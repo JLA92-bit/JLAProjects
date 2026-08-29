@@ -20,9 +20,36 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GODOT_VERSION: "4.3"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Non-blocking: a failure here must never take down the main HTML/JS game,
+      # which is the primary, already-working deployment.
+      - name: Export Godot Web build
+        id: godot_web_export
+        continue-on-error: true
+        uses: firebelley/godot-export@v8.0.0
+        with:
+          godot_executable_download_url: https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64.zip
+          godot_export_templates_download_url: https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_export_templates.tpz
+          relative_project_path: godot
+          archive_output: false
+          use_preset_export_path: true
+          presets_to_export: Web
+
+      - name: Move Godot Web build into the Pages site (if it succeeded)
+        if: steps.godot_web_export.outcome == 'success'
+        run: |
+          if [ -f godot/web/index.html ]; then
+            mkdir -p godot-play
+            cp -r godot/web/* godot-play/
+          else
+            echo "Godot web export produced no index.html - skipping."
+          fi
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
