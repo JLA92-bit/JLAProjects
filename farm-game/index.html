@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tiny Farm</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game-wrap">
+    <canvas id="game" width="640" height="480"></canvas>
+    <div id="hud">
+      <div class="hud-item">
+        <span class="hud-label">Tool</span>
+        <span id="tool-name">Hoe</span>
+        <span class="hud-hint">(1 Hoe · 2 Seed · 3 Harvest · Space to use)</span>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">Crops</span>
+        <span id="crop-count">0</span>
+      </div>
+    </div>
+    <div id="help">Move: WASD / Arrow Keys &nbsp;|&nbsp; Use tool: Space &nbsp;|&nbsp; Switch tool: 1 / 2 / 3</div>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
