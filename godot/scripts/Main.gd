@@ -41,7 +41,47 @@ const TERRAIN_TEX_PATH := {
 	"water": "res://assets/ninja/water.png",
 }
 
-const SAVE_PATH := "user://farmworld_save_v1.json"
+const SAVE_PATH := "user://farmworld_save_v2.json"
+
+# ---------- Acts (story stages that gate content) ----------
+const ACTS := [
+	{
+		"title": "Act 1: First Harvest",
+		"intro": "Welcome to the farm. Till soil with the Hoe, plant Wheat with the Seed Bag, keep it watered, and sell your harvest to build starting capital.",
+		"tools": ["hoe", "water", "seed"],
+		"crops": ["wheat"],
+		"continents": [],
+		"blight": false,
+		"goal_text": "Reach $150 in cash.",
+	},
+	{
+		"title": "Act 2: The Outbreak Begins",
+		"intro": "A mysterious blight has appeared on the farm! The Cure Spray is now in your toolkit. The world map has opened - stake your first claim in Verdant Plains.",
+		"tools": ["hoe", "water", "seed", "cure"],
+		"crops": ["wheat", "corn"],
+		"continents": ["Verdant Plains"],
+		"blight": true,
+		"goal_text": "Own all 5 regions of Verdant Plains.",
+	},
+	{
+		"title": "Act 3: Expanding Empire",
+		"intro": "Your empire is spreading. Tomatoes fetch a fine price, and three more continents are open for the taking.",
+		"tools": ["hoe", "water", "seed", "cure"],
+		"crops": ["wheat", "corn", "tomato"],
+		"continents": ["Verdant Plains", "Sunspire Coast", "Ironcrest Highlands", "Blueriver Delta"],
+		"blight": true,
+		"goal_text": "Own at least 10 of the world's 20 regions.",
+	},
+	{
+		"title": "Act 4: World Domination",
+		"intro": "Every continent is in play. Finish what you started.",
+		"tools": ["hoe", "water", "seed", "cure"],
+		"crops": ["wheat", "corn", "tomato"],
+		"continents": ["Verdant Plains", "Sunspire Coast", "Ironcrest Highlands", "Blueriver Delta"],
+		"blight": true,
+		"goal_text": "Own all 20 regions - total world domination.",
+	},
+]
 
 # ---------- Game state ----------
 var cash := 100
@@ -52,6 +92,8 @@ var produce := {"wheat": 0, "corn": 0, "tomato": 0}
 var prices := {"wheat": 10, "corn": 22, "tomato": 45}
 var selected_crop := "wheat"
 var selected_tool := "hoe"
+var current_act := 0 # index into ACTS
+var victory_shown := false
 var tiles := []
 var regions := []
 var log_text := "Welcome! Hoe tills grass, Seed Bag plants, Watering Can grows crops. Harvest by hand when ready."
@@ -68,9 +110,15 @@ var player_sprite: Sprite2D
 var hud_cash: Label
 var hud_day: Label
 var hud_dom: Label
+var hud_act: Label
 var tool_label: Label
 var log_label: Label
+var tool_row: HBoxContainer
 var tool_buttons := {}
+var act_banner: Panel
+var act_banner_title: Label
+var act_banner_body: Label
+var map_button: Button
 var move_up_held := false
 var move_down_held := false
 var move_left_held := false
@@ -97,6 +145,8 @@ func _ready():
 	_build_player()
 	_build_ui()
 	_refresh_all()
+	if current_act == 0:
+		_show_act_banner(0)
 
 func _load_textures():
 	textures["plants"] = load("res://assets/sprout/objects/Basic_Plants.png")
@@ -255,6 +305,9 @@ func _facing_tile() -> Vector2i:
 
 # ---------- Tools & actions ----------
 func _select_tool(key: String) -> void:
+	if not _tool_unlocked(key):
+		_log("The %s isn't unlocked yet." % TOOLS[key]["name"])
+		return
 	selected_tool = key
 	_refresh_tool_ui()
 
@@ -399,7 +452,7 @@ func _day_tick() -> void:
 				infected_tiles.append(Vector2i(c, r))
 				if t["infected_days"] >= 4:
 					t["type"] = "grass"
-			else:
+			elif _act()["blight"]:
 				var chance = 0.02 + infected_tiles.size() * 0.01
 				if randf() < chance:
 					t["infected"] = true
@@ -445,11 +498,66 @@ func _day_tick() -> void:
 			cash += int(round(reg["health"] * 0.5))
 
 	_redraw_all_tiles()
+	_check_act_progress()
 	_refresh_all()
 	_save_game()
 
 func _region_price(reg: Dictionary) -> int:
 	return int(round((reg["health"] / 100.0) * 300 + 100))
+
+# ---------- Acts ----------
+func _act() -> Dictionary:
+	return ACTS[current_act]
+
+func _tool_unlocked(key: String) -> bool:
+	return _act()["tools"].has(key)
+
+func _crop_unlocked(key: String) -> bool:
+	return _act()["crops"].has(key)
+
+func _continent_unlocked(name: String) -> bool:
+	return _act()["continents"].has(name)
+
+func _owned_count() -> int:
+	return regions.filter(func(r): return r["owned"]).size()
+
+func _check_act_progress() -> void:
+	if current_act >= ACTS.size() - 1:
+		if not victory_shown and _owned_count() >= regions.size():
+			victory_shown = true
+			_show_victory_banner()
+		return
+	var advanced = false
+	match current_act:
+		0:
+			if cash >= 150:
+				advanced = true
+		1:
+			var verdant_owned = regions.filter(func(r): return r["continent"] == "Verdant Plains" and r["owned"]).size()
+			if verdant_owned >= 5:
+				advanced = true
+		2:
+			if _owned_count() >= 10:
+				advanced = true
+	if advanced:
+		current_act += 1
+		if selected_tool != "" and not _tool_unlocked(selected_tool):
+			selected_tool = _act()["tools"][0]
+		if not _crop_unlocked(selected_crop):
+			selected_crop = _act()["crops"][0]
+		_show_act_banner(current_act)
+		_refresh_all()
+
+func _show_act_banner(idx: int) -> void:
+	var act = ACTS[idx]
+	act_banner_title.text = act["title"]
+	act_banner_body.text = "%s\n\nGoal: %s" % [act["intro"], act["goal_text"]]
+	act_banner.visible = true
+
+func _show_victory_banner() -> void:
+	act_banner_title.text = "🌍 World Domination Achieved!"
+	act_banner_body.text = "You own every region on the map. Your farm empire covers the whole world. Keep playing in sandbox mode, or start a new save to do it again."
+	act_banner.visible = true
 
 # ---------- UI construction ----------
 func _add_label(parent: Node, text: String, pos: Vector2, size := Vector2.ZERO, font_size := 20, color := Color(0.93, 0.95, 0.91)) -> Label:
@@ -477,27 +585,25 @@ func _build_ui() -> void:
 	add_child(layer)
 
 	# Top HUD
-	hud_cash = _add_label(layer, "$100", Vector2(16, 12), Vector2(200, 30), 24, Color(1, 0.85, 0.3))
-	hud_day = _add_label(layer, "Day 1", Vector2(260, 12), Vector2(160, 30), 22)
-	hud_dom = _add_label(layer, "0% owned", Vector2(470, 12), Vector2(240, 30), 20, Color(0.6, 0.85, 1))
+	hud_cash = _add_label(layer, "$100", Vector2(16, 12), Vector2(140, 30), 24, Color(1, 0.85, 0.3))
+	hud_day = _add_label(layer, "Day 1", Vector2(160, 12), Vector2(110, 30), 22)
+	hud_dom = _add_label(layer, "0% owned", Vector2(280, 12), Vector2(160, 30), 18, Color(0.6, 0.85, 1))
+	hud_act = _add_label(layer, "Act 1", Vector2(450, 12), Vector2(260, 30), 18, Color(0.85, 0.7, 1))
 
 	tool_label = _add_label(layer, "Tool: Hoe", Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 6), Vector2(640, 26), 20, Color(0.7, 0.9, 0.5))
 	log_label = _add_label(layer, log_text, Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 34), Vector2(640, 44), 16, Color(1, 0.8, 0.4))
 	log_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 
 	var tool_row_y = FARM_ORIGIN.y + ROWS * TILE + 86
-	var tw = 160
-	var i = 0
-	for key in TOOL_KEYS:
-		var t = TOOLS[key]
-		var btn := _add_button(layer, "%s %s" % [t["emoji"], t["name"]], Vector2(FARM_ORIGIN.x + i * (tw + 8), tool_row_y), Vector2(tw, 56), func(): _select_tool(key))
-		tool_buttons[key] = btn
-		i += 1
+	tool_row = HBoxContainer.new()
+	tool_row.position = Vector2(FARM_ORIGIN.x, tool_row_y)
+	tool_row.add_theme_constant_override("separation", 8)
+	layer.add_child(tool_row)
 
 	var action_y = tool_row_y + 70
 	_add_button(layer, "Use Tool", Vector2(FARM_ORIGIN.x, action_y), Vector2(200, 64), func(): _do_action())
 	_add_button(layer, "Inventory", Vector2(FARM_ORIGIN.x + 210, action_y), Vector2(200, 64), _open_inventory)
-	_add_button(layer, "World Map", Vector2(FARM_ORIGIN.x + 420, action_y), Vector2(220, 64), func(): _toggle_map())
+	map_button = _add_button(layer, "World Map", Vector2(FARM_ORIGIN.x + 420, action_y), Vector2(220, 64), func(): _toggle_map())
 
 	# On-screen D-pad
 	var dpad_y = action_y + 90
@@ -509,6 +615,19 @@ func _build_ui() -> void:
 
 	_build_inventory_panel(layer)
 	_build_map_panel(layer)
+	_build_act_banner(layer)
+
+func _build_act_banner(layer: CanvasLayer) -> void:
+	act_banner = Panel.new()
+	act_banner.position = Vector2(40, 300)
+	act_banner.size = Vector2(640, 500)
+	act_banner.visible = false
+	layer.add_child(act_banner)
+
+	act_banner_title = _add_label(act_banner, "", Vector2(24, 24), Vector2(590, 40), 26, Color(1, 0.85, 0.3))
+	act_banner_body = _add_label(act_banner, "", Vector2(24, 80), Vector2(590, 340), 18)
+	act_banner_body.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_add_button(act_banner, "Continue", Vector2(24, 430), Vector2(200, 56), func(): act_banner.visible = false)
 
 func _add_touch_button(parent: Node, text: String, pos: Vector2, size: Vector2, on_change: Callable) -> Button:
 	var b := Button.new()
@@ -576,16 +695,21 @@ func _on_save_button_pressed() -> void:
 	_log("Game saved.")
 
 func _toggle_map() -> void:
+	if _act()["continents"].is_empty():
+		_log("The world map isn't open yet - keep building up your farm.")
+		return
 	map_panel.visible = not map_panel.visible
 	if map_panel.visible:
 		_refresh_map_panel()
 
 # ---------- UI refresh ----------
 func _refresh_all() -> void:
-	var owned_count = regions.filter(func(r): return r["owned"]).size()
+	var owned_count = _owned_count()
 	hud_cash.text = "$%d" % cash
 	hud_day.text = "Day %d" % day
 	hud_dom.text = "%d%% owned" % int(round(100.0 * owned_count / regions.size()))
+	hud_act.text = ACTS[current_act]["title"]
+	map_button.visible = _act()["continents"].size() > 0
 	_refresh_tool_ui()
 	_refresh_inventory_panel()
 	if map_panel and map_panel.visible:
@@ -593,14 +717,27 @@ func _refresh_all() -> void:
 
 func _refresh_tool_ui() -> void:
 	tool_label.text = "Tool: %s %s" % [TOOLS[selected_tool]["emoji"], TOOLS[selected_tool]["name"]]
-	for key in tool_buttons:
-		var btn: Button = tool_buttons[key]
+	for child in tool_row.get_children():
+		child.queue_free()
+	tool_buttons.clear()
+	for key in TOOL_KEYS:
+		if not _tool_unlocked(key):
+			continue
+		var t = TOOLS[key]
+		var btn := Button.new()
+		btn.text = "%s %s" % [t["emoji"], t["name"]]
+		btn.custom_minimum_size = Vector2(160, 56)
+		btn.pressed.connect(func(): _select_tool(key))
 		btn.modulate = Color(1, 1, 0.6) if key == selected_tool else Color(1, 1, 1)
+		tool_row.add_child(btn)
+		tool_buttons[key] = btn
 
 func _refresh_inventory_panel() -> void:
 	for child in seed_rows_container.get_children():
 		child.queue_free()
 	for key in CROP_KEYS:
+		if not _crop_unlocked(key):
+			continue
 		var crop = CROPS[key]
 		var row := HBoxContainer.new()
 		var label := Label.new()
@@ -625,6 +762,8 @@ func _refresh_inventory_panel() -> void:
 	for child in market_rows_container.get_children():
 		child.queue_free()
 	for key in CROP_KEYS:
+		if not _crop_unlocked(key):
+			continue
 		var crop = CROPS[key]
 		var row := HBoxContainer.new()
 		var label := Label.new()
@@ -640,6 +779,7 @@ func _refresh_inventory_panel() -> void:
 			cash += earnings
 			produce[key] = 0
 			_log("Sold %d %s for $%d." % [amount, crop["name"], earnings])
+			_check_act_progress()
 			_refresh_all()
 		)
 		row.add_child(sell_btn)
@@ -666,7 +806,13 @@ func _refresh_map_panel() -> void:
 
 	for continent in CONTINENTS:
 		var owned_here = regions.filter(func(r): return r["continent"] == continent["name"] and r["owned"]).size()
-		_add_label_child(map_scroll_content, "%s (%d/%d)" % [continent["name"], owned_here, continent["regions"].size()], 20, Color(1, 0.85, 0.3))
+		var locked = not _continent_unlocked(continent["name"])
+		var heading = "%s (%d/%d)" % [continent["name"], owned_here, continent["regions"].size()]
+		if locked:
+			heading = "🔒 %s - unlock in a later Act" % continent["name"]
+		_add_label_child(map_scroll_content, heading, 20, Color(0.6, 0.6, 0.6) if locked else Color(1, 0.85, 0.3))
+		if locked:
+			continue
 
 		for reg in regions:
 			if reg["continent"] != continent["name"]:
@@ -691,6 +837,7 @@ func _refresh_map_panel() -> void:
 						cash -= price
 						reg["owned"] = true
 						_log("You acquired %s!" % reg["name"])
+						_check_act_progress()
 						_refresh_all()
 				)
 				vb.add_child(buy_btn)
@@ -712,6 +859,7 @@ func _save_game() -> void:
 	var data := {
 		"cash": cash, "day": day, "seeds": seeds, "produce": produce, "prices": prices,
 		"selected_crop": selected_crop, "selected_tool": selected_tool,
+		"current_act": current_act, "victory_shown": victory_shown,
 		"tiles": tiles, "regions": regions,
 		"player_x": player_pos.x, "player_y": player_pos.y,
 	}
@@ -738,6 +886,8 @@ func _load_game() -> void:
 	prices = parsed.get("prices", prices)
 	selected_crop = parsed.get("selected_crop", selected_crop)
 	selected_tool = parsed.get("selected_tool", selected_tool)
+	current_act = clampi(int(parsed.get("current_act", current_act)), 0, ACTS.size() - 1)
+	victory_shown = parsed.get("victory_shown", victory_shown)
 	if parsed.has("tiles"):
 		tiles = parsed["tiles"]
 	if parsed.has("regions"):
@@ -755,6 +905,8 @@ func _reset_game() -> void:
 	prices = {"wheat": 10, "corn": 22, "tomato": 45}
 	selected_crop = "wheat"
 	selected_tool = "hoe"
+	current_act = 0
+	victory_shown = false
 	player_pos = Vector2(TILE * 2, TILE * 2)
 	tiles.clear()
 	regions.clear()
@@ -762,7 +914,9 @@ func _reset_game() -> void:
 	_redraw_all_tiles()
 	_refresh_all()
 	inventory_panel.visible = false
+	map_panel.visible = false
 	_log("Game reset.")
+	_show_act_banner(0)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED:
