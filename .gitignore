@@ -1,0 +1,10 @@
+# Godot
+godot/.godot/
+godot/build/
+godot/*.apk
+godot/*.aab
+godot/android/build/
+
+# Editor / OS cruft
+.DS_Store
+*.import

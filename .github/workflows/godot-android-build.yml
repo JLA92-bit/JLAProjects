@@ -1,0 +1,65 @@
+name: Build Godot Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "godot/**"
+      - ".github/workflows/godot-android-build.yml"
+  workflow_dispatch: {}
+
+jobs:
+  export-android:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.3"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK command-line components
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Export Android APK via godot-export
+        uses: firebelley/godot-export@v6.1.0
+        with:
+          godot_executable_download_url: https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64.zip
+          godot_export_templates_download_url: https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_export_templates.tpz
+          relative_project_path: godot
+          archive_export_output: false
+          export_debug: true
+          presets_to_export: Android
+
+      - name: Locate built APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find . -name "*.apk" -not -path "*/node_modules/*" | head -n 1)
+          echo "Found APK: $APK_PATH"
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: farmworld-android-debug
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          if-no-files-found: error
+
+      - name: Create/update GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: Farm World (Android, latest build)
+          body: Automatically built debug APK from the latest push to `godot/`. Not signed for release — install directly on a device with "install from unknown sources" enabled, or use it for testing.
+          prerelease: true
+          files: ${{ steps.find_apk.outputs.apk_path }}

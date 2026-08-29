@@ -1,0 +1,26 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+
+config_version=5
+
+[application]
+
+config/name="Farm World: Outbreak & Empire"
+run/main_scene="res://scenes/Main.tscn"
+config/features=PackedStringArray("4.3", "Mobile")
+boot_splash/bg_color=Color(0.105882, 0.164706, 0.117647, 1)
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation="portrait"
+window/energy_saving/keep_screen_on=true
+
+[rendering]
+
+renderer/rendering_method="mobile"
