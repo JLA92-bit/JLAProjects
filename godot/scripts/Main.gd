@@ -27,6 +27,17 @@ const WEATHER := {
 const WEATHER_WEIGHTS := {"sunny": 55, "rainy": 25, "storm": 10, "drought": 10}
 const REGION_DECAY := 6.0 # health lost per day for an unmaintained owned region
 
+# ---------- Terrain modifiers for farming an owned region ----------
+# Each owned region can be farmed directly (its own tile grid), and its
+# terrain creates a real siting decision instead of being flavor text only.
+const TERRAIN_FLAVOR := {
+	"grass": "reliable soil - no bonuses or penalties",
+	"farmland": "reliable soil - no bonuses or penalties",
+	"beach": "sandy soil dries out twice as fast without rain",
+	"cliff": "rocky ground resists blight spreading",
+	"water": "naturally irrigated - never needs manual watering",
+}
+
 const TOOLS := {
 	"hoe": {"name": "Hoe", "emoji": "🔨"},
 	"water": {"name": "Watering Can", "emoji": "💧"},
@@ -110,7 +121,9 @@ var season_idx := 0
 var season_day := 0
 var current_weather := "sunny"
 var forecast_weather := "sunny"
-var tiles := []
+var tiles := [] # reference to plots[active_plot_id] - the grid currently on screen
+var plots := {} # plot_id ("home" or an owned region's name) -> ROWSxCOLS tile grid
+var active_plot_id := "home"
 var regions := []
 var log_text := "Welcome! Hoe tills grass, Seed Bag plants, Watering Can grows crops. Harvest by hand when ready."
 
@@ -128,6 +141,7 @@ var hud_day: Label
 var hud_dom: Label
 var hud_act: Label
 var hud_season: Label
+var hud_farm: Label
 var tool_label: Label
 var log_label: Label
 var tool_row: HBoxContainer
@@ -179,12 +193,9 @@ func _load_textures():
 		textures[key] = load(TERRAIN_TEX_PATH[key])
 
 func _init_fresh_state():
-	tiles.clear()
-	for r in range(ROWS):
-		var row := []
-		for c in range(COLS):
-			row.append({"type": "grass"})
-		tiles.append(row)
+	plots = {"home": _make_empty_grid()}
+	active_plot_id = "home"
+	tiles = plots["home"]
 	regions.clear()
 	for continent in CONTINENTS:
 		var i := 0
@@ -202,6 +213,37 @@ func _init_fresh_state():
 	season_day = 0
 	current_weather = "sunny"
 	forecast_weather = _roll_weather()
+
+# ---------- Plots (home farm + farmable owned regions) ----------
+func _make_empty_grid() -> Array:
+	var grid := []
+	for r in range(ROWS):
+		var row := []
+		for c in range(COLS):
+			row.append({"type": "grass"})
+		grid.append(row)
+	return grid
+
+func _terrain_for_plot(plot_id: String) -> String:
+	if plot_id == "home":
+		return "grass"
+	for reg in regions:
+		if reg["name"] == plot_id:
+			return reg["terrain"]
+	return "grass"
+
+func _plot_display_name(plot_id: String) -> String:
+	return "Home Farm" if plot_id == "home" else plot_id
+
+func _switch_active_plot(plot_id: String) -> void:
+	if plot_id == active_plot_id or not plots.has(plot_id):
+		return
+	active_plot_id = plot_id
+	tiles = plots[plot_id]
+	_redraw_all_tiles()
+	var terrain = _terrain_for_plot(plot_id)
+	_log("Now farming: %s (%s)." % [_plot_display_name(plot_id), TERRAIN_FLAVOR.get(terrain, "")])
+	_refresh_all()
 
 # ---------- Farm grid rendering ----------
 func _make_pixel_sprite(tex: Texture2D) -> Sprite2D:
@@ -448,26 +490,29 @@ func _redraw_all_tiles() -> void:
 			_update_tile_visual(r, c)
 
 # ---------- Day tick ----------
-func _day_tick() -> void:
-	day += 1
-	_advance_calendar()
+# Advances one plot's tile grid by a day: growth, watering/weather, wilt,
+# and blight infection/spread. Runs for every plot the player owns (not
+# just the one on screen) so farms left untended elsewhere keep changing.
+func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 	var infected_tiles := []
 	var wilted := 0
 	var storm_damaged := 0
-	var auto_watered := current_weather == "rainy" or current_weather == "storm"
+	var auto_watered := current_weather == "rainy" or current_weather == "storm" or terrain == "water"
+	var dry_step := 2 if terrain == "beach" else 1
+	var blight_mult := 0.5 if terrain == "cliff" else 1.0
 
 	for r in range(ROWS):
 		for c in range(COLS):
-			var t: Dictionary = tiles[r][c]
+			var t: Dictionary = t_grid[r][c]
 			if t["type"] != "planted":
 				continue
 			if auto_watered:
 				t["watered"] = true
 
-			if current_weather == "drought":
+			if current_weather == "drought" and terrain != "water":
 				# Scarce water: even a watered crop keeps drying out, forcing an
 				# early-harvest-or-lose-it decision instead of a free pass.
-				t["dry_days"] = t.get("dry_days", 0) + 1
+				t["dry_days"] = t.get("dry_days", 0) + dry_step
 				if t["dry_days"] >= WILT_DAYS:
 					t["type"] = "grass"
 					wilted += 1
@@ -480,7 +525,7 @@ func _day_tick() -> void:
 				if t.get("stage", 0) < 4:
 					t["stage"] = t.get("stage", 0) + 1
 			else:
-				t["dry_days"] = t.get("dry_days", 0) + 1
+				t["dry_days"] = t.get("dry_days", 0) + dry_step
 				if t["dry_days"] >= WILT_DAYS:
 					t["type"] = "grass"
 					wilted += 1
@@ -500,7 +545,7 @@ func _day_tick() -> void:
 				if t["infected_days"] >= 4:
 					t["type"] = "grass"
 			elif _act()["blight"]:
-				var chance = 0.02 + infected_tiles.size() * 0.01
+				var chance = (0.02 + infected_tiles.size() * 0.01) * blight_mult
 				if randf() < chance:
 					t["infected"] = true
 					t["infected_days"] = 0
@@ -510,10 +555,26 @@ func _day_tick() -> void:
 		for n in neighbors:
 			if n.x < 0 or n.y < 0 or n.x >= COLS or n.y >= ROWS:
 				continue
-			var nt: Dictionary = tiles[n.y][n.x]
-			if nt["type"] == "planted" and not nt.get("infected", false) and randf() < 0.3:
+			var nt: Dictionary = t_grid[n.y][n.x]
+			if nt["type"] == "planted" and not nt.get("infected", false) and randf() < 0.3 * blight_mult:
 				nt["infected"] = true
 				nt["infected_days"] = 0
+
+	return {"wilted": wilted, "storm_damaged": storm_damaged, "infected_count": infected_tiles.size()}
+
+func _day_tick() -> void:
+	day += 1
+	_advance_calendar()
+	var wilted := 0
+	var storm_damaged := 0
+	var total_infected := 0
+
+	for plot_id in plots.keys():
+		var result := _advance_tiles(plots[plot_id], _terrain_for_plot(plot_id))
+		total_infected += result["infected_count"]
+		if plot_id == active_plot_id:
+			wilted = result["wilted"]
+			storm_damaged = result["storm_damaged"]
 
 	if wilted > 0:
 		var reason = "the drought" if current_weather == "drought" else "neglect"
@@ -527,7 +588,7 @@ func _day_tick() -> void:
 		var np = clamp(prices[key] + drift, base * 0.4, base * 1.8)
 		prices[key] = int(round(np))
 
-	var pressure = infected_tiles.size()
+	var pressure = total_infected
 	var owned_regions = regions.filter(func(r2): return r2["owned"])
 	var unowned_regions = regions.filter(func(r2): return not r2["owned"])
 
@@ -553,6 +614,10 @@ func _day_tick() -> void:
 		reg["maintained_today"] = false
 		if reg["health"] <= 0.0:
 			reg["owned"] = false
+			plots.erase(reg["name"])
+			if active_plot_id == reg["name"]:
+				active_plot_id = "home"
+				tiles = plots["home"]
 			_log("%s fell into ruin from neglect and was lost!" % reg["name"])
 		else:
 			cash += int(round(reg["health"] * 0.5))
@@ -690,6 +755,7 @@ func _build_ui() -> void:
 	hud_dom = _add_label(layer, "0% owned", Vector2(280, 12), Vector2(160, 30), 18, Color(0.6, 0.85, 1))
 	hud_act = _add_label(layer, "Act 1", Vector2(450, 12), Vector2(260, 30), 18, Color(0.85, 0.7, 1))
 	hud_season = _add_label(layer, "", Vector2(16, 44), Vector2(680, 26), 16, Color(0.75, 0.85, 1))
+	hud_farm = _add_label(layer, "", Vector2(16, 70), Vector2(680, 24), 15, Color(0.7, 0.95, 0.75))
 
 	tool_label = _add_label(layer, "Tool: Hoe", Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 6), Vector2(640, 26), 20, Color(0.7, 0.9, 0.5))
 	log_label = _add_label(layer, log_text, Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 34), Vector2(640, 44), 16, Color(1, 0.8, 0.4))
@@ -815,6 +881,8 @@ func _refresh_all() -> void:
 		WEATHER[current_weather]["emoji"], WEATHER[current_weather]["name"],
 		WEATHER[forecast_weather]["emoji"], WEATHER[forecast_weather]["name"],
 	]
+	var terrain = _terrain_for_plot(active_plot_id)
+	hud_farm.text = "Farming: %s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain]
 	map_button.visible = _act()["continents"].size() > 0
 	_refresh_tool_ui()
 	_refresh_inventory_panel()
@@ -892,15 +960,20 @@ func _refresh_inventory_panel() -> void:
 		market_rows_container.add_child(row)
 
 	var infected_count := 0
-	for r in range(ROWS):
-		for c in range(COLS):
-			if tiles[r][c].get("infected", false):
-				infected_count += 1
+	var infected_here := 0
+	for plot_id in plots.keys():
+		var grid: Array = plots[plot_id]
+		for r in range(ROWS):
+			for c in range(COLS):
+				if grid[r][c].get("infected", false):
+					infected_count += 1
+					if plot_id == active_plot_id:
+						infected_here += 1
 	if infected_count > 0:
-		blight_label.text = "%d tile(s) infected with blight! Use the Cure Spray or contain the spread." % infected_count
+		blight_label.text = "%d tile(s) infected with blight across your farms (%d on this plot). Use the Cure Spray or contain the spread." % [infected_count, infected_here]
 		blight_label.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
 	else:
-		blight_label.text = "No active blight. Your farm is healthy."
+		blight_label.text = "No active blight. Your farms are healthy."
 		blight_label.add_theme_color_override("font_color", Color(0.7, 0.8, 0.7))
 
 func _refresh_map_panel() -> void:
@@ -909,6 +982,15 @@ func _refresh_map_panel() -> void:
 
 	for child in map_scroll_content.get_children():
 		child.queue_free()
+
+	if active_plot_id != "home":
+		var home_btn := Button.new()
+		home_btn.text = "🏠 Return to Home Farm"
+		home_btn.pressed.connect(func():
+			_switch_active_plot("home")
+			map_panel.visible = false
+		)
+		map_scroll_content.add_child(home_btn)
 
 	for continent in CONTINENTS:
 		var owned_here = regions.filter(func(r): return r["continent"] == continent["name"] and r["owned"]).size()
@@ -931,7 +1013,8 @@ func _refresh_map_panel() -> void:
 			title.add_theme_font_size_override("font_size", 18)
 			vb.add_child(title)
 			var health_label = Label.new()
-			health_label.text = "Health: %d%%  (terrain: %s)" % [int(round(reg["health"])), reg["terrain"]]
+			health_label.text = "Health: %d%%  (terrain: %s - %s)" % [int(round(reg["health"])), reg["terrain"], TERRAIN_FLAVOR.get(reg["terrain"], "")]
+			health_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 			vb.add_child(health_label)
 			if not reg["owned"]:
 				var price = _region_price(reg)
@@ -942,7 +1025,8 @@ func _refresh_map_panel() -> void:
 					if cash >= price:
 						cash -= price
 						reg["owned"] = true
-						_log("You acquired %s!" % reg["name"])
+						plots[reg["name"]] = _make_empty_grid()
+						_log("You acquired %s! You can farm it directly, or leave it earning passive upkeep income." % reg["name"])
 						_check_act_progress()
 						_refresh_all()
 				)
@@ -966,6 +1050,17 @@ func _refresh_map_panel() -> void:
 				warn_label.add_theme_font_size_override("font_size", 14)
 				warn_label.add_theme_color_override("font_color", Color(0.9, 0.6, 0.4))
 				vb.add_child(warn_label)
+				var farm_btn := Button.new()
+				if active_plot_id == reg["name"]:
+					farm_btn.text = "🌾 Currently farming here"
+					farm_btn.disabled = true
+				else:
+					farm_btn.text = "Farm this region"
+					farm_btn.pressed.connect(func():
+						_switch_active_plot(reg["name"])
+						map_panel.visible = false
+					)
+				vb.add_child(farm_btn)
 			map_scroll_content.add_child(card)
 
 func _add_label_child(parent: Node, text: String, font_size: int, color: Color) -> void:
@@ -983,7 +1078,7 @@ func _save_game() -> void:
 		"current_act": current_act, "victory_shown": victory_shown,
 		"season_idx": season_idx, "season_day": season_day,
 		"current_weather": current_weather, "forecast_weather": forecast_weather,
-		"tiles": tiles, "regions": regions,
+		"plots": plots, "active_plot_id": active_plot_id, "regions": regions,
 		"player_x": player_pos.x, "player_y": player_pos.y,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -1019,10 +1114,25 @@ func _load_game() -> void:
 	forecast_weather = parsed.get("forecast_weather", forecast_weather)
 	if not WEATHER.has(forecast_weather):
 		forecast_weather = "sunny"
-	if parsed.has("tiles"):
-		tiles = parsed["tiles"]
 	if parsed.has("regions"):
 		regions = parsed["regions"]
+
+	if parsed.has("plots"):
+		plots = parsed["plots"]
+	elif parsed.has("tiles"):
+		# Pre-multi-plot save: the single grid it had becomes the home plot.
+		plots = {"home": parsed["tiles"]}
+	if not plots.has("home"):
+		plots["home"] = _make_empty_grid()
+	for reg in regions:
+		if reg.get("owned", false) and not plots.has(reg["name"]):
+			plots[reg["name"]] = _make_empty_grid()
+
+	active_plot_id = parsed.get("active_plot_id", "home")
+	if not plots.has(active_plot_id):
+		active_plot_id = "home"
+	tiles = plots[active_plot_id]
+
 	player_pos = Vector2(parsed.get("player_x", player_pos.x), parsed.get("player_y", player_pos.y))
 
 func _reset_game() -> void:
