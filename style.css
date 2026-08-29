@@ -320,22 +320,46 @@ p.hint {
 }
 
 #regions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 10px;
   margin-top: 10px;
 }
 
-.region-card {
-  background: var(--panel-2);
-  border-radius: 10px;
-  padding: 10px;
-  font-size: 0.8rem;
+.continent-section {
+  margin-bottom: 18px;
 }
 
-.region-card h3 {
+.continent-heading {
+  font-size: 0.95rem;
+  color: var(--accent-2);
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #3a5240;
+}
+
+.regions-subgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.region-card {
+  border-radius: 10px;
+  font-size: 0.8rem;
+  background-size: cover;
+  background-position: center;
+  image-rendering: pixelated;
+  overflow: hidden;
+}
+
+.region-card-inner {
+  background: rgba(20, 30, 22, 0.72);
+  padding: 10px;
+  height: 100%;
+}
+
+.region-card h4 {
   margin: 0 0 4px;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  color: var(--text);
 }
 
 .region-card .health-bar {

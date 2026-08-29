@@ -15,15 +15,20 @@
   };
   const CROP_KEYS = Object.keys(CROPS);
 
-  const REGION_NAMES = [
-    "Ashville Fields", "Green Hollow", "Ironcrest Farms",
-    "Prairie Union", "Sunset Basin", "North Ridge",
+  // World map scale: continents made up of several regions, each with a terrain
+  // flavor used both for its card art and (loosely) its name pool.
+  const TERRAINS = ["grass", "farmland", "beach", "cliff", "water"];
+  const CONTINENTS = [
+    { name: "Verdant Plains", regions: ["Ashville Fields", "Green Hollow", "Prairie Union", "Millbrook", "Oakmere"] },
+    { name: "Sunspire Coast", regions: ["Sunset Basin", "Shellhaven", "Tideward Cove", "Palmrest", "Coral Landing"] },
+    { name: "Ironcrest Highlands", regions: ["Ironcrest Farms", "North Ridge", "Stonefall", "Greywatch", "Craggen Hold"] },
+    { name: "Blueriver Delta", regions: ["Riverside Union", "Mossy Bend", "Willowmere", "Deepwater Flats", "Marsh Landing"] },
   ];
 
   // Tile states: 'grass' | 'soil' | 'planted'
   // planted tile: { crop, stage(0-4), watered, infected, infectedDays }
 
-  const SAVE_KEY = "farmWorldSave_v1";
+  const SAVE_KEY = "farmWorldSave_v2";
 
   // ---------- State ----------
   function freshState() {
@@ -35,9 +40,18 @@
       }
       tiles.push(row);
     }
-    const regions = REGION_NAMES.map((name, i) => ({
-      name, health: 100, owned: i === -1, // none owned at start
-    }));
+    const regions = [];
+    CONTINENTS.forEach((continent) => {
+      continent.regions.forEach((name, i) => {
+        regions.push({
+          name,
+          continent: continent.name,
+          terrain: TERRAINS[i % TERRAINS.length],
+          health: 100,
+          owned: false,
+        });
+      });
+    });
     return {
       cash: 100,
       day: 1,
@@ -78,6 +92,35 @@
   // ---------- Canvas / Input ----------
   const canvas = document.getElementById("farmCanvas");
   const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+
+  // ---------- Sprite assets ----------
+  function loadImage(src) {
+    const img = new Image();
+    img.src = src;
+    return img;
+  }
+  const SPRITES = {
+    grass: loadImage("assets/cutefantasy/tiles/Grass_Middle.png"),
+    farmland: loadImage("assets/cutefantasy/tiles/FarmLand_Tile.png"),
+    player: loadImage("assets/sprout/characters/Basic_Character_Spritesheet.png"),
+    plants: loadImage("assets/sprout/objects/Basic_Plants.png"),
+    oakTree: loadImage("assets/cutefantasy/decoration/Oak_Tree.png"),
+    cow: loadImage("assets/sprout/characters/Free_Cow_Sprites.png"),
+    chicken: loadImage("assets/sprout/characters/Free_Chicken_Sprites.png"),
+    pig: loadImage("assets/cutefantasy/animals/Pig.png"),
+    sheep: loadImage("assets/cutefantasy/animals/Sheep.png"),
+  };
+  // Fixed decorative scenery: a couple of trees and grazing animals dotted
+  // around the farm border (non-interactive, purely visual).
+  const SCENERY = [
+    { img: "oakTree", tx: 0, ty: 0, w: 1, h: 1.3 },
+    { img: "oakTree", tx: 9, ty: 0, w: 1, h: 1.3 },
+    { img: "cow", tx: 8, ty: 6, frame: 0, frames: 5, fw: 19, fh: 16 },
+    { img: "chicken", tx: 1, ty: 6, frame: 0, frames: 5, fw: 16, fh: 16 },
+    { img: "pig", tx: 4, ty: 0, frame: 0, frames: 4, fw: 16, fh: 16 },
+    { img: "sheep", tx: 6, ty: 0, frame: 0, frames: 4, fw: 16, fh: 16 },
+  ];
 
   const keys = new Set();
   const heldDirs = new Set(); // for touch dpad
@@ -316,23 +359,55 @@
     if (!modal.classList.contains("hidden")) renderRegions();
   }
 
+  const TERRAIN_TILE_IMG = {
+    grass: "assets/cutefantasy/tiles/Grass_Middle.png",
+    farmland: "assets/cutefantasy/tiles/FarmLand_Tile.png",
+    beach: "assets/cutefantasy/tiles/Beach_Tile.png",
+    cliff: "assets/cutefantasy/tiles/Cliff_Tile.png",
+    water: "assets/cutefantasy/tiles/Water_Tile.png",
+  };
+
   function renderRegions() {
-    const grid = document.getElementById("regions-grid");
-    grid.innerHTML = "";
-    state.regions.forEach((reg) => {
-      const card = document.createElement("div");
-      card.className = "region-card" + (reg.owned ? " owned" : "");
-      const price = regionPrice(reg);
-      card.innerHTML = `
-        <h3>${reg.name}${reg.owned ? " 👑" : ""}</h3>
-        <div>Health: ${Math.round(reg.health)}%</div>
-        <div class="health-bar"><div class="health-fill" style="width:${reg.health}%"></div></div>
-        ${reg.owned ? "<div>Generating income daily.</div>" :
-          `<button data-region="${reg.name}" ${state.cash < price ? "disabled" : ""}>Buy for $${price}</button>`}
-      `;
-      grid.appendChild(card);
+    const container = document.getElementById("regions-grid");
+    container.innerHTML = "";
+    const ownedCount = state.regions.filter(r => r.owned).length;
+    const summary = document.createElement("p");
+    summary.className = "hint";
+    summary.textContent = `${ownedCount} / ${state.regions.length} regions under your control across ${CONTINENTS.length} continents.`;
+    container.appendChild(summary);
+
+    CONTINENTS.forEach((continent) => {
+      const section = document.createElement("div");
+      section.className = "continent-section";
+      const heading = document.createElement("h3");
+      heading.className = "continent-heading";
+      const ownedHere = state.regions.filter(r => r.continent === continent.name && r.owned).length;
+      heading.textContent = `${continent.name} (${ownedHere}/${continent.regions.length})`;
+      section.appendChild(heading);
+
+      const grid = document.createElement("div");
+      grid.className = "regions-subgrid";
+      state.regions.filter(r => r.continent === continent.name).forEach((reg) => {
+        const card = document.createElement("div");
+        card.className = "region-card" + (reg.owned ? " owned" : "");
+        card.style.backgroundImage = `url("${TERRAIN_TILE_IMG[reg.terrain]}")`;
+        const price = regionPrice(reg);
+        card.innerHTML = `
+          <div class="region-card-inner">
+            <h4>${reg.name}${reg.owned ? " 👑" : ""}</h4>
+            <div>Health: ${Math.round(reg.health)}%</div>
+            <div class="health-bar"><div class="health-fill" style="width:${reg.health}%"></div></div>
+            ${reg.owned ? "<div>Generating income daily.</div>" :
+              `<button data-region="${reg.name}" ${state.cash < price ? "disabled" : ""}>Buy for $${price}</button>`}
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+      section.appendChild(grid);
+      container.appendChild(section);
     });
-    grid.querySelectorAll("button[data-region]").forEach((btn) => {
+
+    container.querySelectorAll("button[data-region]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const reg = state.regions.find(r => r.name === btn.dataset.region);
         const price = regionPrice(reg);
@@ -427,15 +502,24 @@
   }
 
   // ---------- Draw loop ----------
-  function tileColor(tile) {
-    if (tile.type === "grass") return "#4a7a4f";
-    if (tile.type === "soil") return "#6b4a34";
-    if (tile.type === "planted") {
-      if (tile.infected) return "#8a3a3a";
-      const shades = ["#7a5a3a", "#8fae4f", "#a9c95a", "#c8e06a", "#e0c94a"];
-      return shades[tile.stage] || "#7a5a3a";
+  // Basic_Plants.png is a 96x24 strip: 4 growth-stage icons, 24x24 each.
+  const PLANT_FRAME = 24;
+  function plantFrameForStage(stage) {
+    if (stage <= 0) return 0;
+    if (stage <= 2) return 1;
+    if (stage === 3) return 2;
+    return 3;
+  }
+  // Basic_Character_Spritesheet.png is a 192x192 sheet, 4x4 grid of 48x48 frames.
+  const PLAYER_FRAME = 48;
+
+  function drawTileBase(tile, x, y) {
+    if (tile.type === "grass") {
+      ctx.drawImage(SPRITES.grass, 0, 0, 16, 16, x, y, TILE, TILE);
+    } else {
+      // tilled soil, planted, or freshly-harvested soil all use the farmland texture
+      ctx.drawImage(SPRITES.farmland, 0, 0, 48, 48, x, y, TILE, TILE);
     }
-    return "#4a7a4f";
   }
 
   function drawScene() {
@@ -443,26 +527,45 @@
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const tile = state.tiles[r][c];
-        ctx.fillStyle = tileColor(tile);
-        ctx.fillRect(c * TILE, r * TILE, TILE - 2, TILE - 2);
+        const x = c * TILE, y = r * TILE;
+        drawTileBase(tile, x, y);
         if (tile.type === "planted") {
-          ctx.font = "24px sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          const emoji = tile.stage >= 4 ? CROPS[tile.crop].emoji : "🌱";
-          ctx.fillText(tile.infected ? "☠️" : emoji, c * TILE + TILE / 2, r * TILE + TILE / 2);
+          const frame = tile.infected ? -1 : plantFrameForStage(tile.stage);
+          if (frame >= 0) {
+            ctx.drawImage(
+              SPRITES.plants,
+              frame * PLANT_FRAME, 0, PLANT_FRAME, PLANT_FRAME,
+              x + TILE * 0.15, y + TILE * 0.15, TILE * 0.7, TILE * 0.7
+            );
+          } else {
+            ctx.font = `${Math.round(TILE * 0.5)}px sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("☠️", x + TILE / 2, y + TILE / 2);
+          }
         }
       }
     }
+
+    // decorative scenery (trees, grazing animals) — purely visual
+    SCENERY.forEach((s) => {
+      const img = SPRITES[s.img];
+      const x = s.tx * TILE, y = s.ty * TILE;
+      if (s.frames) {
+        ctx.drawImage(img, (s.frame || 0) * s.fw, 0, s.fw, s.fh, x + TILE * 0.15, y + TILE * 0.2, TILE * 0.7, TILE * 0.6);
+      } else {
+        ctx.drawImage(img, x, y - TILE * (s.h - 1), TILE * s.w, TILE * s.h);
+      }
+    });
+
     // player
     const p = state.player;
-    ctx.font = "32px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const arrow = { up: "🔺", down: "🔻", left: "◀️", right: "▶️" }[p.facing];
-    ctx.fillText("🧑‍🌾", p.x + TILE / 2, p.y + TILE / 2);
-    ctx.font = "14px sans-serif";
-    ctx.fillText(arrow, p.x + TILE / 2, p.y - 4);
+    const dirRow = { down: 0, up: 1, left: 2, right: 3 }[p.facing] || 0;
+    ctx.drawImage(
+      SPRITES.player,
+      0, dirRow * PLAYER_FRAME, PLAYER_FRAME, PLAYER_FRAME,
+      p.x, p.y, TILE, TILE
+    );
   }
 
   // ---------- Main loop ----------
