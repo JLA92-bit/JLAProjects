@@ -356,8 +356,8 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 	cam.size = ROWS * WORLD_TILE + 2.0
 	var center := Vector3((COLS - 1) * WORLD_TILE * 0.5, 0, (ROWS - 1) * WORLD_TILE * 0.5)
 	cam.position = center + Vector3(9, 11, 9)
-	cam.look_at(center, Vector3.UP)
 	world_root.add_child(cam)
+	cam.look_at(center, Vector3.UP)
 	cam.current = true
 
 func _build_farm_grid():
@@ -1425,8 +1425,8 @@ func _on_update_check_completed(result: int, response_code: int, _headers: Packe
 	if remote_commit == "" or remote_commit == current_build_commit:
 		return
 	for asset in parsed.get("assets", []):
-		var name: String = asset.get("name", "")
-		if name.ends_with(".apk"):
+		var asset_name: String = asset.get("name", "")
+		if asset_name.ends_with(".apk"):
 			update_download_url = asset.get("browser_download_url", "")
 			break
 	if update_download_url != "":
