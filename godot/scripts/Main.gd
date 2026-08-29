@@ -8,6 +8,15 @@ const DAY_LENGTH := 25.0
 const PLAYER_SPEED := 220.0
 const FARM_ORIGIN := Vector2(40, 110)
 
+# ---------- In-app update check (Android only) ----------
+# Compares the commit this build was stamped with (godot/build_version.json,
+# written by CI at export time) against the latest GitHub release's commit
+# marker. A match means no update; a mismatch surfaces a banner whose button
+# opens the APK download URL, letting Android's own download+install flow
+# take over with one tap - no uninstall needed since CI signs every build
+# with the same committed keystore.
+const UPDATE_CHECK_URL := "https://api.github.com/repos/JLA92-bit/JLAProjects/releases/tags/android-latest"
+
 const CROPS := {
 	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"]},
 	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"]},
@@ -171,6 +180,10 @@ var act_banner: Panel
 var act_banner_title: Label
 var act_banner_body: Label
 var map_button: Button
+var update_banner: Panel
+var update_banner_label: Label
+var current_build_commit := ""
+var update_download_url := ""
 var move_up_held := false
 var move_down_held := false
 var move_left_held := false
@@ -200,6 +213,8 @@ func _ready():
 	_refresh_all()
 	if current_act == 0:
 		_show_act_banner(0)
+	_load_build_commit()
+	_check_for_update()
 
 func _load_textures():
 	textures["plants"] = load("res://assets/sprout/objects/Basic_Plants.png")
@@ -868,6 +883,7 @@ func _build_ui() -> void:
 	_build_inventory_panel(layer)
 	_build_map_panel(layer)
 	_build_act_banner(layer)
+	_build_update_banner(layer)
 
 func _build_act_banner(layer: CanvasLayer) -> void:
 	act_banner = Panel.new()
@@ -880,6 +896,18 @@ func _build_act_banner(layer: CanvasLayer) -> void:
 	act_banner_body = _add_label(act_banner, "", Vector2(24, 80), Vector2(590, 340), 18)
 	act_banner_body.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_add_button(act_banner, "Continue", Vector2(24, 430), Vector2(200, 56), func(): act_banner.visible = false)
+
+func _build_update_banner(layer: CanvasLayer) -> void:
+	update_banner = Panel.new()
+	update_banner.position = Vector2(40, 1030)
+	update_banner.size = Vector2(640, 130)
+	update_banner.visible = false
+	layer.add_child(update_banner)
+
+	update_banner_label = _add_label(update_banner, "A new version is available!", Vector2(16, 12), Vector2(608, 50), 18, Color(1, 0.9, 0.4))
+	update_banner_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_add_button(update_banner, "Download & Install", Vector2(16, 66), Vector2(280, 48), func(): OS.shell_open(update_download_url))
+	_add_button(update_banner, "Later", Vector2(310, 66), Vector2(120, 48), func(): update_banner.visible = false)
 
 func _add_touch_button(parent: Node, text: String, pos: Vector2, size: Vector2, on_change: Callable) -> Button:
 	var b := Button.new()
@@ -1202,6 +1230,53 @@ func _add_label_child(parent: Node, text: String, font_size: int, color: Color) 
 	l.add_theme_font_size_override("font_size", font_size)
 	l.add_theme_color_override("font_color", color)
 	parent.add_child(l)
+
+# ---------- In-app update check ----------
+func _load_build_commit() -> void:
+	if not FileAccess.file_exists("res://build_version.json"):
+		return
+	var f := FileAccess.open("res://build_version.json", FileAccess.READ)
+	if not f:
+		return
+	var parsed = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(parsed) == TYPE_DICTIONARY:
+		current_build_commit = parsed.get("commit", "")
+
+func _check_for_update() -> void:
+	if OS.get_name() != "Android" or current_build_commit == "":
+		return
+	var http := HTTPRequest.new()
+	add_child(http)
+	http.request_completed.connect(func(result, response_code, headers, body):
+		_on_update_check_completed(result, response_code, headers, body)
+		http.queue_free()
+	)
+	var err := http.request(UPDATE_CHECK_URL, ["User-Agent: FarmWorldApp"])
+	if err != OK:
+		http.queue_free()
+
+func _on_update_check_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		return
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var release_body: String = parsed.get("body", "")
+	var marker := "build_commit: "
+	var idx := release_body.find(marker)
+	if idx == -1:
+		return
+	var remote_commit := release_body.substr(idx + marker.length()).strip_edges().split("\n")[0]
+	if remote_commit == "" or remote_commit == current_build_commit:
+		return
+	for asset in parsed.get("assets", []):
+		var name: String = asset.get("name", "")
+		if name.ends_with(".apk"):
+			update_download_url = asset.get("browser_download_url", "")
+			break
+	if update_download_url != "":
+		update_banner.visible = true
 
 # ---------- Save / Load ----------
 func _save_game() -> void:

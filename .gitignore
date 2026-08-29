@@ -4,6 +4,7 @@ godot/build/
 godot/*.apk
 godot/*.aab
 godot/android/build/
+godot/build_version.json
 
 # Editor / OS cruft
 .DS_Store
