@@ -27,6 +27,16 @@ const WEATHER := {
 const WEATHER_WEIGHTS := {"sunny": 55, "rainy": 25, "storm": 10, "drought": 10}
 const REGION_DECAY := 6.0 # health lost per day for an unmaintained owned region
 
+# ---------- Market events ----------
+# A random demand spike temporarily boosts one crop's sell price, unlocked
+# alongside the market itself (Act 2+). Creates a "sell now before it ends
+# or hold for regular price" decision on top of the existing price drift.
+const EVENT_CHANCE := 0.08
+const EVENT_MIN_MULT := 1.4
+const EVENT_MAX_MULT := 1.8
+const EVENT_MIN_DAYS := 2
+const EVENT_MAX_DAYS := 3
+
 # ---------- Terrain modifiers for farming an owned region ----------
 # Each owned region can be farmed directly (its own tile grid), and its
 # terrain creates a real siting decision instead of being flavor text only.
@@ -127,6 +137,7 @@ var selected_tool := "hoe"
 var current_act := 0 # index into ACTS
 var victory_shown := false
 var owned_upgrades := {} # upgrade key -> bool
+var active_event := {} # {} = none, else {"crop":key, "multiplier":float, "days_left":int}
 var season_idx := 0
 var season_day := 0
 var current_weather := "sunny"
@@ -208,6 +219,7 @@ func _init_fresh_state():
 	active_plot_id = "home"
 	tiles = plots["home"]
 	owned_upgrades = {}
+	active_event = {}
 	regions.clear()
 	for continent in CONTINENTS:
 		var i := 0
@@ -623,6 +635,8 @@ func _day_tick() -> void:
 		var np = clamp(prices[key] + drift, base * 0.4, base * 1.8)
 		prices[key] = int(round(np))
 
+	_advance_market_event()
+
 	var pressure = total_infected
 	var owned_regions = regions.filter(func(r2): return r2["owned"])
 	var unowned_regions = regions.filter(func(r2): return not r2["owned"])
@@ -678,6 +692,28 @@ func _upgrade_locked_reason(key: String) -> String:
 	if key == "storage_silo_2" and not owned_upgrades.get("storage_silo_1", false):
 		return "requires Storage Silo first"
 	return ""
+
+# ---------- Market events ----------
+func _effective_price(key: String) -> int:
+	if active_event.get("crop", "") == key:
+		return int(round(prices[key] * active_event["multiplier"]))
+	return prices[key]
+
+func _advance_market_event() -> void:
+	if active_event.is_empty():
+		if current_act >= 1 and randf() < EVENT_CHANCE:
+			var unlocked_crops = CROP_KEYS.filter(func(k): return _crop_unlocked(k))
+			if unlocked_crops.size() > 0:
+				var key = unlocked_crops[randi() % unlocked_crops.size()]
+				var mult = EVENT_MIN_MULT + randf() * (EVENT_MAX_MULT - EVENT_MIN_MULT)
+				var days = EVENT_MIN_DAYS + (randi() % (EVENT_MAX_DAYS - EVENT_MIN_DAYS + 1))
+				active_event = {"crop": key, "multiplier": mult, "days_left": days}
+				_log("Demand spike! %s is selling for %.1fx price for the next %d day(s)." % [CROPS[key]["name"], mult, days])
+	else:
+		active_event["days_left"] -= 1
+		if active_event["days_left"] <= 0:
+			_log("The demand spike for %s has ended." % CROPS[active_event["crop"]]["name"])
+			active_event = {}
 
 func _maintenance_cost(reg: Dictionary) -> int:
 	return max(5, int(round(_region_price(reg) * 0.15)))
@@ -931,10 +967,16 @@ func _refresh_all() -> void:
 	hud_day.text = "Day %d" % day
 	hud_dom.text = "%d%% owned" % int(round(100.0 * owned_count / regions.size()))
 	hud_act.text = ACTS[current_act]["title"]
-	hud_season.text = "%s (day %d/%d) - %s %s  |  Tomorrow: %s %s" % [
+	var event_suffix = ""
+	if not active_event.is_empty():
+		event_suffix = "  |  🔥 %s demand spike x%.1f (%dd left)" % [
+			CROPS[active_event["crop"]]["name"], active_event["multiplier"], active_event["days_left"],
+		]
+	hud_season.text = "%s (day %d/%d) - %s %s  |  Tomorrow: %s %s%s" % [
 		_season_name(), season_day + 1, SEASON_LENGTH,
 		WEATHER[current_weather]["emoji"], WEATHER[current_weather]["name"],
 		WEATHER[forecast_weather]["emoji"], WEATHER[forecast_weather]["name"],
+		event_suffix,
 	]
 	var terrain = _terrain_for_plot(active_plot_id)
 	hud_farm.text = "Farming: %s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain]
@@ -997,7 +1039,9 @@ func _refresh_inventory_panel() -> void:
 		var crop = CROPS[key]
 		var row := HBoxContainer.new()
 		var label := Label.new()
-		label.text = "%s  seeds:%d  produce:%d/%d  $%d" % [crop["name"], seeds[key], produce[key], storage_cap, prices[key]]
+		var eff_price = _effective_price(key)
+		var spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if active_event.get("crop", "") == key else ""
+		label.text = "%s  seeds:%d  produce:%d/%d  $%d%s" % [crop["name"], seeds[key], produce[key], storage_cap, eff_price, spike_tag]
 		label.custom_minimum_size = Vector2(420, 0)
 		row.add_child(label)
 		var sell_btn := Button.new()
@@ -1005,7 +1049,7 @@ func _refresh_inventory_panel() -> void:
 		sell_btn.disabled = produce[key] == 0
 		sell_btn.pressed.connect(func():
 			var amount = produce[key]
-			var earnings = amount * prices[key]
+			var earnings = amount * _effective_price(key)
 			cash += earnings
 			produce[key] = 0
 			_log("Sold %d %s for $%d." % [amount, crop["name"], earnings])
@@ -1168,7 +1212,7 @@ func _save_game() -> void:
 		"season_idx": season_idx, "season_day": season_day,
 		"current_weather": current_weather, "forecast_weather": forecast_weather,
 		"plots": plots, "active_plot_id": active_plot_id, "regions": regions,
-		"owned_upgrades": owned_upgrades,
+		"owned_upgrades": owned_upgrades, "active_event": active_event,
 		"player_x": player_pos.x, "player_y": player_pos.y,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -1205,6 +1249,9 @@ func _load_game() -> void:
 	if not WEATHER.has(forecast_weather):
 		forecast_weather = "sunny"
 	owned_upgrades = parsed.get("owned_upgrades", owned_upgrades)
+	active_event = parsed.get("active_event", active_event)
+	if not (active_event.is_empty() or (active_event.has("crop") and CROPS.has(active_event["crop"]))):
+		active_event = {}
 	if parsed.has("regions"):
 		regions = parsed["regions"]
 
