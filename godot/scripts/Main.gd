@@ -30,9 +30,9 @@ const PLAYER_Y_OFFSET := 0.1 # compensates its feet sitting slightly below y=0
 const UPDATE_CHECK_URL := "https://api.github.com/repos/JLA92-bit/JLAProjects/releases/tags/android-latest"
 
 const CROPS := {
-	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"]},
-	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"]},
-	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45, "seasons": ["Summer", "Fall"]},
+	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"], "frost_hardy": true, "heat_sensitive": false},
+	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"], "frost_hardy": false, "heat_sensitive": false},
+	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45, "seasons": ["Summer", "Fall"], "frost_hardy": false, "heat_sensitive": true},
 }
 const CROP_KEYS := ["wheat", "corn", "tomato"]
 
@@ -44,8 +44,13 @@ const WEATHER := {
 	"rainy": {"name": "Rainy", "emoji": "🌧"},
 	"storm": {"name": "Storm", "emoji": "⛈"},
 	"drought": {"name": "Drought", "emoji": "🔥"},
+	"frost": {"name": "Frost", "emoji": "🥶"},
+	"heatwave": {"name": "Heatwave", "emoji": "🌡"},
 }
-const WEATHER_WEIGHTS := {"sunny": 55, "rainy": 25, "storm": 10, "drought": 10}
+# Base weights before season-gating (frost only rolls in Fall/Winter, heatwave
+# only in Spring/Summer - see _roll_weather()). Non-hardy/non-heat-sensitive
+# crops mostly ignore these; they exist as a targeted threat, not a blanket one.
+const WEATHER_WEIGHTS := {"sunny": 40, "rainy": 20, "storm": 8, "drought": 8, "frost": 12, "heatwave": 12}
 const REGION_DECAY := 6.0 # health lost per day for an unmaintained owned region
 
 # ---------- Market events ----------
@@ -664,8 +669,8 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 	var infected_tiles := []
 	var wilted := 0
 	var storm_damaged := 0
+	var frost_damaged := 0
 	var auto_watered := current_weather == "rainy" or current_weather == "storm" or terrain == "water"
-	var dry_step := 2 if terrain == "beach" else 1
 	var blight_mult := 0.5 if terrain == "cliff" else 1.0
 
 	for r in range(ROWS):
@@ -678,6 +683,21 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 				continue
 			if auto_watered:
 				t["watered"] = true
+
+			var crop_info = CROPS[t["crop"]]
+			var dry_step := 2 if terrain == "beach" else 1
+			if current_weather == "heatwave" and crop_info.get("heat_sensitive", false) and terrain != "water":
+				dry_step += 1
+
+			if current_weather == "frost" and terrain != "water" and not crop_info.get("frost_hardy", false):
+				if randf() < 0.5:
+					t["type"] = "grass"
+					wilted += 1
+					t["watered"] = false
+					continue
+				else:
+					t["stage"] = max(0, t.get("stage", 0) - 1)
+					frost_damaged += 1
 
 			if current_weather == "drought" and terrain != "water":
 				# Scarce water: even a watered crop keeps drying out, forcing an
@@ -730,13 +750,14 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 				nt["infected"] = true
 				nt["infected_days"] = 0
 
-	return {"wilted": wilted, "storm_damaged": storm_damaged, "infected_count": infected_tiles.size()}
+	return {"wilted": wilted, "storm_damaged": storm_damaged, "frost_damaged": frost_damaged, "infected_count": infected_tiles.size()}
 
 func _day_tick() -> void:
 	day += 1
 	_advance_calendar()
 	var wilted := 0
 	var storm_damaged := 0
+	var frost_damaged := 0
 	var total_infected := 0
 
 	for plot_id in plots.keys():
@@ -745,12 +766,15 @@ func _day_tick() -> void:
 		if plot_id == active_plot_id:
 			wilted = result["wilted"]
 			storm_damaged = result["storm_damaged"]
+			frost_damaged = result["frost_damaged"]
 
 	if wilted > 0:
-		var reason = "the drought" if current_weather == "drought" else "neglect"
+		var reason = "the drought" if current_weather == "drought" else ("the frost" if current_weather == "frost" else "neglect")
 		_log("%d crop(s) wilted from %s - remember to water with the Watering Can." % [wilted, reason])
 	elif storm_damaged > 0:
 		_log("The storm damaged %d crop(s), setting their growth back." % storm_damaged)
+	elif frost_damaged > 0:
+		_log("Frost nipped %d crop(s), setting their growth back." % frost_damaged)
 
 	for key in CROP_KEYS:
 		var base = CROPS[key]["base_price"]
@@ -858,13 +882,21 @@ func _season_name() -> String:
 	return SEASONS[season_idx]
 
 func _roll_weather() -> String:
-	var total := 0
+	var season = _season_name()
+	var weights := {}
 	for key in WEATHER_WEIGHTS:
-		total += WEATHER_WEIGHTS[key]
+		if key == "frost" and not (season == "Fall" or season == "Winter"):
+			continue
+		if key == "heatwave" and not (season == "Spring" or season == "Summer"):
+			continue
+		weights[key] = WEATHER_WEIGHTS[key]
+	var total := 0
+	for key in weights:
+		total += weights[key]
 	var roll := randi() % total
 	var acc := 0
-	for key in WEATHER_WEIGHTS:
-		acc += WEATHER_WEIGHTS[key]
+	for key in weights:
+		acc += weights[key]
 		if roll < acc:
 			return key
 	return "sunny"
@@ -1171,9 +1203,14 @@ func _refresh_inventory_panel() -> void:
 		if not _crop_unlocked(key):
 			continue
 		var crop = CROPS[key]
+		var trait_tag = ""
+		if crop.get("frost_hardy", false):
+			trait_tag = "  🥶 frost-hardy"
+		elif crop.get("heat_sensitive", false):
+			trait_tag = "  🌡 heat-sensitive"
 		var row := HBoxContainer.new()
 		var label := Label.new()
-		label.text = "%s (seeds: %d)%s" % [crop["name"], seeds[key], "  [selected]" if key == selected_crop else ""]
+		label.text = "%s (seeds: %d)%s%s" % [crop["name"], seeds[key], trait_tag, "  [selected]" if key == selected_crop else ""]
 		label.custom_minimum_size = Vector2(340, 0)
 		row.add_child(label)
 		var select_btn := Button.new()
