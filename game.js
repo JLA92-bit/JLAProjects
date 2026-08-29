@@ -15,6 +15,16 @@
   };
   const CROP_KEYS = Object.keys(CROPS);
 
+  const TOOLS = {
+    hoe:   { name: "Hoe",          emoji: "🔨", key: "1" },
+    water: { name: "Watering Can", emoji: "💧", key: "2" },
+    seed:  { name: "Seed Bag",     emoji: "🌱", key: "3" },
+    cure:  { name: "Cure Spray",   emoji: "🧪", key: "4" },
+  };
+  const TOOL_KEYS = Object.keys(TOOLS);
+  const WILT_DAYS = 3; // consecutive unwatered days before a planted crop dies
+  const CURE_COST = 15;
+
   // World map scale: continents made up of several regions, each with a terrain
   // flavor used both for its card art and (loosely) its name pool.
   const TERRAINS = ["grass", "farmland", "beach", "cliff", "water"];
@@ -28,7 +38,7 @@
   // Tile states: 'grass' | 'soil' | 'planted'
   // planted tile: { crop, stage(0-4), watered, infected, infectedDays }
 
-  const SAVE_KEY = "farmWorldSave_v2";
+  const SAVE_KEY = "farmWorldSave_v3";
 
   // ---------- State ----------
   function freshState() {
@@ -61,6 +71,7 @@
       produce: { wheat: 0, corn: 0, tomato: 0 },
       prices: { wheat: 10, corn: 22, tomato: 45 },
       selectedCrop: "wheat",
+      selectedTool: "hoe",
       tiles,
       regions,
       outbreakPressure: 0,
@@ -132,11 +143,9 @@
       e.preventDefault();
     }
     if (k === "e") doAction();
-    if (k === "c") doCure();
     if (k === "m") toggleMap();
-    if (k === "1") selectCrop("wheat");
-    if (k === "2") selectCrop("corn");
-    if (k === "3") selectCrop("tomato");
+    const toolByKey = TOOL_KEYS.find((t) => TOOLS[t].key === k);
+    if (toolByKey) selectTool(toolByKey);
   });
   window.addEventListener("keyup", (e) => {
     keys.delete(e.key.toLowerCase());
@@ -159,7 +168,10 @@
   setupDpadButton("dpad-right", "right");
 
   document.getElementById("btn-action").addEventListener("click", doAction);
-  document.getElementById("btn-cure").addEventListener("click", doCure);
+  document.getElementById("btn-cycle-tool").addEventListener("click", () => {
+    const idx = TOOL_KEYS.indexOf(state.selectedTool);
+    selectTool(TOOL_KEYS[(idx + 1) % TOOL_KEYS.length]);
+  });
   document.getElementById("btn-map-mobile").addEventListener("click", toggleMap);
   document.getElementById("btn-map").addEventListener("click", toggleMap);
   document.getElementById("btn-close-map").addEventListener("click", toggleMap);
@@ -174,6 +186,12 @@
 
   function selectCrop(key) {
     state.selectedCrop = key;
+    renderSidebar();
+  }
+
+  function selectTool(key) {
+    state.selectedTool = key;
+    document.getElementById("current-tool-name").textContent = TOOLS[key].name;
     renderSidebar();
   }
 
@@ -202,10 +220,38 @@
     const f = facingTile();
     if (!f) return;
     const tile = state.tiles[f.ty][f.tx];
-    if (tile.type === "grass") {
-      tile.type = "soil";
-      logMsg("Tilled soil.");
-    } else if (tile.type === "soil") {
+
+    // Harvesting a ready crop needs no tool - always available.
+    if (tile.type === "planted" && tile.stage >= 4) {
+      if (tile.infected) {
+        logMsg("That crop is blighted — harvest yields nothing. Cure it or till it under.");
+        tile.type = "grass";
+        delete tile.crop;
+      } else {
+        const wellTended = (tile.timesWatered || 0) >= CROPS[tile.crop].growDays;
+        const yieldAmount = wellTended ? 2 : 1;
+        state.produce[tile.crop] += yieldAmount;
+        logMsg(`Harvested ${yieldAmount}x ${CROPS[tile.crop].name}${wellTended ? " (well-tended bonus!)" : ""}.`);
+        tile.type = "soil";
+        delete tile.crop;
+      }
+      renderSidebar();
+      return;
+    }
+
+    const tool = state.selectedTool;
+    if (tool === "hoe") {
+      if (tile.type === "grass") {
+        tile.type = "soil";
+        logMsg("Tilled soil with the hoe.");
+      } else {
+        logMsg("The hoe only works on grass.");
+      }
+    } else if (tool === "seed") {
+      if (tile.type !== "soil") {
+        logMsg("Seeds need tilled soil — till it with the hoe first.");
+        return;
+      }
       const cropKey = state.selectedCrop;
       if (state.seeds[cropKey] <= 0) {
         logMsg(`No ${CROPS[cropKey].name} seeds left! Buy more.`);
@@ -216,49 +262,39 @@
       tile.crop = cropKey;
       tile.stage = 0;
       tile.watered = false;
+      tile.timesWatered = 0;
       tile.infected = false;
       tile.infectedDays = 0;
+      tile.dryDays = 0;
       logMsg(`Planted ${CROPS[cropKey].name}.`);
-    } else if (tile.type === "planted") {
-      if (tile.stage >= 4) {
-        if (tile.infected) {
-          logMsg("That crop is blighted — harvest yields nothing. Cure it or till it under.");
-          tile.type = "grass";
-          delete tile.crop;
+    } else if (tool === "water") {
+      if (tile.type !== "planted") {
+        logMsg("Nothing planted here to water.");
+        return;
+      }
+      if (tile.watered) {
+        logMsg("Already watered today. It's growing...");
+        return;
+      }
+      tile.watered = true;
+      tile.timesWatered = (tile.timesWatered || 0) + 1;
+      logMsg("Watered the crop.");
+    } else if (tool === "cure") {
+      if (tile.type === "planted" && tile.infected) {
+        if (state.cash < CURE_COST) {
+          logMsg(`Need $${CURE_COST} to cure this blight.`);
           return;
         }
-        state.produce[tile.crop]++;
-        logMsg(`Harvested ${CROPS[tile.crop].name}!`);
-        tile.type = "soil";
-        delete tile.crop;
-      } else if (!tile.watered) {
-        tile.watered = true;
-        logMsg("Watered crop.");
+        state.cash -= CURE_COST;
+        tile.infected = false;
+        tile.infectedDays = 0;
+        logMsg(`Cured the blight for $${CURE_COST}.`);
       } else {
-        logMsg("Already watered today. It's growing...");
+        logMsg("Nothing to cure here.");
+        return;
       }
     }
     renderSidebar();
-  }
-
-  function doCure() {
-    const f = facingTile();
-    if (!f) return;
-    const tile = state.tiles[f.ty][f.tx];
-    if (tile.type === "planted" && tile.infected) {
-      const cost = 15;
-      if (state.cash < cost) {
-        logMsg(`Need $${cost} to cure this blight.`);
-        return;
-      }
-      state.cash -= cost;
-      tile.infected = false;
-      tile.infectedDays = 0;
-      logMsg("Cured the blight for $15.");
-      renderSidebar();
-    } else {
-      logMsg("Nothing to cure here.");
-    }
   }
 
   // ---------- Day tick: growth, market, blight, world ----------
@@ -267,13 +303,24 @@
 
     // Crop growth + blight spread
     let infectedTiles = [];
+    let wiltedCount = 0;
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const t = state.tiles[r][c];
         if (t.type !== "planted") continue;
-        if (t.stage < 4) {
-          if (t.watered) t.stage++;
-          else if (Math.random() < 0.5) t.stage++;
+
+        if (t.watered) {
+          t.dryDays = 0;
+          if (t.stage < 4) t.stage++;
+        } else {
+          t.dryDays = (t.dryDays || 0) + 1;
+          if (t.dryDays >= WILT_DAYS) {
+            t.type = "grass";
+            delete t.crop;
+            wiltedCount++;
+            continue;
+          }
+          if (t.stage < 4 && Math.random() < 0.5) t.stage++;
         }
         t.watered = false;
 
@@ -294,6 +341,10 @@
           }
         }
       }
+    }
+
+    if (wiltedCount > 0) {
+      logMsg(`${wiltedCount} crop(s) wilted from neglect — remember to water with the Watering Can.`);
     }
 
     // Spread infection to adjacent planted tiles
@@ -429,6 +480,17 @@
     const ownedCount = state.regions.filter(r => r.owned).length;
     const pct = Math.round((ownedCount / state.regions.length) * 100);
     document.getElementById("stat-domination").textContent = `🌍 ${pct}% owned`;
+
+    const toolList = document.getElementById("tool-list");
+    toolList.innerHTML = "";
+    TOOL_KEYS.forEach((key) => {
+      const tool = TOOLS[key];
+      const btn = document.createElement("button");
+      btn.className = "tool-btn" + (state.selectedTool === key ? " selected" : "");
+      btn.innerHTML = `${tool.emoji} ${tool.name} <span class="key">[${tool.key}]</span>`;
+      btn.addEventListener("click", () => selectTool(key));
+      toolList.appendChild(btn);
+    });
 
     const seedList = document.getElementById("seed-list");
     seedList.innerHTML = "";
@@ -604,6 +666,7 @@
   }
 
   // ---------- Init ----------
+  document.getElementById("current-tool-name").textContent = TOOLS[state.selectedTool].name;
   renderSidebar();
   renderRegions();
   logMsg(state.log);

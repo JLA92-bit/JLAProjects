@@ -21,10 +21,11 @@
     <section id="game-area">
       <canvas id="farmCanvas" width="560" height="392"></canvas>
       <div id="controls-hint">
-        <b>Move:</b> WASD / Arrows &nbsp; <b>Action:</b> E &nbsp; <b>Cure blight:</b> C &nbsp;
-        <b>Select seed:</b> 1 Wheat / 2 Corn / 3 Tomato &nbsp; <b>World Map:</b> M
+        <b>Move:</b> WASD / Arrows &nbsp; <b>Use tool:</b> E &nbsp;
+        <b>Select tool:</b> 1 Hoe / 2 Watering Can / 3 Seeds / 4 Cure Spray &nbsp; <b>World Map:</b> M
       </div>
       <div id="log"></div>
+      <div id="current-tool">Tool: <span id="current-tool-name">Hoe</span></div>
 
       <div id="touch-controls">
         <div id="dpad">
@@ -34,16 +35,22 @@
           <button class="dpad-btn" id="dpad-right" data-dir="right">▶</button>
         </div>
         <div id="action-buttons">
-          <button class="action-btn" id="btn-action">✋ Action</button>
-          <button class="action-btn" id="btn-cure">🧪 Cure</button>
+          <button class="action-btn" id="btn-action">✋ Use Tool</button>
+          <button class="action-btn" id="btn-cycle-tool">🔄 Tool</button>
           <button class="action-btn" id="btn-map-mobile">🌍 Map</button>
         </div>
       </div>
     </section>
 
     <aside id="sidebar">
+      <div class="panel" id="tool-panel">
+        <h2>Tools</h2>
+        <div id="tool-list"></div>
+      </div>
+
       <div class="panel" id="seed-panel">
-        <h2>Seeds &amp; Tool</h2>
+        <h2>Seed Bag</h2>
+        <p class="hint">Select which seed the Seed Bag tool plants.</p>
         <div id="seed-list"></div>
       </div>
 
