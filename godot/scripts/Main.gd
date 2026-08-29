@@ -867,18 +867,21 @@ func _build_ui() -> void:
 	tool_row.add_theme_constant_override("separation", 8)
 	layer.add_child(tool_row)
 
-	var action_y = tool_row_y + 70
-	_add_button(layer, "Use Tool", Vector2(FARM_ORIGIN.x, action_y), Vector2(200, 64), func(): _do_action())
-	_add_button(layer, "Inventory", Vector2(FARM_ORIGIN.x + 210, action_y), Vector2(200, 64), _open_inventory)
-	map_button = _add_button(layer, "World Map", Vector2(FARM_ORIGIN.x + 420, action_y), Vector2(220, 64), func(): _toggle_map())
+	var action_y = tool_row_y + 76
+	_add_button(layer, "Use Tool", Vector2(FARM_ORIGIN.x, action_y), Vector2(210, 72), func(): _do_action())
+	_add_button(layer, "Inventory", Vector2(FARM_ORIGIN.x + 222, action_y), Vector2(210, 72), _open_inventory)
+	map_button = _add_button(layer, "World Map", Vector2(FARM_ORIGIN.x + 444, action_y), Vector2(230, 72), func(): _toggle_map())
 
-	# On-screen D-pad
-	var dpad_y = action_y + 90
-	var dpad_x = FARM_ORIGIN.x + 40
-	_add_touch_button(layer, "^", Vector2(dpad_x + 70, dpad_y), Vector2(64, 64), func(p): move_up_held = p)
-	_add_touch_button(layer, "v", Vector2(dpad_x + 70, dpad_y + 136), Vector2(64, 64), func(p): move_down_held = p)
-	_add_touch_button(layer, "<", Vector2(dpad_x, dpad_y + 68), Vector2(64, 64), func(p): move_left_held = p)
-	_add_touch_button(layer, ">", Vector2(dpad_x + 140, dpad_y + 68), Vector2(64, 64), func(p): move_right_held = p)
+	# On-screen D-pad - sized generously for real touchscreens, using the
+	# extra vertical space the 19.5:9-ish canvas leaves below the farm UI.
+	var dpad_button := 96
+	var dpad_step := dpad_button + 10
+	var dpad_y = action_y + 120
+	var dpad_x = FARM_ORIGIN.x + 60
+	_add_touch_button(layer, "^", Vector2(dpad_x + dpad_step, dpad_y), Vector2(dpad_button, dpad_button), func(p): move_up_held = p)
+	_add_touch_button(layer, "v", Vector2(dpad_x + dpad_step, dpad_y + dpad_step * 2), Vector2(dpad_button, dpad_button), func(p): move_down_held = p)
+	_add_touch_button(layer, "<", Vector2(dpad_x, dpad_y + dpad_step), Vector2(dpad_button, dpad_button), func(p): move_left_held = p)
+	_add_touch_button(layer, ">", Vector2(dpad_x + dpad_step * 2, dpad_y + dpad_step), Vector2(dpad_button, dpad_button), func(p): move_right_held = p)
 
 	_build_inventory_panel(layer)
 	_build_map_panel(layer)
@@ -899,7 +902,7 @@ func _build_act_banner(layer: CanvasLayer) -> void:
 
 func _build_update_banner(layer: CanvasLayer) -> void:
 	update_banner = Panel.new()
-	update_banner.position = Vector2(40, 1030)
+	update_banner.position = Vector2(40, 1190)
 	update_banner.size = Vector2(640, 130)
 	update_banner.visible = false
 	layer.add_child(update_banner)
@@ -922,7 +925,7 @@ func _add_touch_button(parent: Node, text: String, pos: Vector2, size: Vector2, 
 func _build_inventory_panel(layer: CanvasLayer) -> void:
 	inventory_panel = Panel.new()
 	inventory_panel.position = Vector2(20, 40)
-	inventory_panel.size = Vector2(680, 1180)
+	inventory_panel.size = Vector2(680, 1480)
 	inventory_panel.visible = false
 	layer.add_child(inventory_panel)
 
@@ -955,7 +958,7 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 func _build_map_panel(layer: CanvasLayer) -> void:
 	map_panel = Panel.new()
 	map_panel.position = Vector2(20, 40)
-	map_panel.size = Vector2(680, 1180)
+	map_panel.size = Vector2(680, 1480)
 	map_panel.visible = false
 	layer.add_child(map_panel)
 
@@ -965,7 +968,7 @@ func _build_map_panel(layer: CanvasLayer) -> void:
 
 	var scroll := ScrollContainer.new()
 	scroll.position = Vector2(20, 84)
-	scroll.size = Vector2(640, 1080)
+	scroll.size = Vector2(640, 1380)
 	map_panel.add_child(scroll)
 
 	map_scroll_content = VBoxContainer.new()
@@ -1025,7 +1028,7 @@ func _refresh_tool_ui() -> void:
 		var t = TOOLS[key]
 		var btn := Button.new()
 		btn.text = "%s %s" % [t["emoji"], t["name"]]
-		btn.custom_minimum_size = Vector2(160, 56)
+		btn.custom_minimum_size = Vector2(170, 64)
 		btn.pressed.connect(func(): _select_tool(key))
 		btn.modulate = Color(1, 1, 0.6) if key == selected_tool else Color(1, 1, 1)
 		tool_row.add_child(btn)
