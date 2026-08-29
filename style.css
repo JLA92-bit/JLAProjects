@@ -103,6 +103,44 @@ main {
   text-align: center;
 }
 
+#current-tool {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+#current-tool-name {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+#tool-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: left;
+}
+
+.tool-btn.selected {
+  outline: 2px solid var(--accent);
+  background: #33502e;
+}
+
+.tool-btn .key {
+  opacity: 0.6;
+  font-size: 0.7rem;
+}
+
 #sidebar {
   flex: 1 1 300px;
   display: flex;
