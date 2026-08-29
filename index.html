@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Farm World: Outbreak &amp; Empire</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <h1>🌾 Farm World: Outbreak &amp; Empire</h1>
+    <div id="stats">
+      <span id="stat-cash">💰 $0</span>
+      <span id="stat-day">☀️ Day 1</span>
+      <span id="stat-domination">🌍 0% owned</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="game-area">
+      <canvas id="farmCanvas" width="560" height="392"></canvas>
+      <div id="controls-hint">
+        <b>Move:</b> WASD / Arrows &nbsp; <b>Action:</b> E &nbsp; <b>Cure blight:</b> C &nbsp;
+        <b>Select seed:</b> 1 Wheat / 2 Corn / 3 Tomato &nbsp; <b>World Map:</b> M
+      </div>
+      <div id="log"></div>
+
+      <div id="touch-controls">
+        <div id="dpad">
+          <button class="dpad-btn" id="dpad-up" data-dir="up">▲</button>
+          <button class="dpad-btn" id="dpad-left" data-dir="left">◀</button>
+          <button class="dpad-btn" id="dpad-down" data-dir="down">▼</button>
+          <button class="dpad-btn" id="dpad-right" data-dir="right">▶</button>
+        </div>
+        <div id="action-buttons">
+          <button class="action-btn" id="btn-action">✋ Action</button>
+          <button class="action-btn" id="btn-cure">🧪 Cure</button>
+          <button class="action-btn" id="btn-map-mobile">🌍 Map</button>
+        </div>
+      </div>
+    </section>
+
+    <aside id="sidebar">
+      <div class="panel" id="seed-panel">
+        <h2>Seeds &amp; Tool</h2>
+        <div id="seed-list"></div>
+      </div>
+
+      <div class="panel" id="inventory-panel">
+        <h2>Inventory &amp; Market</h2>
+        <table id="market-table">
+          <thead><tr><th>Crop</th><th>Seeds</th><th>Produce</th><th>Price</th><th></th></tr></thead>
+          <tbody id="market-body"></tbody>
+        </table>
+      </div>
+
+      <div class="panel" id="blight-panel">
+        <h2>Outbreak Status</h2>
+        <div id="blight-info">No active blight.</div>
+      </div>
+
+      <div class="panel">
+        <button id="btn-map">🌍 Open World Map</button>
+        <button id="btn-save">💾 Save</button>
+        <button id="btn-reset">♻️ Reset Game</button>
+      </div>
+    </aside>
+  </main>
+
+  <div id="map-modal" class="hidden">
+    <div id="map-modal-content">
+      <div class="map-modal-header">
+        <h2>World Map — Farm Empire Expansion</h2>
+        <button id="btn-close-map">✕</button>
+      </div>
+      <p class="hint">Weakened (low-health) regions cost less to buy. Your blight outbreaks can weaken rival
+      regions over time — but let it run too wild and it will come back to hurt your own farm.</p>
+      <div id="regions-grid"></div>
+    </div>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>

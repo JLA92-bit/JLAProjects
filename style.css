@@ -1,0 +1,361 @@
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+
+:root {
+  --bg: #1b2a1e;
+  --panel: #24382a;
+  --panel-2: #2e4634;
+  --accent: #8bd450;
+  --accent-2: #f2c14e;
+  --danger: #e0524b;
+  --text: #eef3ea;
+  --muted: #a9bfa3;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+#topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--panel-2);
+  border-bottom: 2px solid #16241a;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+#topbar h1 {
+  font-size: 1.05rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+#stats {
+  display: flex;
+  gap: 12px;
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+}
+
+#stats span {
+  background: var(--panel);
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+main {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+}
+
+#game-area {
+  flex: 1 1 560px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+#farmCanvas {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  aspect-ratio: 560 / 392;
+  background: #3a5a3f;
+  border: 3px solid #16241a;
+  border-radius: 10px;
+  touch-action: none;
+  image-rendering: pixelated;
+}
+
+#controls-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+#log {
+  width: 100%;
+  max-width: 560px;
+  min-height: 1.2em;
+  font-size: 0.8rem;
+  color: var(--accent-2);
+  text-align: center;
+}
+
+#sidebar {
+  flex: 1 1 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 280px;
+}
+
+.panel {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.panel h2 {
+  font-size: 0.9rem;
+  margin: 0 0 8px;
+  color: var(--accent);
+}
+
+#seed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.seed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.seed-row.selected {
+  outline: 2px solid var(--accent);
+}
+
+.seed-row button {
+  font-size: 0.75rem;
+  padding: 4px 8px;
+}
+
+table#market-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+#market-table th, #market-table td {
+  padding: 5px 4px;
+  text-align: center;
+  border-bottom: 1px solid #3a5240;
+}
+
+button {
+  font-family: inherit;
+  background: var(--accent);
+  color: #16241a;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+#btn-map, #btn-save, #btn-reset {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+#btn-reset {
+  background: var(--danger);
+  color: white;
+}
+
+#blight-info {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+#blight-info.active {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* Touch controls */
+#touch-controls {
+  display: none;
+  width: 100%;
+  max-width: 560px;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+}
+
+#dpad {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  display: grid;
+  grid-template-columns: 44px 44px 44px;
+  grid-template-rows: 44px 44px 44px;
+}
+
+.dpad-btn {
+  font-size: 1.1rem;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+#dpad-up { grid-column: 2; grid-row: 1; }
+#dpad-left { grid-column: 1; grid-row: 2; }
+#dpad-down { grid-column: 2; grid-row: 3; }
+#dpad-right { grid-column: 3; grid-row: 2; }
+
+#action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-btn {
+  font-size: 0.85rem;
+  padding: 10px 14px;
+  border-radius: 10px;
+}
+
+#btn-cure {
+  background: var(--danger);
+  color: white;
+}
+
+#btn-map-mobile {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* Show touch controls on touch-capable / narrow screens */
+@media (pointer: coarse) {
+  #touch-controls { display: flex; }
+  #controls-hint { display: none; }
+}
+
+@media (max-width: 700px) {
+  #topbar h1 { font-size: 0.9rem; }
+  main { padding: 8px; gap: 8px; }
+  #sidebar { min-width: 0; }
+}
+
+/* World map modal */
+#map-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 16px;
+}
+
+#map-modal.hidden {
+  display: none;
+}
+
+#map-modal-content {
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 16px;
+  max-width: 640px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.map-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.map-modal-header h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.map-modal-header button {
+  background: var(--panel-2);
+  color: var(--text);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  padding: 0;
+}
+
+p.hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+#regions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.region-card {
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 0.8rem;
+}
+
+.region-card h3 {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+}
+
+.region-card .health-bar {
+  height: 6px;
+  border-radius: 4px;
+  background: #16241a;
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.region-card .health-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.region-card.owned {
+  outline: 2px solid var(--accent-2);
+}
+
+.region-card button {
+  width: 100%;
+  margin-top: 6px;
+}
