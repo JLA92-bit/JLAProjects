@@ -71,10 +71,27 @@ const TOOLS := {
 	"water": {"name": "Watering Can", "emoji": "💧"},
 	"seed": {"name": "Seed Bag", "emoji": "🌱"},
 	"cure": {"name": "Cure Spray", "emoji": "🧪"},
+	"fertilize": {"name": "Fertilizer", "emoji": "🪴"},
 }
-const TOOL_KEYS := ["hoe", "water", "seed", "cure"]
+const TOOL_KEYS := ["hoe", "water", "seed", "cure", "fertilize"]
 const WILT_DAYS := 3
 const CURE_COST := 15
+
+# ---------- Soil (early-game depth: a single quality score per tile) ----------
+# Planting the same crop repeatedly depletes soil faster than rotating
+# crops; fertilizer restores it directly; leaving a tile fallow (untilled
+# grass) slowly recovers it on its own. Soil quality gates the existing
+# well-tended yield bonus and, when badly exhausted, risks losing the
+# harvest outright - a real reason to rotate crops or invest in fertilizer
+# instead of just replanting the same profitable crop forever.
+const SOIL_DEGRADE_SAME_CROP := 15.0
+const SOIL_DEGRADE_ROTATED := 5.0
+const SOIL_FALLOW_REGEN := 1.0
+const SOIL_FERTILIZE_BOOST := 30.0
+const SOIL_DEPLETED_THRESHOLD := 70.0
+const SOIL_EXHAUSTED_THRESHOLD := 40.0
+const SOIL_EXHAUSTED_FAIL_CHANCE := 0.3
+const FERTILIZER_COST := 12
 
 const TERRAINS := ["grass", "farmland", "beach", "cliff", "water"]
 const CONTINENTS := [
@@ -108,7 +125,7 @@ const ACTS := [
 	{
 		"title": "Act 2: The Outbreak Begins",
 		"intro": "A mysterious blight has appeared on the farm! The Cure Spray is now in your toolkit. The world map has opened - stake your first claim in Verdant Plains.",
-		"tools": ["hoe", "water", "seed", "cure"],
+		"tools": ["hoe", "water", "seed", "cure", "fertilize"],
 		"crops": ["wheat", "corn"],
 		"continents": ["Verdant Plains"],
 		"blight": true,
@@ -117,7 +134,7 @@ const ACTS := [
 	{
 		"title": "Act 3: Expanding Empire",
 		"intro": "Your empire is spreading. Tomatoes fetch a fine price, and three more continents are open for the taking.",
-		"tools": ["hoe", "water", "seed", "cure"],
+		"tools": ["hoe", "water", "seed", "cure", "fertilize"],
 		"crops": ["wheat", "corn", "tomato"],
 		"continents": ["Verdant Plains", "Sunspire Coast", "Ironcrest Highlands", "Blueriver Delta"],
 		"blight": true,
@@ -126,7 +143,7 @@ const ACTS := [
 	{
 		"title": "Act 4: World Domination",
 		"intro": "Every continent is in play. Finish what you started.",
-		"tools": ["hoe", "water", "seed", "cure"],
+		"tools": ["hoe", "water", "seed", "cure", "fertilize"],
 		"crops": ["wheat", "corn", "tomato"],
 		"continents": ["Verdant Plains", "Sunspire Coast", "Ironcrest Highlands", "Blueriver Delta"],
 		"blight": true,
@@ -139,6 +156,7 @@ var cash := 100
 var day := 1
 var day_progress := 0.0
 var seeds := {"wheat": 6, "corn": 2, "tomato": 0}
+var fertilizer := 3
 var produce := {"wheat": 0, "corn": 0, "tomato": 0}
 var prices := {"wheat": 10, "corn": 22, "tomato": 45}
 var selected_crop := "wheat"
@@ -194,6 +212,8 @@ var seed_rows_container: VBoxContainer
 var market_rows_container: VBoxContainer
 var upgrade_rows_container: VBoxContainer
 var blight_label: Label
+var soil_label: Label
+var fertilizer_label: Label
 
 var map_panel: Panel
 var map_summary_label: Label
@@ -259,7 +279,7 @@ func _make_empty_grid() -> Array:
 	for r in range(ROWS):
 		var row := []
 		for c in range(COLS):
-			row.append({"type": "grass"})
+			row.append({"type": "grass", "soil_quality": 100.0, "last_crop": ""})
 		grid.append(row)
 	return grid
 
@@ -330,11 +350,16 @@ func _build_scenery():
 		s.position = FARM_ORIGIN + Vector2(d["tx"] * TILE, d["ty"] * TILE)
 		add_child(s)
 
+	# Pig/Sheep sheets are a 2x2 grid of 32x32 frames (not 16x16 - that was
+	# cutting each sprite into quarters) and the Cow sheet is a 3x2 grid of
+	# 32x32 frames (not the guessed, non-integer 19x16, which sampled the
+	# wrong pixels entirely). Verified by scanning each sheet's alpha
+	# channel for the actual frame gaps rather than assuming a grid size.
 	var animal_deco = [
-		{"tex": "pig", "tx": 4, "ty": 0, "frame_w": 16, "frame_h": 16},
-		{"tex": "sheep", "tx": 6, "ty": 0, "frame_w": 16, "frame_h": 16},
+		{"tex": "pig", "tx": 5, "ty": 6, "frame_w": 32, "frame_h": 32},
+		{"tex": "sheep", "tx": 7, "ty": 6, "frame_w": 32, "frame_h": 32},
 		{"tex": "chicken", "tx": 1, "ty": 6, "frame_w": 16, "frame_h": 16},
-		{"tex": "cow", "tx": 8, "ty": 6, "frame_w": 19, "frame_h": 16},
+		{"tex": "cow", "tx": 8, "ty": 6, "frame_w": 32, "frame_h": 32},
 	]
 	for d in animal_deco:
 		var s := _make_pixel_sprite(textures[d["tex"]])
@@ -395,6 +420,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			KEY_2: _select_tool("water")
 			KEY_3: _select_tool("seed")
 			KEY_4: _select_tool("cure")
+			KEY_5: _select_tool("fertilize")
 
 func _facing_tile() -> Vector2i:
 	var tx := int(round(player_pos.x / TILE))
@@ -434,15 +460,23 @@ func _do_action() -> void:
 			_log("That crop is blighted - harvest yields nothing. Cure it or till it under.")
 			tile["type"] = "grass"
 		else:
-			var well_tended = tile.get("times_watered", 0) >= CROPS[tile["crop"]]["grow_days"]
-			var amount = 2 if well_tended else 1
-			var cap = _storage_cap()
-			if produce[tile["crop"]] + amount > cap:
-				_log("Storage is full for %s (%d/%d) - sell some or upgrade your silo." % [CROPS[tile["crop"]]["name"], produce[tile["crop"]], cap])
-				return
-			produce[tile["crop"]] += amount
-			_log("Harvested %dx %s%s." % [amount, CROPS[tile["crop"]]["name"], " (well-tended bonus!)" if well_tended else ""])
-			tile["type"] = "soil"
+			var sq: float = tile.get("soil_quality", 100.0)
+			if sq < SOIL_EXHAUSTED_THRESHOLD and randf() < SOIL_EXHAUSTED_FAIL_CHANCE:
+				_log("The exhausted soil ruined this %s harvest - fertilize or rotate crops here." % CROPS[tile["crop"]]["name"])
+				tile["type"] = "soil"
+			else:
+				var well_tended = tile.get("times_watered", 0) >= CROPS[tile["crop"]]["grow_days"] and sq >= SOIL_DEPLETED_THRESHOLD
+				var amount = 2 if well_tended else 1
+				var cap = _storage_cap()
+				if produce[tile["crop"]] + amount > cap:
+					_log("Storage is full for %s (%d/%d) - sell some or upgrade your silo." % [CROPS[tile["crop"]]["name"], produce[tile["crop"]], cap])
+					return
+				produce[tile["crop"]] += amount
+				_log("Harvested %dx %s%s." % [amount, CROPS[tile["crop"]]["name"], " (well-tended bonus!)" if well_tended else ""])
+				tile["type"] = "soil"
+			var same_crop = tile.get("last_crop", "") == tile["crop"]
+			tile["soil_quality"] = max(0.0, sq - (SOIL_DEGRADE_SAME_CROP if same_crop else SOIL_DEGRADE_ROTATED))
+			tile["last_crop"] = tile["crop"]
 		_update_tile_visual(f.y, f.x)
 		_refresh_inventory_panel()
 		return
@@ -515,6 +549,16 @@ func _do_action() -> void:
 			else:
 				_log("Nothing to cure here.")
 				return
+		"fertilize":
+			if tile["type"] == "grass":
+				_log("Nothing to fertilize here - till it first.")
+				return
+			if fertilizer <= 0:
+				_log("No fertilizer left! Buy more.")
+				return
+			fertilizer -= 1
+			tile["soil_quality"] = min(100.0, tile.get("soil_quality", 100.0) + SOIL_FERTILIZE_BOOST)
+			_log("Fertilized the soil (now %d%%)." % int(round(tile["soil_quality"])))
 	_update_tile_visual(f.y, f.x)
 	_refresh_all()
 
@@ -566,6 +610,9 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 	for r in range(ROWS):
 		for c in range(COLS):
 			var t: Dictionary = t_grid[r][c]
+			if t["type"] == "grass":
+				t["soil_quality"] = min(100.0, t.get("soil_quality", 100.0) + SOIL_FALLOW_REGEN)
+				continue
 			if t["type"] != "planted":
 				continue
 			if auto_watered:
@@ -952,8 +999,28 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 	upgrade_rows_container.size = Vector2(640, 300)
 	inventory_panel.add_child(upgrade_rows_container)
 
-	_add_button(inventory_panel, "Save Game", Vector2(20, 1000), Vector2(300, 56), _on_save_button_pressed)
-	_add_button(inventory_panel, "Reset Game", Vector2(340, 1000), Vector2(300, 56), func(): _reset_game())
+	_add_label(inventory_panel, "Soil Care", Vector2(20, 985), Vector2(400, 30), 24)
+	soil_label = _add_label(inventory_panel, "", Vector2(20, 1023), Vector2(640, 26), 16, Color(0.8, 0.7, 0.5))
+	var fert_row := HBoxContainer.new()
+	fert_row.position = Vector2(20, 1055)
+	inventory_panel.add_child(fert_row)
+	fertilizer_label = Label.new()
+	fertilizer_label.custom_minimum_size = Vector2(340, 0)
+	fert_row.add_child(fertilizer_label)
+	var fert_buy_btn := Button.new()
+	fert_buy_btn.text = "Buy $%d" % FERTILIZER_COST
+	fert_buy_btn.pressed.connect(func():
+		if cash >= FERTILIZER_COST:
+			cash -= FERTILIZER_COST
+			fertilizer += 1
+			_refresh_all()
+		else:
+			_log("Need $%d for fertilizer." % FERTILIZER_COST)
+	)
+	fert_row.add_child(fert_buy_btn)
+
+	_add_button(inventory_panel, "Save Game", Vector2(20, 1120), Vector2(300, 56), _on_save_button_pressed)
+	_add_button(inventory_panel, "Reset Game", Vector2(340, 1120), Vector2(300, 56), func(): _reset_game())
 
 func _build_map_panel(layer: CanvasLayer) -> void:
 	map_panel = Panel.new()
@@ -1140,6 +1207,28 @@ func _refresh_inventory_panel() -> void:
 				row.add_child(buy_btn)
 			upgrade_rows_container.add_child(row)
 
+	if current_act < 1:
+		soil_label.text = "Soil care unlocks in Act 2."
+		fertilizer_label.text = ""
+	else:
+		soil_label.text = "Avg soil quality on this plot: %d%% (%s)" % [int(round(_avg_soil_quality())), _soil_quality_label(_avg_soil_quality())]
+		fertilizer_label.text = "Fertilizer: %d in stock (+%d%% quality per use)" % [fertilizer, int(SOIL_FERTILIZE_BOOST)]
+
+func _avg_soil_quality() -> float:
+	var total := 0.0
+	for r in range(ROWS):
+		for c in range(COLS):
+			total += tiles[r][c].get("soil_quality", 100.0)
+	return total / (ROWS * COLS)
+
+func _soil_quality_label(sq: float) -> String:
+	if sq >= SOIL_DEPLETED_THRESHOLD:
+		return "Fertile"
+	elif sq >= SOIL_EXHAUSTED_THRESHOLD:
+		return "Depleted"
+	else:
+		return "Exhausted"
+
 func _refresh_map_panel() -> void:
 	var owned_count = regions.filter(func(r): return r["owned"]).size()
 	map_summary_label.text = "%d / %d regions under your control across %d continents." % [owned_count, regions.size(), CONTINENTS.size()]
@@ -1284,7 +1373,7 @@ func _on_update_check_completed(result: int, response_code: int, _headers: Packe
 # ---------- Save / Load ----------
 func _save_game() -> void:
 	var data := {
-		"cash": cash, "day": day, "seeds": seeds, "produce": produce, "prices": prices,
+		"cash": cash, "day": day, "seeds": seeds, "fertilizer": fertilizer, "produce": produce, "prices": prices,
 		"selected_crop": selected_crop, "selected_tool": selected_tool,
 		"current_act": current_act, "victory_shown": victory_shown,
 		"season_idx": season_idx, "season_day": season_day,
@@ -1312,6 +1401,7 @@ func _load_game() -> void:
 	cash = parsed.get("cash", cash)
 	day = parsed.get("day", day)
 	seeds = parsed.get("seeds", seeds)
+	fertilizer = parsed.get("fertilizer", fertilizer)
 	produce = parsed.get("produce", produce)
 	prices = parsed.get("prices", prices)
 	selected_crop = parsed.get("selected_crop", selected_crop)
@@ -1358,6 +1448,7 @@ func _reset_game() -> void:
 	day = 1
 	day_progress = 0.0
 	seeds = {"wheat": 6, "corn": 2, "tomato": 0}
+	fertilizer = 3
 	produce = {"wheat": 0, "corn": 0, "tomato": 0}
 	prices = {"wheat": 10, "corn": 22, "tomato": 45}
 	selected_crop = "wheat"
