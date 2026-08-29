@@ -53,6 +53,7 @@ jobs:
           use_preset_export_path: true
           export_debug: true
           presets_to_export: Android
+          verbose: true
 
       - name: Locate built APK
         id: find_apk

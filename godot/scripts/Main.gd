@@ -34,11 +34,11 @@ const CONTINENTS := [
 ]
 
 const TERRAIN_TEX_PATH := {
-	"grass": "res://assets/cutefantasy/tiles/Grass_Middle.png",
-	"farmland": "res://assets/cutefantasy/tiles/FarmLand_Tile.png",
-	"beach": "res://assets/cutefantasy/tiles/Beach_Tile.png",
+	"grass": "res://assets/ninja/grass.png",
+	"farmland": "res://assets/ninja/soil.png",
+	"beach": "res://assets/ninja/sand.png",
 	"cliff": "res://assets/cutefantasy/tiles/Cliff_Tile.png",
-	"water": "res://assets/cutefantasy/tiles/Water_Tile.png",
+	"water": "res://assets/ninja/water.png",
 }
 
 const SAVE_PATH := "user://farmworld_save_v1.json"
@@ -101,7 +101,9 @@ func _ready():
 func _load_textures():
 	textures["plants"] = load("res://assets/sprout/objects/Basic_Plants.png")
 	textures["player"] = load("res://assets/sprout/characters/Basic_Character_Spritesheet.png")
-	textures["oak_tree"] = load("res://assets/cutefantasy/decoration/Oak_Tree.png")
+	textures["tree"] = load("res://assets/ninja/tree.png")
+	textures["house"] = load("res://assets/ninja/house.png")
+	textures["fence"] = load("res://assets/ninja/fence_strip.png")
 	textures["cow"] = load("res://assets/sprout/characters/Free_Cow_Sprites.png")
 	textures["chicken"] = load("res://assets/sprout/characters/Free_Chicken_Sprites.png")
 	textures["pig"] = load("res://assets/cutefantasy/animals/Pig.png")
@@ -160,25 +162,33 @@ func _build_farm_grid():
 		tile_overlay_sprites.append(overlay_row)
 
 func _build_scenery():
-	var deco = [
-		{"tex": "oak_tree", "tx": 0, "ty": 0},
-		{"tex": "oak_tree", "tx": 9, "ty": 0},
+	# Ninja-tileset decorations are natively drawn on a 16px grid, so they always
+	# scale uniformly by TILE/16 regardless of how many tiles they span.
+	var ninja_scale = float(TILE) / 16.0
+	var ninja_deco = [
+		{"tex": "tree", "tx": 0, "ty": 0},
+		{"tex": "tree", "tx": 9, "ty": 0},
+		{"tex": "house", "tx": 3, "ty": 0},
+		{"tex": "fence", "tx": 0, "ty": 6},
+	]
+	for d in ninja_deco:
+		var s := _make_pixel_sprite(textures[d["tex"]])
+		s.scale = Vector2(ninja_scale, ninja_scale)
+		s.position = FARM_ORIGIN + Vector2(d["tx"] * TILE, d["ty"] * TILE)
+		add_child(s)
+
+	var animal_deco = [
 		{"tex": "pig", "tx": 4, "ty": 0, "frame_w": 16, "frame_h": 16},
 		{"tex": "sheep", "tx": 6, "ty": 0, "frame_w": 16, "frame_h": 16},
 		{"tex": "chicken", "tx": 1, "ty": 6, "frame_w": 16, "frame_h": 16},
 		{"tex": "cow", "tx": 8, "ty": 6, "frame_w": 19, "frame_h": 16},
 	]
-	for d in deco:
+	for d in animal_deco:
 		var s := _make_pixel_sprite(textures[d["tex"]])
-		if d.has("frame_w"):
-			s.region_enabled = true
-			s.region_rect = Rect2(0, 0, d["frame_w"], d["frame_h"])
-			s.scale = Vector2(TILE * 0.7 / d["frame_w"], TILE * 0.6 / d["frame_h"])
-			s.position = FARM_ORIGIN + Vector2(d["tx"] * TILE, d["ty"] * TILE) + Vector2(TILE, TILE) * 0.2
-		else:
-			var scale_f = float(TILE) / s.texture.get_width()
-			s.scale = Vector2(scale_f, scale_f)
-			s.position = FARM_ORIGIN + Vector2(d["tx"] * TILE, d["ty"] * TILE - s.texture.get_height() * scale_f * 0.5)
+		s.region_enabled = true
+		s.region_rect = Rect2(0, 0, d["frame_w"], d["frame_h"])
+		s.scale = Vector2(TILE * 0.7 / d["frame_w"], TILE * 0.6 / d["frame_h"])
+		s.position = FARM_ORIGIN + Vector2(d["tx"] * TILE, d["ty"] * TILE) + Vector2(TILE, TILE) * 0.2
 		add_child(s)
 
 func _build_player():
