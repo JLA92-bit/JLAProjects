@@ -34,13 +34,21 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Generate Android debug keystore
+      # Using a fixed, committed keystore (instead of generating a fresh one
+      # each run) means every build shares the same signing key, so Android
+      # can install a new APK over an existing install in place - required
+      # for the in-app update feature, which would otherwise force an
+      # uninstall every time (mismatched signatures) despite matching
+      # package names.
+      - name: Install stable debug keystore
         run: |
           mkdir -p "$HOME/.android"
-          keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" \
-            -storepass android -alias androiddebugkey -keypass android \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          cp godot/ci/debug.keystore "$HOME/.android/debug.keystore"
+
+      - name: Stamp build version info
+        run: |
+          printf '{"commit": "%s", "built_at": "%s"}' "${{ github.sha }}" "$(date -u +%FT%TZ)" > godot/build_version.json
+          cat godot/build_version.json
 
       # godot-export's own default editor_settings-4.tres only sets
       # export/android/android_sdk_path - it never sets java_sdk_path, which
@@ -96,6 +104,9 @@ jobs:
         with:
           tag_name: android-latest
           name: Farm World (Android, latest build)
-          body: Automatically built debug APK from the latest push to `godot/`. Not signed for release — install directly on a device with "install from unknown sources" enabled, or use it for testing.
+          body: |
+            Automatically built debug APK from the latest push to `godot/`. Not signed for release — install directly on a device with "install from unknown sources" enabled, or use it for testing.
+
+            build_commit: ${{ github.sha }}
           prerelease: true
           files: ${{ steps.find_apk.outputs.apk_path }}
