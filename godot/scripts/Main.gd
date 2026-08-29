@@ -331,6 +331,7 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 	farm_viewport = SubViewport.new()
 	farm_viewport.size = Vector2i(COLS * TILE, ROWS * TILE)
 	farm_viewport.transparent_bg = false
+	farm_viewport.own_world_3d = true
 	container.add_child(farm_viewport)
 
 	world_root = Node3D.new()
@@ -342,20 +343,20 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 	environment.background_color = Color(0.55, 0.75, 0.95)
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color(0.78, 0.8, 0.85)
-	environment.ambient_light_energy = 0.7
+	environment.ambient_light_energy = 1.2
 	env_node.environment = environment
 	world_root.add_child(env_node)
 
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-55, -35, 0)
-	light.light_energy = 1.1
+	light.light_energy = 1.0
 	world_root.add_child(light)
 
 	var cam := Camera3D.new()
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-	cam.size = ROWS * WORLD_TILE + 2.0
+	cam.size = COLS * WORLD_TILE * 1.7
 	var center := Vector3((COLS - 1) * WORLD_TILE * 0.5, 0, (ROWS - 1) * WORLD_TILE * 0.5)
-	cam.position = center + Vector3(9, 11, 9)
+	cam.position = center + Vector3(8, 7, 8)
 	world_root.add_child(cam)
 	cam.look_at(center, Vector3.UP)
 	cam.current = true
