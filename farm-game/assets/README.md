@@ -1,40 +1,46 @@
 # Assets
 
-This build ships **no external image assets**. All tiles, the fence, water,
-crops, and the player character are drawn procedurally with Canvas 2D
-primitives (`game.js`, see `drawTile` / `drawCrop` / `drawPlayer`).
+All sprites in this folder are cropped from the **Sprout Lands - Sprites -
+Basic pack** by Cup Nooble. See `../CREDITS.md` for the full file list,
+license terms, and the non-commercial restriction that comes with them.
 
-## Why no Kenney / LPC assets
+## Why only cropped pieces, not the original pack files
 
-The original plan (see the task this game was built from) was to use:
+The Sprout Lands (and Cute Fantasy) licenses explicitly allow using the
+assets *within* a project, but forbid redistributing the pack itself, even
+modified. Committing the original `.zip`/`.rar` downloads to this public
+repo would count as redistributing the pack — so only the individual sprite
+crops actually used by the game are committed here, which the license does
+permit.
 
-- Kenney's ["Tiny Farm"](https://kenney.nl/assets/tiny-farm) pack (CC0) for
-  tiles/crops/fences, and
-- The [Universal LPC Spritesheet Character
-  Generator](https://liberatedpixelcup.github.io/Universal-LPC-Spritesheet-Character-Generator/)
-  (CC-BY-SA / GPL) for a 4-direction farmer walk cycle.
+## Where the source packs are
 
-The sandboxed environment this was built in has no outbound network access
-to either site (requests are blocked at the network policy level), so the
-files could not be downloaded and committed. Per the task's own fallback
-instructions, the game uses simple placeholder graphics instead so movement,
-tilling, planting, growth, and harvesting all work end to end.
+Four free packs were supplied for this project during development:
 
-## Swapping in the real assets later
+1. Farm RPG FREE 16x16 - Tiny Asset Pack (itch.io)
+2. Cute Fantasy Free
+3. **Sprout Lands - Sprites - Basic pack** ← currently used
+4. Pixel Crawler - Free Pack
 
-Everything is drawn in one place, so this is a contained follow-up:
+They were extracted and inspected in the session's scratch directory, which
+does **not** persist between sessions — so if a future session needs to
+pull more sprites from any of these (e.g. switching to Cute Fantasy's water
+tile, or Farm RPG's taller character), the pack will need to be re-supplied
+by the user rather than assumed to still be on disk.
 
-1. Download the Kenney Tiny Farm pack and drop the PNGs in this folder
-   (e.g. `assets/tiles.png`, `assets/crops.png`, `assets/fence.png`).
-2. Generate a farmer character from the LPC generator and export the
-   walk-cycle spritesheet to `assets/player.png`. If you do this, add a
-   `CREDITS.md` entry crediting the specific LPC contributors used, per the
-   CC-BY-SA/GPL license (a starter `CREDITS.md` already exists at the repo
-   root for this).
-3. In `game.js`, replace the `ctx.fillRect(...)` calls in `drawTile`,
-   `drawCrop`, and `drawPlayer` with `ctx.drawImage(...)` calls against the
-   loaded spritesheets (source rects for tile/frame lookup, destination rect
-   at `sx, sy, TILE, TILE`).
+## Regenerating or changing the crops
 
-No other files need to change — the tile grid, movement, and farming logic
-are independent of how tiles are rendered.
+The crops here were sliced with a small Python/Pillow script (grid-overlay
+the sheet, read off pixel coordinates, crop). If you want different frames
+or a different source pack:
+
+1. Get the sheet's exact pixel dimensions and tile grid (Sprout Lands tiles
+   are 16x16; the character sheet uses 48x48 cells).
+2. Crop the specific `(x0, y0, x1, y1)` box for the piece you want.
+3. Save it into this folder with a clear name, and update the `IMG_NAMES`
+   list and the relevant `draw*` function in `../game.js` to reference it.
+
+Current tile scale: source art is 16x16px, drawn at `TILE = 32`px (2x, see
+the `SRC`/`TILE` constants at the top of `game.js`). The player sheet uses
+48x48px cells, drawn at `48 * (TILE/SRC) = 96`px so it scales consistently
+with the tiles.

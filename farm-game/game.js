@@ -1,10 +1,10 @@
 // Tiny Farm — a minimal Stardew-style top-down farming game.
-// Pure canvas + vanilla JS, no images: all sprites are drawn procedurally
-// (see README/CREDITS for why — no network access to fetch real asset packs
-// in the environment this was built in).
+// Pure canvas + vanilla JS. Sprites are real assets sliced from the
+// Sprout Lands - Sprites - Basic pack (by Cup Nooble) — see CREDITS.md.
 
 (() => {
-  const TILE = 32;
+  const TILE = 32; // on-screen tile size (source art is 16x16, drawn at 2x)
+  const SRC = 16; // source tile size in the sprite sheets
   const MAP_W = 18;
   const MAP_H = 18;
   const VIEW_W = 640;
@@ -22,12 +22,41 @@
   const GROW_STAGE_MS = 4000; // time per crop growth stage
   const MAX_STAGE = 3; // 0 seed, 1 sprout, 2 growing, 3 ripe
 
+  const BUILDING = { x: 13, y: 2, w: 3, h: 3 }; // footprint, in tiles
+
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
 
   const toolNameEl = document.getElementById("tool-name");
   const cropCountEl = document.getElementById("crop-count");
+
+  // ---------- Assets ----------
+  const IMG_NAMES = [
+    "grass1",
+    "grass2",
+    "dirt_tilled",
+    "path",
+    "water1",
+    "water2",
+    "fence_post",
+    "fence_rail",
+    "house",
+    "crop_stage0",
+    "crop_stage1",
+    "crop_stage2",
+    "crop_stage3",
+    "player",
+    "tool_hoe",
+  ];
+  const images = {};
+  let imagesLoaded = 0;
+  IMG_NAMES.forEach((name) => {
+    const img = new Image();
+    img.src = `assets/${name}.png`;
+    img.onload = () => imagesLoaded++;
+    images[name] = img;
+  });
 
   // ---------- Map setup ----------
   // tile grid: { type, tilled, planted, stage, plantedAt }
@@ -52,8 +81,8 @@
     }
 
     // small barn/shed block, top-right
-    for (let y = 2; y <= 4; y++) {
-      for (let x = 13; x <= 15; x++) {
+    for (let y = BUILDING.y; y < BUILDING.y + BUILDING.h; y++) {
+      for (let x = BUILDING.x; x < BUILDING.x + BUILDING.w; x++) {
         grid[y][x].type = TILE_TYPES.BUILDING;
       }
     }
@@ -96,6 +125,10 @@
     animTimer: 0,
     animFrame: 0,
   };
+
+  // row order in player.png (Sprout Lands character sheet, 48px cells)
+  const DIR_ROW = { down: 0, up: 1, right: 2, left: 3 };
+  const PLAYER_CELL = 48;
 
   function facingTile() {
     let dx = 0,
@@ -206,9 +239,9 @@
 
     if (player.moving) {
       player.animTimer += dt;
-      if (player.animTimer > 0.15) {
+      if (player.animTimer > 0.12) {
         player.animTimer = 0;
-        player.animFrame = (player.animFrame + 1) % 2;
+        player.animFrame = (player.animFrame + 1) % 4;
       }
     } else {
       player.animFrame = 0;
@@ -243,61 +276,45 @@
   }
 
   // ---------- Rendering ----------
-  const COLORS = {
-    grass: "#3f7a3a",
-    grassAlt: "#457f40",
-    dirt: "#6b4a30",
-    dirtWet: "#5a3d27",
-    water: "#3a7bbf",
-    fence: "#8a6446",
-    path: "#a68b5c",
-    building: "#7a5c46",
-    buildingRoof: "#4a3324",
-  };
+  const waterFrames = ["water1", "water2"];
 
   function drawTile(tile, sx, sy, tx, ty) {
     switch (tile.type) {
-      case TILE_TYPES.GRASS:
-        ctx.fillStyle = (tx + ty) % 2 === 0 ? COLORS.grass : COLORS.grassAlt;
-        ctx.fillRect(sx, sy, TILE, TILE);
+      case TILE_TYPES.GRASS: {
+        const img = images[(tx + ty) % 2 === 0 ? "grass1" : "grass2"];
+        ctx.drawImage(img, sx, sy, TILE, TILE);
         break;
-      case TILE_TYPES.DIRT:
-        ctx.fillStyle = tile.planted ? COLORS.dirtWet : COLORS.dirt;
-        ctx.fillRect(sx, sy, TILE, TILE);
-        ctx.strokeStyle = "rgba(0,0,0,0.15)";
-        for (let i = 4; i < TILE; i += 8) {
-          ctx.beginPath();
-          ctx.moveTo(sx + 2, sy + i);
-          ctx.lineTo(sx + TILE - 2, sy + i);
-          ctx.stroke();
-        }
+      }
+      case TILE_TYPES.DIRT: {
+        const base = images[(tx + ty) % 2 === 0 ? "grass1" : "grass2"];
+        ctx.drawImage(base, sx, sy, TILE, TILE);
+        ctx.drawImage(images.dirt_tilled, sx, sy, TILE, TILE);
         break;
-      case TILE_TYPES.WATER:
-        ctx.fillStyle = COLORS.water;
-        ctx.fillRect(sx, sy, TILE, TILE);
-        ctx.strokeStyle = "rgba(255,255,255,0.25)";
-        ctx.beginPath();
-        ctx.moveTo(sx + 4, sy + TILE / 2);
-        ctx.lineTo(sx + TILE - 4, sy + TILE / 2);
-        ctx.stroke();
+      }
+      case TILE_TYPES.WATER: {
+        const frame = Math.floor(performance.now() / 500) % waterFrames.length;
+        ctx.drawImage(images[waterFrames[frame]], sx, sy, TILE, TILE);
         break;
-      case TILE_TYPES.PATH:
-        ctx.fillStyle = COLORS.path;
-        ctx.fillRect(sx, sy, TILE, TILE);
+      }
+      case TILE_TYPES.PATH: {
+        const grassBase = images[(tx + ty) % 2 === 0 ? "grass1" : "grass2"];
+        ctx.drawImage(grassBase, sx, sy, TILE, TILE);
+        ctx.drawImage(images.path, sx, sy, TILE, TILE);
         break;
-      case TILE_TYPES.FENCE:
-        ctx.fillStyle = COLORS.grass;
-        ctx.fillRect(sx, sy, TILE, TILE);
-        ctx.fillStyle = COLORS.fence;
-        ctx.fillRect(sx + TILE / 2 - 3, sy, 6, TILE);
-        ctx.fillRect(sx, sy + 6, TILE, 5);
+      }
+      case TILE_TYPES.FENCE: {
+        const grassBase = images[(tx + ty) % 2 === 0 ? "grass1" : "grass2"];
+        ctx.drawImage(grassBase, sx, sy, TILE, TILE);
+        const horizontalEdge = ty === 0 || ty === MAP_H - 1;
+        const fenceImg = images[horizontalEdge ? "fence_rail" : "fence_post"];
+        ctx.drawImage(fenceImg, sx, sy, TILE, TILE);
         break;
-      case TILE_TYPES.BUILDING:
-        ctx.fillStyle = COLORS.building;
-        ctx.fillRect(sx, sy, TILE, TILE);
-        ctx.fillStyle = COLORS.buildingRoof;
-        ctx.fillRect(sx, sy, TILE, TILE / 3);
+      }
+      case TILE_TYPES.BUILDING: {
+        const grassBase = images[(tx + ty) % 2 === 0 ? "grass1" : "grass2"];
+        ctx.drawImage(grassBase, sx, sy, TILE, TILE);
         break;
+      }
     }
 
     if (tile.planted) {
@@ -306,88 +323,60 @@
   }
 
   function drawCrop(sx, sy, stage) {
-    const cx = sx + TILE / 2;
-    const cy = sy + TILE / 2;
-    if (stage === 0) {
-      ctx.fillStyle = "#8fd45c";
-      ctx.fillRect(cx - 2, cy + 4, 4, 6);
-    } else if (stage === 1) {
-      ctx.fillStyle = "#6bbf3a";
-      ctx.fillRect(cx - 3, cy - 2, 6, 12);
-      ctx.fillStyle = "#8fd45c";
-      ctx.fillRect(cx - 6, cy - 4, 5, 5);
-      ctx.fillRect(cx + 1, cy - 4, 5, 5);
-    } else if (stage === 2) {
-      ctx.fillStyle = "#4f9e2c";
-      ctx.fillRect(cx - 4, cy - 8, 8, 18);
-      ctx.fillStyle = "#8fd45c";
-      ctx.fillRect(cx - 9, cy - 6, 6, 6);
-      ctx.fillRect(cx + 3, cy - 6, 6, 6);
-    } else {
-      // ripe
-      ctx.fillStyle = "#4f9e2c";
-      ctx.fillRect(cx - 4, cy - 8, 8, 18);
-      ctx.fillStyle = "#8fd45c";
-      ctx.fillRect(cx - 9, cy - 6, 6, 6);
-      ctx.fillRect(cx + 3, cy - 6, 6, 6);
-      ctx.fillStyle = "#e2432a";
-      ctx.beginPath();
-      ctx.arc(cx - 3, cy - 3, 4, 0, Math.PI * 2);
-      ctx.arc(cx + 3, cy - 6, 4, 0, Math.PI * 2);
-      ctx.arc(cx, cy + 2, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    const img = images[`crop_stage${stage}`];
+    ctx.drawImage(img, sx, sy, TILE, TILE);
+  }
+
+  function drawBuilding(camX, camY) {
+    const img = images.house;
+    if (!img.complete || img.naturalWidth === 0) return;
+    // house art is 32x64 (2x4 at 16px source); stretch to the footprint width
+    // and keep aspect ratio, anchored so its base sits on the bottom tile row
+    const destW = BUILDING.w * TILE;
+    const destH = destW * (img.height / img.width);
+    const destX = BUILDING.x * TILE - camX;
+    const destY = (BUILDING.y + BUILDING.h) * TILE - camY - destH;
+    ctx.drawImage(img, destX, destY, destW, destH);
   }
 
   function drawPlayer(sx, sy) {
-    const bob = player.moving && player.animFrame === 1 ? 2 : 0;
-    const x = sx - player.w / 2;
-    const y = sy - player.h / 2 - bob;
+    const img = images.player;
+    if (!img.complete || img.naturalWidth === 0) return;
+    const row = DIR_ROW[player.dir];
+    const col = player.animFrame;
+    // source cells are 48x48; keep the same 2x (TILE/SRC) scale used for tiles
+    const drawSize = PLAYER_CELL * (TILE / SRC);
+
+    ctx.drawImage(
+      img,
+      col * PLAYER_CELL,
+      row * PLAYER_CELL,
+      PLAYER_CELL,
+      PLAYER_CELL,
+      sx - drawSize / 2,
+      sy - drawSize / 2,
+      drawSize,
+      drawSize
+    );
 
     // shadow
-    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
     ctx.beginPath();
     ctx.ellipse(sx, sy + player.h / 2 - 2, player.w / 2, 5, 0, 0, Math.PI * 2);
     ctx.fill();
-
-    // legs
-    ctx.fillStyle = "#5a3d27";
-    ctx.fillRect(x + 3, y + player.h - 8, 5, 8);
-    ctx.fillRect(x + player.w - 8, y + player.h - 8, 5, 8);
-
-    // body
-    ctx.fillStyle = "#3f6fae";
-    ctx.fillRect(x + 2, y + 8, player.w - 4, player.h - 14);
-
-    // head
-    ctx.fillStyle = "#e8b48a";
-    ctx.fillRect(x + 4, y, player.w - 8, 10);
-
-    // hair
-    ctx.fillStyle = "#7a4a26";
-    ctx.fillRect(x + 4, y - 2, player.w - 8, 4);
-
-    // direction indicator (simple face/eyes cue)
-    ctx.fillStyle = "#2b2b2b";
-    if (player.dir === "down") {
-      ctx.fillRect(x + 6, y + 5, 2, 2);
-      ctx.fillRect(x + player.w - 8, y + 5, 2, 2);
-    } else if (player.dir === "up") {
-      // no face visible
-    } else if (player.dir === "left") {
-      ctx.fillRect(x + 5, y + 5, 2, 2);
-    } else if (player.dir === "right") {
-      ctx.fillRect(x + player.w - 7, y + 5, 2, 2);
-    }
-
-    // tool hint (small swing when used feels like extra scope; keep static)
-    ctx.fillStyle = "#c9c9c9";
-    if (player.dir === "right") ctx.fillRect(x + player.w - 2, y + 12, 6, 3);
-    else if (player.dir === "left") ctx.fillRect(x - 4, y + 12, 6, 3);
   }
 
   function draw() {
     ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+
+    if (imagesLoaded < IMG_NAMES.length) {
+      ctx.fillStyle = "#2e2a1f";
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      ctx.fillStyle = "#f4ead1";
+      ctx.font = "16px sans-serif";
+      ctx.fillText("Loading...", VIEW_W / 2 - 30, VIEW_H / 2);
+      return;
+    }
 
     // camera centered on player, clamped to map bounds
     let camX = player.x - VIEW_W / 2;
@@ -413,6 +402,8 @@
         drawTile(tile, sx, sy, tx, ty);
       }
     }
+
+    drawBuilding(camX, camY);
 
     // highlight the tile the player is facing
     const { tx, ty } = facingTile();

@@ -49,12 +49,13 @@ cycle, shop/economy, multiple crop types, save/load, full inventory UI.
 
 ## Assets
 
-This build uses procedurally-drawn placeholder graphics rather than a real
-sprite pack — the environment this was built in has no network access to
-fetch the intended Kenney "Tiny Farm" tileset or an LPC-generated character
-spritesheet. See [`assets/README.md`](assets/README.md) for details and how
-to swap in real assets later, and [`CREDITS.md`](CREDITS.md) for licensing
-notes on the intended asset sources.
+Sprites are real pixel art cropped from the **Sprout Lands - Sprites -
+Basic pack** by Cup Nooble (ground tiles, water, fence, house, crop growth
+stages, and the player's 4-direction walk cycle). See
+[`assets/README.md`](assets/README.md) for the extraction details and
+[`CREDITS.md`](CREDITS.md) for full attribution and licensing — **note the
+pack is non-commercial only**, which makes this game non-commercial too
+unless the art is swapped out later.
 
 ## Deploying to GitHub Pages
 
