@@ -9,11 +9,23 @@ const PLAYER_SPEED := 220.0
 const FARM_ORIGIN := Vector2(40, 110)
 
 const CROPS := {
-	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10},
-	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22},
-	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45},
+	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"]},
+	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"]},
+	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45, "seasons": ["Summer", "Fall"]},
 }
 const CROP_KEYS := ["wheat", "corn", "tomato"]
+
+# ---------- Seasons & weather ----------
+const SEASONS := ["Spring", "Summer", "Fall", "Winter"]
+const SEASON_LENGTH := 7 # days per season
+const WEATHER := {
+	"sunny": {"name": "Sunny", "emoji": "☀"},
+	"rainy": {"name": "Rainy", "emoji": "🌧"},
+	"storm": {"name": "Storm", "emoji": "⛈"},
+	"drought": {"name": "Drought", "emoji": "🔥"},
+}
+const WEATHER_WEIGHTS := {"sunny": 55, "rainy": 25, "storm": 10, "drought": 10}
+const REGION_DECAY := 6.0 # health lost per day for an unmaintained owned region
 
 const TOOLS := {
 	"hoe": {"name": "Hoe", "emoji": "🔨"},
@@ -94,6 +106,10 @@ var selected_crop := "wheat"
 var selected_tool := "hoe"
 var current_act := 0 # index into ACTS
 var victory_shown := false
+var season_idx := 0
+var season_day := 0
+var current_weather := "sunny"
+var forecast_weather := "sunny"
 var tiles := []
 var regions := []
 var log_text := "Welcome! Hoe tills grass, Seed Bag plants, Watering Can grows crops. Harvest by hand when ready."
@@ -111,6 +127,7 @@ var hud_cash: Label
 var hud_day: Label
 var hud_dom: Label
 var hud_act: Label
+var hud_season: Label
 var tool_label: Label
 var log_label: Label
 var tool_row: HBoxContainer
@@ -178,8 +195,13 @@ func _init_fresh_state():
 				"terrain": TERRAINS[i % TERRAINS.size()],
 				"health": 100.0,
 				"owned": false,
+				"maintained_today": false,
 			})
 			i += 1
+	season_idx = 0
+	season_day = 0
+	current_weather = "sunny"
+	forecast_weather = _roll_weather()
 
 # ---------- Farm grid rendering ----------
 func _make_pixel_sprite(tex: Texture2D) -> Sprite2D:
@@ -351,6 +373,9 @@ func _do_action() -> void:
 			if tile["type"] != "soil":
 				_log("Seeds need tilled soil - till it with the hoe first.")
 				return
+			if not CROPS[selected_crop]["seasons"].has(_season_name()):
+				_log("%s can't be planted in %s." % [CROPS[selected_crop]["name"], _season_name()])
+				return
 			if seeds[selected_crop] <= 0:
 				_log("No %s seeds left! Buy more." % CROPS[selected_crop]["name"])
 				return
@@ -425,15 +450,32 @@ func _redraw_all_tiles() -> void:
 # ---------- Day tick ----------
 func _day_tick() -> void:
 	day += 1
+	_advance_calendar()
 	var infected_tiles := []
 	var wilted := 0
+	var storm_damaged := 0
+	var auto_watered := current_weather == "rainy" or current_weather == "storm"
 
 	for r in range(ROWS):
 		for c in range(COLS):
 			var t: Dictionary = tiles[r][c]
 			if t["type"] != "planted":
 				continue
-			if t.get("watered", false):
+			if auto_watered:
+				t["watered"] = true
+
+			if current_weather == "drought":
+				# Scarce water: even a watered crop keeps drying out, forcing an
+				# early-harvest-or-lose-it decision instead of a free pass.
+				t["dry_days"] = t.get("dry_days", 0) + 1
+				if t["dry_days"] >= WILT_DAYS:
+					t["type"] = "grass"
+					wilted += 1
+					t["watered"] = false
+					continue
+				if t.get("watered", false) and t.get("stage", 0) < 4 and randf() < 0.5:
+					t["stage"] = t.get("stage", 0) + 1
+			elif t.get("watered", false):
 				t["dry_days"] = 0
 				if t.get("stage", 0) < 4:
 					t["stage"] = t.get("stage", 0) + 1
@@ -442,10 +484,15 @@ func _day_tick() -> void:
 				if t["dry_days"] >= WILT_DAYS:
 					t["type"] = "grass"
 					wilted += 1
+					t["watered"] = false
 					continue
 				if t.get("stage", 0) < 4 and randf() < 0.5:
 					t["stage"] = t.get("stage", 0) + 1
 			t["watered"] = false
+
+			if current_weather == "storm" and t.get("stage", 0) < 4 and randf() < 0.2:
+				t["stage"] = max(0, t.get("stage", 0) - 1)
+				storm_damaged += 1
 
 			if t.get("infected", false):
 				t["infected_days"] = t.get("infected_days", 0) + 1
@@ -469,7 +516,10 @@ func _day_tick() -> void:
 				nt["infected_days"] = 0
 
 	if wilted > 0:
-		_log("%d crop(s) wilted from neglect - remember to water with the Watering Can." % wilted)
+		var reason = "the drought" if current_weather == "drought" else "neglect"
+		_log("%d crop(s) wilted from %s - remember to water with the Watering Can." % [wilted, reason])
+	elif storm_damaged > 0:
+		_log("The storm damaged %d crop(s), setting their growth back." % storm_damaged)
 
 	for key in CROP_KEYS:
 		var base = CROPS[key]["base_price"]
@@ -492,9 +542,19 @@ func _day_tick() -> void:
 		_log("Outbreak spread back and hurt your region: %s!" % target["name"])
 
 	for reg in regions:
-		if reg["health"] < 100.0:
-			reg["health"] = min(100.0, reg["health"] + 2.0)
-		if reg["owned"]:
+		if not reg["owned"]:
+			if reg["health"] < 100.0:
+				reg["health"] = min(100.0, reg["health"] + 2.0)
+			continue
+		if reg.get("maintained_today", false):
+			reg["health"] = min(100.0, reg["health"] + 5.0)
+		else:
+			reg["health"] = max(0.0, reg["health"] - REGION_DECAY)
+		reg["maintained_today"] = false
+		if reg["health"] <= 0.0:
+			reg["owned"] = false
+			_log("%s fell into ruin from neglect and was lost!" % reg["name"])
+		else:
 			cash += int(round(reg["health"] * 0.5))
 
 	_redraw_all_tiles()
@@ -504,6 +564,46 @@ func _day_tick() -> void:
 
 func _region_price(reg: Dictionary) -> int:
 	return int(round((reg["health"] / 100.0) * 300 + 100))
+
+func _maintenance_cost(reg: Dictionary) -> int:
+	return max(5, int(round(_region_price(reg) * 0.15)))
+
+func _maintain_region(reg: Dictionary) -> void:
+	if reg.get("maintained_today", false):
+		return
+	var cost := _maintenance_cost(reg)
+	if cash < cost:
+		_log("Need $%d to maintain %s." % [cost, reg["name"]])
+		return
+	cash -= cost
+	reg["maintained_today"] = true
+	_log("Maintained %s for $%d." % [reg["name"], cost])
+	_refresh_all()
+
+# ---------- Seasons & weather ----------
+func _season_name() -> String:
+	return SEASONS[season_idx]
+
+func _roll_weather() -> String:
+	var total := 0
+	for key in WEATHER_WEIGHTS:
+		total += WEATHER_WEIGHTS[key]
+	var roll := randi() % total
+	var acc := 0
+	for key in WEATHER_WEIGHTS:
+		acc += WEATHER_WEIGHTS[key]
+		if roll < acc:
+			return key
+	return "sunny"
+
+func _advance_calendar() -> void:
+	season_day += 1
+	if season_day >= SEASON_LENGTH:
+		season_day = 0
+		season_idx = (season_idx + 1) % SEASONS.size()
+		_log("The season has changed to %s." % _season_name())
+	current_weather = forecast_weather
+	forecast_weather = _roll_weather()
 
 # ---------- Acts ----------
 func _act() -> Dictionary:
@@ -589,6 +689,7 @@ func _build_ui() -> void:
 	hud_day = _add_label(layer, "Day 1", Vector2(160, 12), Vector2(110, 30), 22)
 	hud_dom = _add_label(layer, "0% owned", Vector2(280, 12), Vector2(160, 30), 18, Color(0.6, 0.85, 1))
 	hud_act = _add_label(layer, "Act 1", Vector2(450, 12), Vector2(260, 30), 18, Color(0.85, 0.7, 1))
+	hud_season = _add_label(layer, "", Vector2(16, 44), Vector2(680, 26), 16, Color(0.75, 0.85, 1))
 
 	tool_label = _add_label(layer, "Tool: Hoe", Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 6), Vector2(640, 26), 20, Color(0.7, 0.9, 0.5))
 	log_label = _add_label(layer, log_text, Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 34), Vector2(640, 44), 16, Color(1, 0.8, 0.4))
@@ -709,6 +810,11 @@ func _refresh_all() -> void:
 	hud_day.text = "Day %d" % day
 	hud_dom.text = "%d%% owned" % int(round(100.0 * owned_count / regions.size()))
 	hud_act.text = ACTS[current_act]["title"]
+	hud_season.text = "%s (day %d/%d) - %s %s  |  Tomorrow: %s %s" % [
+		_season_name(), season_day + 1, SEASON_LENGTH,
+		WEATHER[current_weather]["emoji"], WEATHER[current_weather]["name"],
+		WEATHER[forecast_weather]["emoji"], WEATHER[forecast_weather]["name"],
+	]
 	map_button.visible = _act()["continents"].size() > 0
 	_refresh_tool_ui()
 	_refresh_inventory_panel()
@@ -843,8 +949,23 @@ func _refresh_map_panel() -> void:
 				vb.add_child(buy_btn)
 			else:
 				var income_label = Label.new()
-				income_label.text = "Generating income daily."
+				income_label.text = "Income: $%d/day (from health)." % int(round(reg["health"] * 0.5))
 				vb.add_child(income_label)
+				var maintained = reg.get("maintained_today", false)
+				var maint_cost = _maintenance_cost(reg)
+				var maint_btn := Button.new()
+				maint_btn.text = "Maintained today" if maintained else "Maintain ($%d)" % maint_cost
+				maint_btn.disabled = maintained or cash < maint_cost
+				maint_btn.pressed.connect(func():
+					_maintain_region(reg)
+					_refresh_map_panel()
+				)
+				vb.add_child(maint_btn)
+				var warn_label = Label.new()
+				warn_label.text = "Unmaintained regions lose %d health/day and can be lost!" % int(REGION_DECAY)
+				warn_label.add_theme_font_size_override("font_size", 14)
+				warn_label.add_theme_color_override("font_color", Color(0.9, 0.6, 0.4))
+				vb.add_child(warn_label)
 			map_scroll_content.add_child(card)
 
 func _add_label_child(parent: Node, text: String, font_size: int, color: Color) -> void:
@@ -860,6 +981,8 @@ func _save_game() -> void:
 		"cash": cash, "day": day, "seeds": seeds, "produce": produce, "prices": prices,
 		"selected_crop": selected_crop, "selected_tool": selected_tool,
 		"current_act": current_act, "victory_shown": victory_shown,
+		"season_idx": season_idx, "season_day": season_day,
+		"current_weather": current_weather, "forecast_weather": forecast_weather,
 		"tiles": tiles, "regions": regions,
 		"player_x": player_pos.x, "player_y": player_pos.y,
 	}
@@ -888,6 +1011,14 @@ func _load_game() -> void:
 	selected_tool = parsed.get("selected_tool", selected_tool)
 	current_act = clampi(int(parsed.get("current_act", current_act)), 0, ACTS.size() - 1)
 	victory_shown = parsed.get("victory_shown", victory_shown)
+	season_idx = clampi(int(parsed.get("season_idx", season_idx)), 0, SEASONS.size() - 1)
+	season_day = clampi(int(parsed.get("season_day", season_day)), 0, SEASON_LENGTH - 1)
+	current_weather = parsed.get("current_weather", current_weather)
+	if not WEATHER.has(current_weather):
+		current_weather = "sunny"
+	forecast_weather = parsed.get("forecast_weather", forecast_weather)
+	if not WEATHER.has(forecast_weather):
+		forecast_weather = "sunny"
 	if parsed.has("tiles"):
 		tiles = parsed["tiles"]
 	if parsed.has("regions"):
