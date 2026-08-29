@@ -38,6 +38,15 @@ const TERRAIN_FLAVOR := {
 	"water": "naturally irrigated - never needs manual watering",
 }
 
+# ---------- Equipment upgrades (durable money sinks, Act 2+) ----------
+const BASE_STORAGE_CAP := 15
+const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2"]
+const UPGRADES := {
+	"watering_can_2": {"name": "Reinforced Watering Can", "cost": 200, "desc": "Waters a 3x3 area around you instead of a single tile."},
+	"storage_silo_1": {"name": "Storage Silo", "cost": 150, "desc": "+20 storage capacity per crop."},
+	"storage_silo_2": {"name": "Storage Silo II", "cost": 400, "desc": "+20 more storage capacity per crop (requires Storage Silo)."},
+}
+
 const TOOLS := {
 	"hoe": {"name": "Hoe", "emoji": "🔨"},
 	"water": {"name": "Watering Can", "emoji": "💧"},
@@ -117,6 +126,7 @@ var selected_crop := "wheat"
 var selected_tool := "hoe"
 var current_act := 0 # index into ACTS
 var victory_shown := false
+var owned_upgrades := {} # upgrade key -> bool
 var season_idx := 0
 var season_day := 0
 var current_weather := "sunny"
@@ -158,6 +168,7 @@ var move_right_held := false
 var inventory_panel: Panel
 var seed_rows_container: VBoxContainer
 var market_rows_container: VBoxContainer
+var upgrade_rows_container: VBoxContainer
 var blight_label: Label
 
 var map_panel: Panel
@@ -196,6 +207,7 @@ func _init_fresh_state():
 	plots = {"home": _make_empty_grid()}
 	active_plot_id = "home"
 	tiles = plots["home"]
+	owned_upgrades = {}
 	regions.clear()
 	for continent in CONTINENTS:
 		var i := 0
@@ -397,6 +409,10 @@ func _do_action() -> void:
 		else:
 			var well_tended = tile.get("times_watered", 0) >= CROPS[tile["crop"]]["grow_days"]
 			var amount = 2 if well_tended else 1
+			var cap = _storage_cap()
+			if produce[tile["crop"]] + amount > cap:
+				_log("Storage is full for %s (%d/%d) - sell some or upgrade your silo." % [CROPS[tile["crop"]]["name"], produce[tile["crop"]], cap])
+				return
 			produce[tile["crop"]] += amount
 			_log("Harvested %dx %s%s." % [amount, CROPS[tile["crop"]]["name"], " (well-tended bonus!)" if well_tended else ""])
 			tile["type"] = "soil"
@@ -432,15 +448,34 @@ func _do_action() -> void:
 			tile["dry_days"] = 0
 			_log("Planted %s." % CROPS[selected_crop]["name"])
 		"water":
-			if tile["type"] != "planted":
-				_log("Nothing planted here to water.")
-				return
-			if tile.get("watered", false):
-				_log("Already watered today. It's growing...")
-				return
-			tile["watered"] = true
-			tile["times_watered"] = tile.get("times_watered", 0) + 1
-			_log("Watered the crop.")
+			if not owned_upgrades.get("watering_can_2", false):
+				if tile["type"] != "planted":
+					_log("Nothing planted here to water.")
+					return
+				if tile.get("watered", false):
+					_log("Already watered today. It's growing...")
+					return
+				tile["watered"] = true
+				tile["times_watered"] = tile.get("times_watered", 0) + 1
+				_log("Watered the crop.")
+			else:
+				var watered_count := 0
+				for dy in range(-1, 2):
+					for dx in range(-1, 2):
+						var ny = f.y + dy
+						var nx = f.x + dx
+						if ny < 0 or ny >= ROWS or nx < 0 or nx >= COLS:
+							continue
+						var nt: Dictionary = tiles[ny][nx]
+						if nt["type"] == "planted" and not nt.get("watered", false):
+							nt["watered"] = true
+							nt["times_watered"] = nt.get("times_watered", 0) + 1
+							watered_count += 1
+							_update_tile_visual(ny, nx)
+				if watered_count > 0:
+					_log("Watered %d crop(s) with the reinforced can." % watered_count)
+				else:
+					_log("Nothing nearby needs watering.")
 		"cure":
 			if tile["type"] == "planted" and tile.get("infected", false):
 				if cash < CURE_COST:
@@ -629,6 +664,20 @@ func _day_tick() -> void:
 
 func _region_price(reg: Dictionary) -> int:
 	return int(round((reg["health"] / 100.0) * 300 + 100))
+
+# ---------- Equipment upgrades ----------
+func _storage_cap() -> int:
+	var cap := BASE_STORAGE_CAP
+	if owned_upgrades.get("storage_silo_1", false):
+		cap += 20
+	if owned_upgrades.get("storage_silo_2", false):
+		cap += 20
+	return cap
+
+func _upgrade_locked_reason(key: String) -> String:
+	if key == "storage_silo_2" and not owned_upgrades.get("storage_silo_1", false):
+		return "requires Storage Silo first"
+	return ""
 
 func _maintenance_cost(reg: Dictionary) -> int:
 	return max(5, int(round(_region_price(reg) * 0.15)))
@@ -830,8 +879,14 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 	_add_label(inventory_panel, "Outbreak Status", Vector2(20, 520), Vector2(400, 30), 24)
 	blight_label = _add_label(inventory_panel, "No active blight.", Vector2(20, 560), Vector2(640, 60), 18)
 
-	_add_button(inventory_panel, "Save Game", Vector2(20, 640), Vector2(300, 56), _on_save_button_pressed)
-	_add_button(inventory_panel, "Reset Game", Vector2(340, 640), Vector2(300, 56), func(): _reset_game())
+	_add_label(inventory_panel, "Upgrades", Vector2(20, 630), Vector2(400, 30), 24)
+	upgrade_rows_container = VBoxContainer.new()
+	upgrade_rows_container.position = Vector2(20, 670)
+	upgrade_rows_container.size = Vector2(640, 300)
+	inventory_panel.add_child(upgrade_rows_container)
+
+	_add_button(inventory_panel, "Save Game", Vector2(20, 1000), Vector2(300, 56), _on_save_button_pressed)
+	_add_button(inventory_panel, "Reset Game", Vector2(340, 1000), Vector2(300, 56), func(): _reset_game())
 
 func _build_map_panel(layer: CanvasLayer) -> void:
 	map_panel = Panel.new()
@@ -935,13 +990,14 @@ func _refresh_inventory_panel() -> void:
 
 	for child in market_rows_container.get_children():
 		child.queue_free()
+	var storage_cap = _storage_cap()
 	for key in CROP_KEYS:
 		if not _crop_unlocked(key):
 			continue
 		var crop = CROPS[key]
 		var row := HBoxContainer.new()
 		var label := Label.new()
-		label.text = "%s  seeds:%d  produce:%d  $%d" % [crop["name"], seeds[key], produce[key], prices[key]]
+		label.text = "%s  seeds:%d  produce:%d/%d  $%d" % [crop["name"], seeds[key], produce[key], storage_cap, prices[key]]
 		label.custom_minimum_size = Vector2(420, 0)
 		row.add_child(label)
 		var sell_btn := Button.new()
@@ -975,6 +1031,39 @@ func _refresh_inventory_panel() -> void:
 	else:
 		blight_label.text = "No active blight. Your farms are healthy."
 		blight_label.add_theme_color_override("font_color", Color(0.7, 0.8, 0.7))
+
+	for child in upgrade_rows_container.get_children():
+		child.queue_free()
+	if current_act < 1:
+		var locked_label := Label.new()
+		locked_label.text = "Upgrades unlock in Act 2."
+		locked_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		upgrade_rows_container.add_child(locked_label)
+	else:
+		for key in UPGRADE_KEYS:
+			var up = UPGRADES[key]
+			var owned = owned_upgrades.get(key, false)
+			var locked_reason = _upgrade_locked_reason(key)
+			var row := HBoxContainer.new()
+			var label := Label.new()
+			var suffix = "  [owned]" if owned else ("  (%s)" % locked_reason if locked_reason != "" else "")
+			label.text = "%s - %s%s" % [up["name"], up["desc"], suffix]
+			label.custom_minimum_size = Vector2(460, 0)
+			label.autowrap_mode = TextServer.AUTOWRAP_WORD
+			row.add_child(label)
+			if not owned:
+				var buy_btn := Button.new()
+				buy_btn.text = "Buy $%d" % up["cost"]
+				buy_btn.disabled = cash < up["cost"] or locked_reason != ""
+				buy_btn.pressed.connect(func():
+					if cash >= up["cost"] and _upgrade_locked_reason(key) == "":
+						cash -= up["cost"]
+						owned_upgrades[key] = true
+						_log("Purchased %s!" % up["name"])
+						_refresh_all()
+				)
+				row.add_child(buy_btn)
+			upgrade_rows_container.add_child(row)
 
 func _refresh_map_panel() -> void:
 	var owned_count = regions.filter(func(r): return r["owned"]).size()
@@ -1079,6 +1168,7 @@ func _save_game() -> void:
 		"season_idx": season_idx, "season_day": season_day,
 		"current_weather": current_weather, "forecast_weather": forecast_weather,
 		"plots": plots, "active_plot_id": active_plot_id, "regions": regions,
+		"owned_upgrades": owned_upgrades,
 		"player_x": player_pos.x, "player_y": player_pos.y,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -1114,6 +1204,7 @@ func _load_game() -> void:
 	forecast_weather = parsed.get("forecast_weather", forecast_weather)
 	if not WEATHER.has(forecast_weather):
 		forecast_weather = "sunny"
+	owned_upgrades = parsed.get("owned_upgrades", owned_upgrades)
 	if parsed.has("regions"):
 		regions = parsed["regions"]
 
