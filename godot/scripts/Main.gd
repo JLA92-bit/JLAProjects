@@ -8,6 +8,18 @@ const DAY_LENGTH := 25.0
 const PLAYER_SPEED := 220.0
 const FARM_ORIGIN := Vector2(40, 110)
 
+# ---------- 3D farm view ----------
+# The farm is rendered as a real 3D scene (Kenney "Nature Kit" models, CC0)
+# inside a SubViewport embedded at the same screen position/size the old 2D
+# sprite grid used to occupy - every other UI position/size constant above
+# stays meaningful unchanged. Nature Kit's ground/fence pieces are modeled
+# at exactly 1 unit = 1 tile, centered on origin with their base at y=0, so
+# WORLD_TILE=1.0 needs no rescaling (confirmed by reading each glTF's own
+# accessor bounding box, not by eyeballing it in an editor).
+const WORLD_TILE := 1.0
+const PLAYER_SCALE := 0.1 # basicCharacter.gltf is modeled ~17 units tall
+const PLAYER_Y_OFFSET := 0.1 # compensates its feet sitting slightly below y=0
+
 # ---------- In-app update check (Android only) ----------
 # Compares the commit this build was stamped with (godot/build_version.json,
 # written by CI at export time) against the latest GitHub release's commit
@@ -101,14 +113,6 @@ const CONTINENTS := [
 	{"name": "Blueriver Delta", "regions": ["Riverside Union", "Mossy Bend", "Willowmere", "Deepwater Flats", "Marsh Landing"]},
 ]
 
-const TERRAIN_TEX_PATH := {
-	"grass": "res://assets/ninja/grass.png",
-	"farmland": "res://assets/ninja/soil.png",
-	"beach": "res://assets/ninja/sand.png",
-	"cliff": "res://assets/cutefantasy/tiles/Cliff_Tile.png",
-	"water": "res://assets/ninja/water.png",
-}
-
 const SAVE_PATH := "user://farmworld_save_v2.json"
 
 # ---------- Acts (story stages that gate content) ----------
@@ -179,10 +183,12 @@ var player_pos := Vector2(TILE * 2, TILE * 2)
 var player_facing := "down"
 
 # ---------- Node refs ----------
-var textures := {}
-var tile_base_sprites := []
-var tile_overlay_sprites := []
-var player_sprite: Sprite2D
+var world_scenes := {} # key -> PackedScene (3D models)
+var farm_viewport: SubViewport
+var world_root: Node3D
+var tile_nodes := [] # 2D array of {"node":Node3D, "ground":Node3D, "ground_key":String, "crop":Node3D}
+var player_node: Node3D
+var player_skin_material: StandardMaterial3D
 
 var hud_cash: Label
 var hud_day: Label
@@ -222,32 +228,42 @@ var map_scroll_content: VBoxContainer
 # ---------- Lifecycle ----------
 func _ready():
 	randomize()
-	_load_textures()
+	_load_world_assets()
 	_init_fresh_state()
 	_load_game()
+	_build_ui()
 	_build_farm_grid()
 	_redraw_all_tiles()
 	_build_scenery()
 	_build_player()
-	_build_ui()
 	_refresh_all()
 	if current_act == 0:
 		_show_act_banner(0)
 	_load_build_commit()
 	_check_for_update()
 
-func _load_textures():
-	textures["plants"] = load("res://assets/sprout/objects/Basic_Plants.png")
-	textures["player"] = load("res://assets/sprout/characters/Basic_Character_Spritesheet.png")
-	textures["tree"] = load("res://assets/ninja/tree.png")
-	textures["house"] = load("res://assets/ninja/house.png")
-	textures["fence"] = load("res://assets/ninja/fence_strip.png")
-	textures["cow"] = load("res://assets/sprout/characters/Free_Cow_Sprites.png")
-	textures["chicken"] = load("res://assets/sprout/characters/Free_Chicken_Sprites.png")
-	textures["pig"] = load("res://assets/cutefantasy/animals/Pig.png")
-	textures["sheep"] = load("res://assets/cutefantasy/animals/Sheep.png")
-	for key in TERRAIN_TEX_PATH:
-		textures[key] = load(TERRAIN_TEX_PATH[key])
+func _load_world_assets():
+	const NK := "res://assets_3d/nature_kit/"
+	world_scenes["ground_grass"] = load(NK + "ground_grass.glb")
+	world_scenes["ground_soil"] = load(NK + "crops_dirtSingle.glb")
+	world_scenes["wheat_a"] = load(NK + "crops_wheatStageA.glb")
+	world_scenes["wheat_b"] = load(NK + "crops_wheatStageB.glb")
+	world_scenes["corn_a"] = load(NK + "crops_cornStageA.glb")
+	world_scenes["corn_b"] = load(NK + "crops_cornStageB.glb")
+	world_scenes["corn_c"] = load(NK + "crops_cornStageC.glb")
+	world_scenes["corn_d"] = load(NK + "crops_cornStageD.glb")
+	# Nature Kit has no tomato-specific staged model; a generic leafy plant
+	# stands in for the growing phase and a round fruit model for "ready".
+	world_scenes["tomato_a"] = load(NK + "crops_leafsStageA.glb")
+	world_scenes["tomato_b"] = load(NK + "crops_leafsStageB.glb")
+	world_scenes["tomato_ready"] = load(NK + "crop_melon.glb")
+	world_scenes["fence"] = load(NK + "fence_simple.glb")
+	world_scenes["fence_corner"] = load(NK + "fence_corner.glb")
+	world_scenes["tree"] = load(NK + "tree_default.glb")
+	world_scenes["pine"] = load(NK + "tree_pineRoundA.glb")
+	world_scenes["player"] = load("res://assets_3d/character/basicCharacter.gltf")
+	player_skin_material = StandardMaterial3D.new()
+	player_skin_material.albedo_texture = load("res://assets_3d/character/skin_man.png")
 
 func _init_fresh_state():
 	plots = {"home": _make_empty_grid()}
@@ -304,78 +320,98 @@ func _switch_active_plot(plot_id: String) -> void:
 	_log("Now farming: %s (%s)." % [_plot_display_name(plot_id), TERRAIN_FLAVOR.get(terrain, "")])
 	_refresh_all()
 
-# ---------- Farm grid rendering ----------
-func _make_pixel_sprite(tex: Texture2D) -> Sprite2D:
-	var s := Sprite2D.new()
-	s.texture = tex
-	s.centered = false
-	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	return s
+# ---------- Farm grid rendering (3D) ----------
+func _build_farm_view(layer: CanvasLayer) -> void:
+	var container := SubViewportContainer.new()
+	container.position = FARM_ORIGIN
+	container.size = Vector2(COLS * TILE, ROWS * TILE)
+	container.stretch = true
+	layer.add_child(container)
+
+	farm_viewport = SubViewport.new()
+	farm_viewport.size = Vector2i(COLS * TILE, ROWS * TILE)
+	farm_viewport.transparent_bg = false
+	container.add_child(farm_viewport)
+
+	world_root = Node3D.new()
+	farm_viewport.add_child(world_root)
+
+	var env_node := WorldEnvironment.new()
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color(0.55, 0.75, 0.95)
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color(0.78, 0.8, 0.85)
+	environment.ambient_light_energy = 0.7
+	env_node.environment = environment
+	world_root.add_child(env_node)
+
+	var light := DirectionalLight3D.new()
+	light.rotation_degrees = Vector3(-55, -35, 0)
+	light.light_energy = 1.1
+	world_root.add_child(light)
+
+	var cam := Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.size = ROWS * WORLD_TILE + 2.0
+	var center := Vector3((COLS - 1) * WORLD_TILE * 0.5, 0, (ROWS - 1) * WORLD_TILE * 0.5)
+	cam.position = center + Vector3(9, 11, 9)
+	cam.look_at(center, Vector3.UP)
+	world_root.add_child(cam)
+	cam.current = true
 
 func _build_farm_grid():
+	tile_nodes.clear()
 	for r in range(ROWS):
-		var base_row := []
-		var overlay_row := []
+		var row := []
 		for c in range(COLS):
-			var base := _make_pixel_sprite(textures["grass"])
-			base.position = FARM_ORIGIN + Vector2(c * TILE, r * TILE)
-			base.scale = Vector2(float(TILE) / base.texture.get_width(), float(TILE) / base.texture.get_height())
-			add_child(base)
-			base_row.append(base)
-
-			var overlay := _make_pixel_sprite(textures["plants"])
-			overlay.region_enabled = true
-			overlay.region_rect = Rect2(0, 0, 24, 24)
-			overlay.position = FARM_ORIGIN + Vector2(c * TILE, r * TILE) + Vector2(TILE, TILE) * 0.15
-			overlay.scale = Vector2(TILE * 0.7 / 24.0, TILE * 0.7 / 24.0)
-			overlay.visible = false
-			add_child(overlay)
-			overlay_row.append(overlay)
-		tile_base_sprites.append(base_row)
-		tile_overlay_sprites.append(overlay_row)
+			var slot_node := Node3D.new()
+			slot_node.position = Vector3(c * WORLD_TILE, 0, r * WORLD_TILE)
+			world_root.add_child(slot_node)
+			row.append({"node": slot_node, "ground": null, "ground_key": "", "crop": null})
+		tile_nodes.append(row)
 
 func _build_scenery():
-	# Ninja-tileset decorations are natively drawn on a 16px grid, so they always
-	# scale uniformly by TILE/16 regardless of how many tiles they span.
-	var ninja_scale = float(TILE) / 16.0
-	var ninja_deco = [
-		{"tex": "tree", "tx": 0, "ty": 0},
-		{"tex": "tree", "tx": 9, "ty": 0},
-		{"tex": "house", "tx": 3, "ty": 0},
-		{"tex": "fence", "tx": 0, "ty": 6},
+	var deco = [
+		{"key": "tree", "tx": -1, "tz": -1},
+		{"key": "pine", "tx": COLS, "tz": -1},
+		{"key": "tree", "tx": COLS, "tz": ROWS},
+		{"key": "pine", "tx": -1, "tz": ROWS},
 	]
-	for d in ninja_deco:
-		var s := _make_pixel_sprite(textures[d["tex"]])
-		s.scale = Vector2(ninja_scale, ninja_scale)
-		s.position = FARM_ORIGIN + Vector2(d["tx"] * TILE, d["ty"] * TILE)
-		add_child(s)
+	for d in deco:
+		var s = world_scenes[d["key"]].instantiate()
+		s.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
+		world_root.add_child(s)
 
-	# Pig/Sheep sheets are a 2x2 grid of 32x32 frames (not 16x16 - that was
-	# cutting each sprite into quarters) and the Cow sheet is a 3x2 grid of
-	# 32x32 frames (not the guessed, non-integer 19x16, which sampled the
-	# wrong pixels entirely). Verified by scanning each sheet's alpha
-	# channel for the actual frame gaps rather than assuming a grid size.
-	var animal_deco = [
-		{"tex": "pig", "tx": 5, "ty": 6, "frame_w": 32, "frame_h": 32},
-		{"tex": "sheep", "tx": 7, "ty": 6, "frame_w": 32, "frame_h": 32},
-		{"tex": "chicken", "tx": 1, "ty": 6, "frame_w": 16, "frame_h": 16},
-		{"tex": "cow", "tx": 8, "ty": 6, "frame_w": 32, "frame_h": 32},
-	]
-	for d in animal_deco:
-		var s := _make_pixel_sprite(textures[d["tex"]])
-		s.region_enabled = true
-		s.region_rect = Rect2(0, 0, d["frame_w"], d["frame_h"])
-		s.scale = Vector2(TILE * 0.7 / d["frame_w"], TILE * 0.6 / d["frame_h"])
-		s.position = FARM_ORIGIN + Vector2(d["tx"] * TILE, d["ty"] * TILE) + Vector2(TILE, TILE) * 0.2
-		add_child(s)
+	for c in range(-1, COLS + 1):
+		var f = world_scenes["fence"].instantiate()
+		f.position = Vector3(c * WORLD_TILE, 0, -1 * WORLD_TILE)
+		world_root.add_child(f)
+		var f2 = world_scenes["fence"].instantiate()
+		f2.position = Vector3(c * WORLD_TILE, 0, ROWS * WORLD_TILE)
+		f2.rotation.y = PI
+		world_root.add_child(f2)
+	for r in range(ROWS):
+		var f3 = world_scenes["fence"].instantiate()
+		f3.position = Vector3(-1 * WORLD_TILE, 0, r * WORLD_TILE)
+		f3.rotation.y = -PI / 2.0
+		world_root.add_child(f3)
+		var f4 = world_scenes["fence"].instantiate()
+		f4.position = Vector3(COLS * WORLD_TILE, 0, r * WORLD_TILE)
+		f4.rotation.y = PI / 2.0
+		world_root.add_child(f4)
 
 func _build_player():
-	player_sprite = _make_pixel_sprite(textures["player"])
-	player_sprite.region_enabled = true
-	player_sprite.region_rect = Rect2(0, 0, 48, 48)
-	player_sprite.scale = Vector2(float(TILE) / 48.0, float(TILE) / 48.0)
-	player_sprite.z_index = 10
-	add_child(player_sprite)
+	player_node = world_scenes["player"].instantiate()
+	player_node.scale = Vector3.ONE * PLAYER_SCALE
+	_apply_player_skin(player_node)
+	world_root.add_child(player_node)
+
+func _apply_player_skin(node: Node) -> void:
+	if node is MeshInstance3D:
+		node.material_override = player_skin_material
+	for child in node.get_children():
+		_apply_player_skin(child)
 
 # ---------- Input ----------
 func _process(delta: float) -> void:
@@ -407,9 +443,11 @@ func _handle_movement(delta: float) -> void:
 		player_pos.y = clamp(player_pos.y, 0, (ROWS - 1) * TILE)
 
 func _update_player_visual() -> void:
-	player_sprite.position = FARM_ORIGIN + player_pos
-	var row: int = {"down": 0, "up": 1, "left": 2, "right": 3}[player_facing]
-	player_sprite.region_rect = Rect2(0, row * 48, 48, 48)
+	var world_x = (player_pos.x / TILE) * WORLD_TILE
+	var world_z = (player_pos.y / TILE) * WORLD_TILE
+	player_node.position = Vector3(world_x, PLAYER_Y_OFFSET, world_z)
+	var facing_yaw: float = {"down": 0.0, "up": PI, "left": PI / 2.0, "right": -PI / 2.0}[player_facing]
+	player_node.rotation.y = facing_yaw
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -563,32 +601,54 @@ func _do_action() -> void:
 	_refresh_all()
 
 # ---------- Tile visuals ----------
+func _crop_mesh_key(crop: String, stage: int) -> String:
+	match crop:
+		"wheat":
+			return "wheat_a" if stage < 3 else "wheat_b"
+		"corn":
+			if stage <= 0: return "corn_a"
+			elif stage == 1: return "corn_b"
+			elif stage == 2: return "corn_c"
+			else: return "corn_d"
+		"tomato":
+			if stage <= 1: return "tomato_a"
+			elif stage <= 3: return "tomato_b"
+			else: return "tomato_ready"
+	return "wheat_a"
+
+func _tint_node(node: Node, color: Color) -> void:
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			var mat := StandardMaterial3D.new()
+			mat.albedo_color = color
+			child.material_override = mat
+		_tint_node(child, color)
+
 func _update_tile_visual(r: int, c: int) -> void:
 	var tile: Dictionary = tiles[r][c]
-	var base: Sprite2D = tile_base_sprites[r][c]
-	var overlay: Sprite2D = tile_overlay_sprites[r][c]
-	if tile["type"] == "grass":
-		base.texture = textures["grass"]
-		overlay.visible = false
-	else:
-		base.texture = textures["farmland"]
-		if tile["type"] == "planted":
-			overlay.visible = true
-			if tile.get("infected", false):
-				overlay.modulate = Color(1, 0.35, 0.35)
-				overlay.region_rect = Rect2(72, 0, 24, 24)
-			else:
-				overlay.modulate = Color(1, 1, 1)
-				var stage = tile.get("stage", 0)
-				var frame = 0
-				if stage <= 0: frame = 0
-				elif stage <= 2: frame = 1
-				elif stage == 3: frame = 2
-				else: frame = 3
-				overlay.region_rect = Rect2(frame * 24, 0, 24, 24)
-		else:
-			overlay.visible = false
-	base.scale = Vector2(float(TILE) / base.texture.get_width(), float(TILE) / base.texture.get_height())
+	var slot: Dictionary = tile_nodes[r][c]
+	var node: Node3D = slot["node"]
+
+	var ground_key = "ground_soil" if tile["type"] != "grass" else "ground_grass"
+	if slot["ground"] == null or slot.get("ground_key", "") != ground_key:
+		if slot["ground"]:
+			slot["ground"].queue_free()
+		var g = world_scenes[ground_key].instantiate()
+		node.add_child(g)
+		slot["ground"] = g
+		slot["ground_key"] = ground_key
+
+	if slot["crop"]:
+		slot["crop"].queue_free()
+		slot["crop"] = null
+
+	if tile["type"] == "planted":
+		var mesh_key = _crop_mesh_key(tile["crop"], tile.get("stage", 0))
+		var cnode = world_scenes[mesh_key].instantiate()
+		node.add_child(cnode)
+		slot["crop"] = cnode
+		if tile.get("infected", false):
+			_tint_node(cnode, Color(0.75, 0.35, 0.3))
 
 func _redraw_all_tiles() -> void:
 	for r in range(ROWS):
@@ -895,6 +955,8 @@ func _add_button(parent: Node, text: String, pos: Vector2, size: Vector2, cb: Ca
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+
+	_build_farm_view(layer)
 
 	# Top HUD
 	hud_cash = _add_label(layer, "$100", Vector2(16, 12), Vector2(140, 30), 24, Color(1, 0.85, 0.3))
