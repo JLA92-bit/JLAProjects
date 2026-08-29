@@ -220,7 +220,7 @@ func _handle_movement(delta: float) -> void:
 
 func _update_player_visual() -> void:
 	player_sprite.position = FARM_ORIGIN + player_pos
-	var row := {"down": 0, "up": 1, "left": 2, "right": 3}[player_facing]
+	var row: int = {"down": 0, "up": 1, "left": 2, "right": 3}[player_facing]
 	player_sprite.region_rect = Rect2(0, row * 48, 48, 48)
 
 func _unhandled_key_input(event: InputEvent) -> void:
