@@ -32,10 +32,13 @@ const UPDATE_CHECK_URL := "https://api.github.com/repos/JLA92-bit/JLAProjects/re
 # "thirsty" crops dry out one day faster than normal every day (not just
 # during a heatwave), giving each crop a distinct watering-frequency
 # requirement - a simple boolean tag rather than a numeric water-need stat.
+# "blight_resistant" halves both the chance a healthy plant of that crop
+# catches the outbreak and the chance it passes it to a resistant neighbor -
+# the spec's "disease/pest vulnerability" attribute, same simple-tag pattern.
 const CROPS := {
-	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"], "frost_hardy": true, "heat_sensitive": false, "thirsty": false},
-	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"], "frost_hardy": false, "heat_sensitive": false, "thirsty": true},
-	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45, "seasons": ["Summer", "Fall"], "frost_hardy": false, "heat_sensitive": true, "thirsty": false},
+	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"], "frost_hardy": true, "heat_sensitive": false, "thirsty": false, "blight_resistant": true},
+	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"], "frost_hardy": false, "heat_sensitive": false, "thirsty": true, "blight_resistant": false},
+	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45, "seasons": ["Summer", "Fall"], "frost_hardy": false, "heat_sensitive": true, "thirsty": false, "blight_resistant": false},
 }
 const CROP_KEYS := ["wheat", "corn", "tomato"]
 
@@ -783,6 +786,8 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 					t["type"] = "grass"
 			elif _act()["blight"]:
 				var chance = (0.02 + infected_tiles.size() * 0.01) * blight_mult
+				if crop_info.get("blight_resistant", false):
+					chance *= 0.5
 				if randf() < chance:
 					t["infected"] = true
 					t["infected_days"] = 0
@@ -793,9 +798,13 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 			if n.x < 0 or n.y < 0 or n.x >= COLS or n.y >= ROWS:
 				continue
 			var nt: Dictionary = t_grid[n.y][n.x]
-			if nt["type"] == "planted" and not nt.get("infected", false) and randf() < 0.3 * blight_mult:
-				nt["infected"] = true
-				nt["infected_days"] = 0
+			if nt["type"] == "planted" and not nt.get("infected", false):
+				var spread_chance = 0.3 * blight_mult
+				if CROPS[nt["crop"]].get("blight_resistant", false):
+					spread_chance *= 0.5
+				if randf() < spread_chance:
+					nt["infected"] = true
+					nt["infected_days"] = 0
 
 	return {"wilted": wilted, "storm_damaged": storm_damaged, "frost_damaged": frost_damaged, "infected_count": infected_tiles.size()}
 
@@ -1303,13 +1312,16 @@ func _refresh_inventory_panel() -> void:
 		if not _crop_unlocked(key):
 			continue
 		var crop = CROPS[key]
-		var trait_tag = ""
+		var trait_parts := []
 		if crop.get("frost_hardy", false):
-			trait_tag = "  🥶 frost-hardy"
-		elif crop.get("heat_sensitive", false):
-			trait_tag = "  🌡 heat-sensitive"
-		elif crop.get("thirsty", false):
-			trait_tag = "  💧 thirsty"
+			trait_parts.append("🥶 frost-hardy")
+		if crop.get("heat_sensitive", false):
+			trait_parts.append("🌡 heat-sensitive")
+		if crop.get("thirsty", false):
+			trait_parts.append("💧 thirsty")
+		if crop.get("blight_resistant", false):
+			trait_parts.append("🛡 blight-resistant")
+		var trait_tag = ("  " + " ".join(trait_parts)) if trait_parts.size() > 0 else ""
 		var row := HBoxContainer.new()
 		var label := Label.new()
 		label.text = "%s (seeds: %d)%s%s" % [crop["name"], seeds[key], trait_tag, "  [selected]" if key == selected_crop else ""]
