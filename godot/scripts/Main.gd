@@ -83,13 +83,14 @@ const TERRAIN_FLAVOR := {
 
 # ---------- Equipment upgrades (durable money sinks, Act 2+) ----------
 const BASE_STORAGE_CAP := 15
-const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2", "sprinkler_system", "scarecrow"]
+const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2", "sprinkler_system", "scarecrow", "greenhouse"]
 const UPGRADES := {
 	"watering_can_2": {"name": "Reinforced Watering Can", "cost": 200, "desc": "Waters a 3x3 area around you instead of a single tile."},
 	"storage_silo_1": {"name": "Storage Silo", "cost": 150, "desc": "+20 storage capacity per crop."},
 	"storage_silo_2": {"name": "Storage Silo II", "cost": 400, "desc": "+20 more storage capacity per crop."},
 	"sprinkler_system": {"name": "Sprinkler System", "cost": 600, "desc": "Automatically waters every planted tile on whichever farm you're actively working, every morning - no more manual watering there."},
 	"scarecrow": {"name": "Scarecrow", "cost": 180, "desc": "Halves the chance of blight starting or spreading on whichever farm you're actively working."},
+	"greenhouse": {"name": "Greenhouse", "cost": 500, "desc": "Lets you plant any unlocked crop in any season, ignoring its normal growing season."},
 }
 
 const TOOLS := {
@@ -598,7 +599,7 @@ func _do_action() -> void:
 			if tile["type"] != "soil":
 				_log("Seeds need tilled soil - till it with the hoe first.")
 				return
-			if not CROPS[selected_crop]["seasons"].has(_season_name()):
+			if not CROPS[selected_crop]["seasons"].has(_season_name()) and not owned_upgrades.get("greenhouse", false):
 				_log("%s can't be planted in %s." % [CROPS[selected_crop]["name"], _season_name()])
 				return
 			if seeds[selected_crop] <= 0:
@@ -967,6 +968,8 @@ func _upgrade_locked_reason(key: String) -> String:
 	if key == "storage_silo_2" and not owned_upgrades.get("storage_silo_1", false):
 		return "requires Storage Silo first"
 	if key == "sprinkler_system" and current_act < 2:
+		return "unlocks in Act 3"
+	if key == "greenhouse" and current_act < 2:
 		return "unlocks in Act 3"
 	return ""
 
@@ -1352,9 +1355,12 @@ func _refresh_inventory_panel() -> void:
 		if crop.get("blight_resistant", false):
 			trait_parts.append("🛡 blight-resistant")
 		var trait_tag = ("  " + " ".join(trait_parts)) if trait_parts.size() > 0 else ""
+		var season_tag = ""
+		if not crop["seasons"].has(_season_name()):
+			season_tag = "  🏚 greenhouse only" if owned_upgrades.get("greenhouse", false) else "  ⛔ out of season"
 		var row := HBoxContainer.new()
 		var label := Label.new()
-		label.text = "%s (seeds: %d)%s%s" % [crop["name"], seeds[key], trait_tag, "  [selected]" if key == selected_crop else ""]
+		label.text = "%s (seeds: %d)%s%s%s" % [crop["name"], seeds[key], trait_tag, season_tag, "  [selected]" if key == selected_crop else ""]
 		label.custom_minimum_size = Vector2(340, 0)
 		row.add_child(label)
 		var select_btn := Button.new()
