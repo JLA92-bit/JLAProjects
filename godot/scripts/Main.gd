@@ -1,5 +1,12 @@
 extends Node2D
 
+# Editor-only: set this in the Inspector (0-3) and run this scene to jump
+# straight to that Act's title card + Kacie dialogue, with tools/crops/map
+# unlocked to match, skipping the naming screen and normal progression -
+# lets each Act be previewed and tested in isolation without playing
+# through every Act before it. Leave at -1 for normal play.
+@export_range(-1, 3, 1) var debug_start_act: int = -1
+
 # ---------- Constants ----------
 const TILE := 40
 const COLS := 16
@@ -400,6 +407,11 @@ var intro_dialog_panel: Panel
 var intro_dialog_body: Label
 var intro_dialog_next_btn: Button
 var intro_dialog_index := 0
+var active_dialogue_pages: Array = [] # Kacie's lines for whichever Act triggered the dialogue panel
+var act_title_panel: Panel
+var act_title_label: Label
+var act_title_goal_label: Label
+var pending_act_transition_idx := 0
 var move_up_held := false
 var move_down_held := false
 var move_left_held := false
@@ -434,7 +446,15 @@ func _ready():
 	_build_scenery()
 	_build_player()
 	_refresh_all()
-	if is_new_game:
+	if debug_start_act >= 0:
+		current_act = clampi(debug_start_act, 0, ACTS.size() - 1)
+		if selected_tool != "" and not _tool_unlocked(selected_tool):
+			selected_tool = _act()["tools"][0]
+		if not _crop_unlocked(selected_crop):
+			selected_crop = _act()["crops"][0]
+		_refresh_all()
+		_show_act_transition(current_act)
+	elif is_new_game:
 		intro_name_panel.visible = true
 	elif current_act == 0:
 		_show_act_banner(0)
@@ -682,7 +702,9 @@ func _update_player_visual() -> void:
 	var world_x = (player_pos.x / TILE) * WORLD_TILE
 	var world_z = (player_pos.y / TILE) * WORLD_TILE
 	player_node.position = Vector3(world_x, PLAYER_Y_OFFSET, world_z)
-	var facing_yaw: float = {"down": 0.0, "up": PI, "left": PI / 2.0, "right": -PI / 2.0}[player_facing]
+	# left/right were swapped from the character model's actual facing - it
+	# visibly turned to look right when moving left, and vice versa.
+	var facing_yaw: float = {"down": 0.0, "up": PI, "left": -PI / 2.0, "right": PI / 2.0}[player_facing]
 	player_node.rotation.y = facing_yaw
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -1291,7 +1313,7 @@ func _check_act_progress() -> void:
 			selected_tool = _act()["tools"][0]
 		if not _crop_unlocked(selected_crop):
 			selected_crop = _act()["crops"][0]
-		_show_act_banner(current_act)
+		_show_act_transition(current_act)
 		_refresh_all()
 
 func _show_act_banner(idx: int) -> void:
@@ -1446,35 +1468,87 @@ func _build_intro_ui(layer: CanvasLayer) -> void:
 
 	intro_dialog_next_btn = _add_button(intro_dialog_panel, "Next", Vector2(440, 950), Vector2(240, 64), _advance_intro_dialog)
 
-func _kacie_intro_pages() -> Array:
-	var shown_name = farm_name if farm_name != "" else "Home Farm"
-	return [
-		"Hi there! I'm Kacie - I run the co-op down the road, and I'll be showing you the ropes.",
-		"Here's the big picture: your goal is to become the biggest farm in the world. Every region on the map, from tiny islands to whole continents, can eventually be yours.",
-		"Right now you're just getting started on %s. Till soil with the Hoe, plant seeds with the Seed Bag, keep the crop watered with the Watering Can, then harvest it by hand and sell it for cash." % shown_name,
-		"Act 1 - First Harvest: reach $150 in cash to prove you can run a farm. Clearing it unlocks the World Map, where you can start claiming real regions around the globe.",
-		"Watch out, though: once the Outbreak begins, blight can infect your crops; bad weather like drought and frost can ruin a harvest; and regions you own need upkeep, or you'll lose them.",
-		"Clearing each Act's goal unlocks bigger tools, new crops, and more of the map to conquer - check the banner at the top any time to see what's next and what it takes to get there.",
-		"That's the whole pitch! Grab your Hoe and get started - I'll be cheering you on.",
-	]
+	# Screen 3 (also the very first screen after Act 1's naming/dialogue):
+	# a plain chapter-card announcing whichever Act is about to start, shown
+	# before Kacie's dialogue for that Act - reused for every 1->2->3->4
+	# transition, not just the very first one.
+	act_title_panel = Panel.new()
+	act_title_panel.position = Vector2.ZERO
+	act_title_panel.size = Vector2(720, 1560)
+	act_title_panel.visible = false
+	layer.add_child(act_title_panel)
+	_add_opaque_backdrop(act_title_panel)
+
+	act_title_label = _add_label(act_title_panel, "", Vector2(0, 660), Vector2(720, 50), 36, Color(1, 0.85, 0.3))
+	act_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	act_title_goal_label = _add_label(act_title_panel, "", Vector2(60, 730), Vector2(600, 120), 18)
+	act_title_goal_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	act_title_goal_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_add_button(act_title_panel, "Continue", Vector2(240, 880), Vector2(240, 64), _on_act_title_continue)
+
+func _kacie_dialogue_for_act(idx: int) -> Array:
+	var act = ACTS[idx]
+	if idx == 0:
+		var shown_name = farm_name if farm_name != "" else "Home Farm"
+		return [
+			"Hi there! I'm Kacie - I run the co-op down the road, and I'll be showing you the ropes.",
+			"Here's the big picture: your goal is to become the biggest farm in the world. Every region on the map, from tiny islands to whole continents, can eventually be yours.",
+			"Right now you're just getting started on %s. Till soil with the Hoe, plant seeds with the Seed Bag, keep the crop watered with the Watering Can, then harvest it by hand and sell it for cash." % shown_name,
+			"Act 1 - First Harvest: reach $150 in cash to prove you can run a farm. Clearing it unlocks the World Map, where you can start claiming real regions around the globe.",
+			"Watch out, though: once the Outbreak begins, blight can infect your crops; bad weather like drought and frost can ruin a harvest; and regions you own need upkeep, or you'll lose them.",
+			"Clearing each Act's goal unlocks bigger tools, new crops, and more of the map to conquer - check the banner at the top any time to see what's next and what it takes to get there.",
+			"That's the whole pitch! Grab your Hoe and get started - I'll be cheering you on.",
+		]
+	match idx:
+		1:
+			return [
+				"Uh oh - a blight's broken out. Keep watch on your crops, and hit anything infected with the Cure Spray right away before it spreads to its neighbors.",
+				"Good news, though: the World Map just opened up. Africa's ready to claim - buy up its regions from the map screen to expand past this one plot.",
+				"%s: %s" % [act["title"], act["goal_text"]],
+			]
+		2:
+			return [
+				"You're really building something now. Tomatoes just came into season - they sell for a lot more than wheat or corn, so work them into your rotation.",
+				"Every continent on Earth is open to you at this point. Spread out, but don't forget: every region you own needs upkeep, or you'll lose it right back.",
+				"%s: %s" % [act["title"], act["goal_text"]],
+			]
+		3:
+			return [
+				"This is the big one. Every continent is in play, and pumpkins are your best cash crop yet - a premium pick for a farm at your level.",
+				"Finish what you started. Every region left unowned is one more step toward the biggest farm in the world.",
+				"%s: %s" % [act["title"], act["goal_text"]],
+			]
+		_:
+			return [act["intro"], act["goal_text"]]
+
+func _show_act_transition(idx: int) -> void:
+	pending_act_transition_idx = idx
+	var act = ACTS[idx]
+	act_title_label.text = act["title"]
+	act_title_goal_label.text = "%s\n\nGoal: %s" % [act["intro"], act["goal_text"]]
+	act_title_panel.visible = true
+
+func _on_act_title_continue() -> void:
+	act_title_panel.visible = false
+	active_dialogue_pages = _kacie_dialogue_for_act(pending_act_transition_idx)
+	intro_dialog_index = 0
+	_show_intro_dialog_page()
+	intro_dialog_panel.visible = true
 
 func _on_farm_name_confirmed() -> void:
 	var typed := farm_name_edit.text.strip_edges()
 	farm_name = typed if typed != "" else "Sunny Acres"
 	intro_name_panel.visible = false
 	_refresh_all()
-	intro_dialog_index = 0
-	_show_intro_dialog_page()
-	intro_dialog_panel.visible = true
+	_show_act_transition(0)
 
 func _show_intro_dialog_page() -> void:
-	var pages := _kacie_intro_pages()
-	intro_dialog_body.text = pages[intro_dialog_index]
-	intro_dialog_next_btn.text = "Let's Go!" if intro_dialog_index == pages.size() - 1 else "Next"
+	intro_dialog_body.text = active_dialogue_pages[intro_dialog_index]
+	intro_dialog_next_btn.text = "Let's Go!" if intro_dialog_index == active_dialogue_pages.size() - 1 else "Next"
 
 func _advance_intro_dialog() -> void:
 	intro_dialog_index += 1
-	if intro_dialog_index >= _kacie_intro_pages().size():
+	if intro_dialog_index >= active_dialogue_pages.size():
 		intro_dialog_panel.visible = false
 		return
 	_show_intro_dialog_page()
