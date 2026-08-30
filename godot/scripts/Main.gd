@@ -183,6 +183,17 @@ const ACTS := [
 	},
 ]
 
+# ---------- Farm progression (infrastructure ladder, separate from the Acts) ----------
+# The Acts above are the story/unlock gate; this ladder is a read-only label
+# reflecting how built-out the player's actual farming operation is, driven
+# by a simple score: +1 per Act reached beyond the first, +1 per equipment
+# upgrade owned. It labels the same growth the player is already causing
+# (more Acts, more upgrades) rather than gating anything new of its own.
+const FARM_TIERS := [
+	"Basic Farm", "Improved Farm", "Specialised Farm",
+	"Productive Farm", "Commercial Operation", "Advanced Agricultural Business",
+]
+
 # ---------- Game state ----------
 var cash := 100
 var day := 1
@@ -907,6 +918,17 @@ func _process_crop(key: String) -> void:
 	_log("Processed %d %s into 1 %s." % [needed, CROPS[key]["name"], recipe["product_name"]])
 	_refresh_all()
 
+func _farm_tier_index() -> int:
+	var owned_upgrade_count := 0
+	for key in UPGRADE_KEYS:
+		if owned_upgrades.get(key, false):
+			owned_upgrade_count += 1
+	var score = current_act + owned_upgrade_count
+	return clampi(score, 0, FARM_TIERS.size() - 1)
+
+func _farm_tier_name() -> String:
+	return FARM_TIERS[_farm_tier_index()]
+
 func _upgrade_locked_reason(key: String) -> String:
 	if key == "storage_silo_2" and not owned_upgrades.get("storage_silo_1", false):
 		return "requires Storage Silo first"
@@ -1250,7 +1272,7 @@ func _refresh_all() -> void:
 		event_suffix,
 	]
 	var terrain = _terrain_for_plot(active_plot_id)
-	hud_farm.text = "Farming: %s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain]
+	hud_farm.text = "Farming: %s%s  |  Tier: %s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain, _farm_tier_name()]
 	map_button.visible = _act()["continents"].size() > 0
 	_refresh_tool_ui()
 	_refresh_inventory_panel()
