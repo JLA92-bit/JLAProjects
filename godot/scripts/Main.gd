@@ -2268,6 +2268,7 @@ func _reset_game() -> void:
 	lifetime_harvested = 0
 	lifetime_earned = 0
 	player_pos = Vector2(TILE * 2, TILE * 2)
+	farm_name = ""
 	tiles.clear()
 	regions.clear()
 	_init_fresh_state()
@@ -2276,7 +2277,12 @@ func _reset_game() -> void:
 	inventory_panel.visible = false
 	map_panel.visible = false
 	_log("Game reset.")
-	_show_act_banner(0)
+	# Route back through the same naming screen + Kacie intro a truly new
+	# game gets, rather than the old plain Act 1 banner - a manual reset
+	# should feel like starting over, not resume with a name that no longer
+	# applies to the just-cleared farm.
+	farm_name_edit.text = ""
+	intro_name_panel.visible = true
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED:
