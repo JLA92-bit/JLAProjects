@@ -43,9 +43,13 @@ jobs:
       - name: Move Godot Web build into the Pages site (if it succeeded)
         if: steps.godot_web_export.outcome == 'success'
         run: |
-          if [ -f godot/web/index.html ]; then
+          # use_preset_export_path copies the build into a subfolder named
+          # after the export preset itself ("Web"), so the real output is
+          # one level deeper than godot/web/index.html - that mismatch made
+          # this step silently skip on every run despite the export working.
+          if [ -f godot/web/Web/index.html ]; then
             mkdir -p godot-play
-            cp -r godot/web/* godot-play/
+            cp -r godot/web/Web/* godot-play/
           else
             echo "Godot web export produced no index.html - skipping."
           fi

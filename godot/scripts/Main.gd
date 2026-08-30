@@ -1,9 +1,16 @@
 extends Node2D
 
+# Editor-only: set this in the Inspector (0-3) and run this scene to jump
+# straight to that Act's title card + Kacie dialogue, with tools/crops/map
+# unlocked to match, skipping the naming screen and normal progression -
+# lets each Act be previewed and tested in isolation without playing
+# through every Act before it. Leave at -1 for normal play.
+@export_range(-1, 3, 1) var debug_start_act: int = -1
+
 # ---------- Constants ----------
-const TILE := 64
-const COLS := 10
-const ROWS := 7
+const TILE := 40
+const COLS := 16
+const ROWS := 11
 const DAY_LENGTH := 25.0
 const PLAYER_SPEED := 220.0
 const FARM_ORIGIN := Vector2(40, 110)
@@ -361,6 +368,8 @@ var plots := {} # plot_id ("home" or an owned region's name) -> ROWSxCOLS tile g
 var active_plot_id := "home"
 var regions := []
 var log_text := "Welcome! Hoe tills grass, Seed Bag plants, Watering Can grows crops. Harvest by hand when ready."
+var farm_name := "" # player-chosen name for the Home Farm, set on the first-launch intro screen
+var is_new_game := false # true only for the very first _ready() before any save file exists
 
 var player_pos := Vector2(TILE * 2, TILE * 2)
 var player_facing := "down"
@@ -391,6 +400,18 @@ var update_banner: Panel
 var update_banner_label: Label
 var current_build_commit := ""
 var update_download_url := ""
+
+var intro_name_panel: Panel
+var farm_name_edit: LineEdit
+var intro_dialog_panel: Panel
+var intro_dialog_body: Label
+var intro_dialog_next_btn: Button
+var intro_dialog_index := 0
+var active_dialogue_pages: Array = [] # Kacie's lines for whichever Act triggered the dialogue panel
+var act_title_panel: Panel
+var act_title_label: Label
+var act_title_goal_label: Label
+var pending_act_transition_idx := 0
 var move_up_held := false
 var move_down_held := false
 var move_left_held := false
@@ -415,6 +436,7 @@ var map_continent_headings := {} # continent name -> Label, for jump buttons
 # ---------- Lifecycle ----------
 func _ready():
 	randomize()
+	is_new_game = not FileAccess.file_exists(SAVE_PATH)
 	_load_world_assets()
 	_init_fresh_state()
 	_load_game()
@@ -424,14 +446,56 @@ func _ready():
 	_build_scenery()
 	_build_player()
 	_refresh_all()
-	if current_act == 0:
+	if debug_start_act >= 0:
+		current_act = clampi(debug_start_act, 0, ACTS.size() - 1)
+		if selected_tool != "" and not _tool_unlocked(selected_tool):
+			selected_tool = _act()["tools"][0]
+		if not _crop_unlocked(selected_crop):
+			selected_crop = _act()["crops"][0]
+		_refresh_all()
+		_show_act_transition(current_act)
+	elif is_new_game:
+		intro_name_panel.visible = true
+	elif current_act == 0:
 		_show_act_banner(0)
 	_load_build_commit()
 	_check_for_update()
 
+func _build_textured_ground_scene(texture_path: String, tint: Color = Color.WHITE) -> PackedScene:
+	var mesh_instance := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(WORLD_TILE, WORLD_TILE)
+	mesh_instance.mesh = plane
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load(texture_path)
+	mat.albedo_color = tint
+	mat.roughness = 0.95 # matte, not shiny/plastic-looking under the directional light
+	# Mipmapped filtering (the default) is what keeps the far backdrop tiles
+	# from turning into visual static - the viewport is only a few hundred
+	# pixels across, so a huge swath of distant tiles has to compress into a
+	# handful of pixels, and only mipmaps can average that down cleanly.
+	mesh_instance.material_override = mat
+	var scene := PackedScene.new()
+	scene.pack(mesh_instance)
+	return scene
+
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
-	world_scenes["ground_grass"] = load(NK + "ground_grass.glb")
+	# Kenney's ground_grass.glb is a flat solid vertex color (no texture at
+	# all), which read as an unrealistic flat-green void once it was also
+	# used to fill the whole backdrop beyond the farm. Swapped for a real
+	# photographed, seamless grass texture (see CREDITS.md) applied to a
+	# plain 1x1 quad, built once here and reused via .instantiate() exactly
+	# like the other world_scenes entries.
+	world_scenes["ground_grass"] = _build_textured_ground_scene("res://assets_3d/textures/grass_real.webp")
+	# The backdrop skirt (see _build_scenery) sits much farther from the
+	# camera on average than the real playable grid, so the GPU samples a
+	# coarser, blurred-down mip level for it - and averaging this specific
+	# photo's texel data skews noticeably brighter, leaving a visible tonal
+	# seam right at the grid's edge. A dedicated, gently-darkened tint on the
+	# backdrop-only copy brings its far-mip average back in line with the
+	# grid's close-up tone, without touching the real tiles or the texture.
+	world_scenes["ground_grass_backdrop"] = _build_textured_ground_scene("res://assets_3d/textures/grass_real.webp", Color(0.82, 0.86, 0.78))
 	# crops_dirtSingle.glb is a small raised dirt MOUND meant to sit decoratively
 	# on top of a full grass tile, not a full-tile ground mesh - using it as the
 	# tilled-soil ground left every tilled/planted tile with no ground plane at
@@ -502,7 +566,9 @@ func _terrain_for_plot(plot_id: String) -> String:
 	return "grass"
 
 func _plot_display_name(plot_id: String) -> String:
-	return "Home Farm" if plot_id == "home" else plot_id
+	if plot_id == "home":
+		return farm_name if farm_name != "" else "Home Farm"
+	return plot_id
 
 func _switch_active_plot(plot_id: String) -> void:
 	if plot_id == active_plot_id or not plots.has(plot_id):
@@ -550,7 +616,16 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 	cam.size = COLS * WORLD_TILE * 1.7
 	var center := Vector3((COLS - 1) * WORLD_TILE * 0.5, 0, (ROWS - 1) * WORLD_TILE * 0.5)
-	cam.position = center + Vector3(8, 7, 8)
+	# The camera offset's height (the "7") has to grow with cam.size, not stay
+	# fixed: for this fixed viewing angle, an orthogonal camera's bottom-row
+	# rays start at world Y = offset.y - half_frustum_height * 0.85 (0.85 is
+	# this angle's vertical basis component) and travel further downward from
+	# there - so if that start point is already below Y=0, those rays never
+	# reach the ground plane at all and the sky shows through no matter how
+	# much backdrop is added. Scaling the whole offset with COLS keeps the
+	# same angle while keeping the start point comfortably above the ground.
+	var cam_offset := Vector3(8, 7, 8) * (COLS / 10.0) * 1.3
+	cam.position = center + cam_offset
 	world_root.add_child(cam)
 	cam.look_at(center, Vector3.UP)
 	cam.current = true
@@ -573,12 +648,15 @@ func _build_scenery():
 	# unclaimed farmland stretching toward the horizon instead of a flat
 	# sky-blue void. Individual real tiles (not one scaled-up mesh) so the
 	# shading matches the actual grid perfectly with no visible seam.
-	const BACKDROP_MARGIN := 20
+	# Scaled off COLS (tuned as 20 tiles at the original COLS=10) so a bigger
+	# playable grid - which also zooms the camera out further, see cam.size
+	# in _build_farm_view - still gets enough backdrop to hide the sky.
+	var BACKDROP_MARGIN := int(COLS * 2.0)
 	for tz in range(-BACKDROP_MARGIN, ROWS + BACKDROP_MARGIN):
 		for tx in range(-BACKDROP_MARGIN, COLS + BACKDROP_MARGIN):
 			if tx >= 0 and tx < COLS and tz >= 0 and tz < ROWS:
 				continue # the real playable grid already covers this cell
-			var backdrop_tile: Node3D = world_scenes["ground_grass"].instantiate()
+			var backdrop_tile: Node3D = world_scenes["ground_grass_backdrop"].instantiate()
 			backdrop_tile.position = Vector3(tx * WORLD_TILE, -0.01, tz * WORLD_TILE)
 			world_root.add_child(backdrop_tile)
 
@@ -656,7 +734,9 @@ func _update_player_visual() -> void:
 	var world_x = (player_pos.x / TILE) * WORLD_TILE
 	var world_z = (player_pos.y / TILE) * WORLD_TILE
 	player_node.position = Vector3(world_x, PLAYER_Y_OFFSET, world_z)
-	var facing_yaw: float = {"down": 0.0, "up": PI, "left": PI / 2.0, "right": -PI / 2.0}[player_facing]
+	# left/right were swapped from the character model's actual facing - it
+	# visibly turned to look right when moving left, and vice versa.
+	var facing_yaw: float = {"down": 0.0, "up": PI, "left": -PI / 2.0, "right": PI / 2.0}[player_facing]
 	player_node.rotation.y = facing_yaw
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -1265,7 +1345,7 @@ func _check_act_progress() -> void:
 			selected_tool = _act()["tools"][0]
 		if not _crop_unlocked(selected_crop):
 			selected_crop = _act()["crops"][0]
-		_show_act_banner(current_act)
+		_show_act_transition(current_act)
 		_refresh_all()
 
 func _show_act_banner(idx: int) -> void:
@@ -1290,6 +1370,18 @@ func _add_label(parent: Node, text: String, pos: Vector2, size := Vector2.ZERO, 
 	l.add_theme_color_override("font_color", color)
 	parent.add_child(l)
 	return l
+
+func _add_opaque_backdrop(parent: Control) -> void:
+	# Plain Panel controls use the theme's default translucent style, which
+	# lets whatever is underneath (the 3D farm view, HUD buttons) show
+	# through - fine for small overlays, but confusing for a full-screen
+	# intro/dialogue screen that should read as its own separate scene.
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.08, 0.13, 0.09)
+	backdrop.size = parent.size
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(backdrop)
+	parent.move_child(backdrop, 0)
 
 func _add_button(parent: Node, text: String, pos: Vector2, size: Vector2, cb: Callable) -> Button:
 	var b := Button.new()
@@ -1344,6 +1436,154 @@ func _build_ui() -> void:
 	_build_map_panel(layer)
 	_build_act_banner(layer)
 	_build_update_banner(layer)
+	_build_intro_ui(layer)
+
+func _build_intro_ui(layer: CanvasLayer) -> void:
+	# Screen 1, first launch only: name the Home Farm before anything else happens.
+	intro_name_panel = Panel.new()
+	intro_name_panel.position = Vector2.ZERO
+	intro_name_panel.size = Vector2(720, 1560)
+	intro_name_panel.visible = false
+	layer.add_child(intro_name_panel)
+	_add_opaque_backdrop(intro_name_panel)
+
+	var title_label := _add_label(intro_name_panel, "Farm World", Vector2(0, 420), Vector2(720, 50), 34, Color(1, 0.85, 0.3))
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var subtitle_label := _add_label(intro_name_panel, "Outbreak & Empire", Vector2(0, 472), Vector2(720, 30), 18, Color(0.75, 0.85, 0.95))
+	subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var prompt_label := _add_label(intro_name_panel, "What will you name your farm?", Vector2(60, 640), Vector2(600, 30), 20)
+	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	farm_name_edit = LineEdit.new()
+	farm_name_edit.position = Vector2(110, 690)
+	farm_name_edit.size = Vector2(500, 60)
+	farm_name_edit.placeholder_text = "e.g. Sunny Acres"
+	farm_name_edit.max_length = 24
+	farm_name_edit.add_theme_font_size_override("font_size", 22)
+	farm_name_edit.text_submitted.connect(func(_t): _on_farm_name_confirmed())
+	intro_name_panel.add_child(farm_name_edit)
+
+	_add_button(intro_name_panel, "Start Farming", Vector2(210, 780), Vector2(300, 64), _on_farm_name_confirmed)
+
+	# Screen 2, right after naming: Kacie's onboarding dialogue - the game's
+	# goal, how Act 1 works and what it takes to clear it, hazards to watch
+	# for, and how clearing Acts opens up more of the world map.
+	intro_dialog_panel = Panel.new()
+	intro_dialog_panel.position = Vector2.ZERO
+	intro_dialog_panel.size = Vector2(720, 1560)
+	intro_dialog_panel.visible = false
+	layer.add_child(intro_dialog_panel)
+	_add_opaque_backdrop(intro_dialog_panel)
+
+	var portrait_rect := TextureRect.new()
+	portrait_rect.texture = load("res://assets_3d/textures/kacie_portrait.png")
+	portrait_rect.position = Vector2(240, 250)
+	portrait_rect.size = Vector2(240, 304)
+	portrait_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	portrait_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	portrait_rect.custom_minimum_size = Vector2(240, 304)
+	intro_dialog_panel.add_child(portrait_rect)
+	# Controls clamp to their computed minimum size the instant they enter the
+	# tree, and a TextureRect's minimum size tracks its texture regardless of
+	# expand_mode - so the requested size only sticks if it's (re)applied
+	# after add_child, once that one-time clamp has already happened.
+	portrait_rect.size = Vector2(240, 304)
+	var speaker_label := _add_label(intro_dialog_panel, "Kacie", Vector2(0, 566), Vector2(720, 36), 26, Color(1, 0.85, 0.3))
+	speaker_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	var body_panel := Panel.new()
+	body_panel.position = Vector2(40, 620)
+	body_panel.size = Vector2(640, 300)
+	intro_dialog_panel.add_child(body_panel)
+	intro_dialog_body = _add_label(body_panel, "", Vector2(20, 20), Vector2(600, 260), 18)
+	intro_dialog_body.autowrap_mode = TextServer.AUTOWRAP_WORD
+
+	intro_dialog_next_btn = _add_button(intro_dialog_panel, "Next", Vector2(440, 950), Vector2(240, 64), _advance_intro_dialog)
+
+	# Screen 3 (also the very first screen after Act 1's naming/dialogue):
+	# a plain chapter-card announcing whichever Act is about to start, shown
+	# before Kacie's dialogue for that Act - reused for every 1->2->3->4
+	# transition, not just the very first one.
+	act_title_panel = Panel.new()
+	act_title_panel.position = Vector2.ZERO
+	act_title_panel.size = Vector2(720, 1560)
+	act_title_panel.visible = false
+	layer.add_child(act_title_panel)
+	_add_opaque_backdrop(act_title_panel)
+
+	act_title_label = _add_label(act_title_panel, "", Vector2(0, 660), Vector2(720, 50), 36, Color(1, 0.85, 0.3))
+	act_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	act_title_goal_label = _add_label(act_title_panel, "", Vector2(60, 730), Vector2(600, 120), 18)
+	act_title_goal_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	act_title_goal_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_add_button(act_title_panel, "Continue", Vector2(240, 880), Vector2(240, 64), _on_act_title_continue)
+
+func _kacie_dialogue_for_act(idx: int) -> Array:
+	var act = ACTS[idx]
+	if idx == 0:
+		var shown_name = farm_name if farm_name != "" else "Home Farm"
+		return [
+			"Hi there! I'm Kacie - I run the co-op down the road, and I'll be showing you the ropes.",
+			"Here's the big picture: your goal is to become the biggest farm in the world. Every region on the map, from tiny islands to whole continents, can eventually be yours.",
+			"Right now you're just getting started on %s. Till soil with the Hoe, plant seeds with the Seed Bag, keep the crop watered with the Watering Can, then harvest it by hand and sell it for cash." % shown_name,
+			"Act 1 - First Harvest: reach $150 in cash to prove you can run a farm. Clearing it unlocks the World Map, where you can start claiming real regions around the globe.",
+			"Watch out, though: once the Outbreak begins, blight can infect your crops; bad weather like drought and frost can ruin a harvest; and regions you own need upkeep, or you'll lose them.",
+			"Clearing each Act's goal unlocks bigger tools, new crops, and more of the map to conquer - check the banner at the top any time to see what's next and what it takes to get there.",
+			"That's the whole pitch! Grab your Hoe and get started - I'll be cheering you on.",
+		]
+	match idx:
+		1:
+			return [
+				"Uh oh - a blight's broken out. Keep watch on your crops, and hit anything infected with the Cure Spray right away before it spreads to its neighbors.",
+				"Good news, though: the World Map just opened up. Africa's ready to claim - buy up its regions from the map screen to expand past this one plot.",
+				"%s: %s" % [act["title"], act["goal_text"]],
+			]
+		2:
+			return [
+				"You're really building something now. Tomatoes just came into season - they sell for a lot more than wheat or corn, so work them into your rotation.",
+				"Every continent on Earth is open to you at this point. Spread out, but don't forget: every region you own needs upkeep, or you'll lose it right back.",
+				"%s: %s" % [act["title"], act["goal_text"]],
+			]
+		3:
+			return [
+				"This is the big one. Every continent is in play, and pumpkins are your best cash crop yet - a premium pick for a farm at your level.",
+				"Finish what you started. Every region left unowned is one more step toward the biggest farm in the world.",
+				"%s: %s" % [act["title"], act["goal_text"]],
+			]
+		_:
+			return [act["intro"], act["goal_text"]]
+
+func _show_act_transition(idx: int) -> void:
+	pending_act_transition_idx = idx
+	var act = ACTS[idx]
+	act_title_label.text = act["title"]
+	act_title_goal_label.text = "%s\n\nGoal: %s" % [act["intro"], act["goal_text"]]
+	act_title_panel.visible = true
+
+func _on_act_title_continue() -> void:
+	act_title_panel.visible = false
+	active_dialogue_pages = _kacie_dialogue_for_act(pending_act_transition_idx)
+	intro_dialog_index = 0
+	_show_intro_dialog_page()
+	intro_dialog_panel.visible = true
+
+func _on_farm_name_confirmed() -> void:
+	var typed := farm_name_edit.text.strip_edges()
+	farm_name = typed if typed != "" else "Sunny Acres"
+	intro_name_panel.visible = false
+	_refresh_all()
+	_show_act_transition(0)
+
+func _show_intro_dialog_page() -> void:
+	intro_dialog_body.text = active_dialogue_pages[intro_dialog_index]
+	intro_dialog_next_btn.text = "Let's Go!" if intro_dialog_index == active_dialogue_pages.size() - 1 else "Next"
+
+func _advance_intro_dialog() -> void:
+	intro_dialog_index += 1
+	if intro_dialog_index >= active_dialogue_pages.size():
+		intro_dialog_panel.visible = false
+		return
+	_show_intro_dialog_page()
 
 func _build_act_banner(layer: CanvasLayer) -> void:
 	act_banner = Panel.new()
@@ -1922,6 +2162,7 @@ func _save_game() -> void:
 		"plots": plots, "active_plot_id": active_plot_id, "regions": regions,
 		"owned_upgrades": owned_upgrades, "active_event": active_event,
 		"player_x": player_pos.x, "player_y": player_pos.y,
+		"farm_name": farm_name,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -1969,6 +2210,7 @@ func _load_game() -> void:
 	selected_crop = parsed.get("selected_crop", selected_crop)
 	selected_tool = parsed.get("selected_tool", selected_tool)
 	current_act = clampi(int(parsed.get("current_act", current_act)), 0, ACTS.size() - 1)
+	farm_name = parsed.get("farm_name", farm_name)
 	victory_shown = parsed.get("victory_shown", victory_shown)
 	lifetime_harvested = int(parsed.get("lifetime_harvested", lifetime_harvested))
 	lifetime_earned = int(parsed.get("lifetime_earned", lifetime_earned))
@@ -2011,6 +2253,15 @@ func _load_game() -> void:
 	elif parsed.has("tiles"):
 		# Pre-multi-plot save: the single grid it had becomes the home plot.
 		plots = {"home": parsed["tiles"]}
+	# A save from before a ROWS/COLS change carries grids sized to the old
+	# dimensions - indexing those with the current ROWS/COLS would run past
+	# their bounds. Replace any mismatched grid with a fresh one rather than
+	# trying to splice old tile data into a different-sized grid.
+	for plot_key in plots.keys():
+		var grid = plots[plot_key]
+		var grid_ok = typeof(grid) == TYPE_ARRAY and grid.size() == ROWS and (ROWS == 0 or (typeof(grid[0]) == TYPE_ARRAY and grid[0].size() == COLS))
+		if not grid_ok:
+			plots[plot_key] = _make_empty_grid()
 	if not plots.has("home"):
 		plots["home"] = _make_empty_grid()
 	for reg in regions:
@@ -2049,6 +2300,7 @@ func _reset_game() -> void:
 	lifetime_harvested = 0
 	lifetime_earned = 0
 	player_pos = Vector2(TILE * 2, TILE * 2)
+	farm_name = ""
 	tiles.clear()
 	regions.clear()
 	_init_fresh_state()
@@ -2057,7 +2309,12 @@ func _reset_game() -> void:
 	inventory_panel.visible = false
 	map_panel.visible = false
 	_log("Game reset.")
-	_show_act_banner(0)
+	# Route back through the same naming screen + Kacie intro a truly new
+	# game gets, rather than the old plain Act 1 banner - a manual reset
+	# should feel like starting over, not resume with a name that no longer
+	# applies to the just-cleared farm.
+	farm_name_edit.text = ""
+	intro_name_panel.visible = true
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED:
