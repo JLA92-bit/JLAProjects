@@ -479,6 +479,114 @@ func _build_textured_ground_scene(texture_path: String, tint: Color = Color.WHIT
 	scene.pack(mesh_instance)
 	return scene
 
+func _set_flat_material(mesh_instance: MeshInstance3D, color: Color) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = 0.9
+	mesh_instance.material_override = mat
+
+# Built from primitive meshes rather than a sourced model: no CC0 farm-animal
+# pack (chicken/pig/sheep/cow) could be reached from this sandbox - itch.io
+# and poly.pizza, where the usual low-poly CC0 packs live, are network-
+# blocked here, and no GitHub mirror of one turned up either (see
+# CREDITS.md). Simple enough to still read clearly as the intended animal
+# at this camera distance, and easy to swap for a real model later.
+func _build_animal_scene(kind: String) -> PackedScene:
+	var root := Node3D.new()
+	var white := Color(0.95, 0.95, 0.92)
+	var pink := Color(0.93, 0.62, 0.68)
+	var dark_pink := Color(0.8, 0.45, 0.52)
+	var red := Color(0.85, 0.15, 0.15)
+	var orange := Color(0.95, 0.6, 0.1)
+
+	match kind:
+		"chicken":
+			var body := MeshInstance3D.new()
+			var body_mesh := SphereMesh.new()
+			body_mesh.radius = 0.14
+			body_mesh.height = 0.28
+			body.mesh = body_mesh
+			body.position = Vector3(0, 0.16, 0)
+			_set_flat_material(body, white)
+			root.add_child(body)
+
+			var head := MeshInstance3D.new()
+			var head_mesh := SphereMesh.new()
+			head_mesh.radius = 0.075
+			head_mesh.height = 0.15
+			head.mesh = head_mesh
+			head.position = Vector3(0, 0.28, 0.11)
+			_set_flat_material(head, white)
+			root.add_child(head)
+
+			var comb := MeshInstance3D.new()
+			var comb_mesh := BoxMesh.new()
+			comb_mesh.size = Vector3(0.03, 0.05, 0.06)
+			comb.mesh = comb_mesh
+			comb.position = Vector3(0, 0.35, 0.11)
+			_set_flat_material(comb, red)
+			root.add_child(comb)
+
+			var beak := MeshInstance3D.new()
+			var beak_mesh := BoxMesh.new()
+			beak_mesh.size = Vector3(0.04, 0.03, 0.05)
+			beak.mesh = beak_mesh
+			beak.position = Vector3(0, 0.27, 0.18)
+			_set_flat_material(beak, orange)
+			root.add_child(beak)
+		"pig":
+			var body := MeshInstance3D.new()
+			var body_mesh := CapsuleMesh.new()
+			body_mesh.radius = 0.22
+			body_mesh.height = 0.55
+			body.mesh = body_mesh
+			body.rotation.z = PI / 2.0
+			body.position = Vector3(0, 0.24, 0)
+			_set_flat_material(body, pink)
+			root.add_child(body)
+
+			var head := MeshInstance3D.new()
+			var head_mesh := SphereMesh.new()
+			head_mesh.radius = 0.16
+			head.mesh = head_mesh
+			head.position = Vector3(0, 0.28, 0.28)
+			_set_flat_material(head, pink)
+			root.add_child(head)
+
+			var snout := MeshInstance3D.new()
+			var snout_mesh := CylinderMesh.new()
+			snout_mesh.top_radius = 0.07
+			snout_mesh.bottom_radius = 0.07
+			snout_mesh.height = 0.05
+			snout.mesh = snout_mesh
+			snout.rotation.x = PI / 2.0
+			snout.position = Vector3(0, 0.26, 0.42)
+			_set_flat_material(snout, dark_pink)
+			root.add_child(snout)
+
+			for ex in [-0.1, 0.1]:
+				var ear := MeshInstance3D.new()
+				var ear_mesh := BoxMesh.new()
+				ear_mesh.size = Vector3(0.06, 0.08, 0.03)
+				ear.mesh = ear_mesh
+				ear.position = Vector3(ex, 0.4, 0.24)
+				_set_flat_material(ear, pink)
+				root.add_child(ear)
+
+	root.scale = Vector3.ONE * 1.8 # a bit larger - too subtle to read at the actual farm-view resolution otherwise
+	# PackedScene.pack() only serializes descendants whose `owner` is set to
+	# the packed root - anything else is treated as a transient helper node
+	# and silently dropped, which left every one of these meshes missing.
+	_set_owner_recursive(root, root)
+	var scene := PackedScene.new()
+	scene.pack(root)
+	return scene
+
+func _set_owner_recursive(node: Node, root: Node) -> void:
+	for child in node.get_children():
+		child.owner = root
+		_set_owner_recursive(child, root)
+
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
 	# Kenney's ground_grass.glb is a flat solid vertex color (no texture at
@@ -524,6 +632,8 @@ func _load_world_assets():
 	world_scenes["player"] = load("res://assets_3d/character/basicCharacter.gltf")
 	player_skin_material = StandardMaterial3D.new()
 	player_skin_material.albedo_texture = load("res://assets_3d/character/skin_man.png")
+	world_scenes["chicken"] = _build_animal_scene("chicken")
+	world_scenes["pig"] = _build_animal_scene("pig")
 
 func _init_fresh_state():
 	plots = {"home": _make_empty_grid()}
@@ -670,6 +780,19 @@ func _build_scenery():
 		var s = world_scenes[d["key"]].instantiate()
 		s.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
 		world_root.add_child(s)
+
+	# A few farm animals wandering just outside the fence, purely for
+	# ambience - not interactive, not on the playable grid.
+	var animal_deco = [
+		{"key": "chicken", "tx": 2.3, "tz": -1.6},
+		{"key": "chicken", "tx": 3.1, "tz": -1.4},
+		{"key": "pig", "tx": COLS - 2, "tz": ROWS + 0.5},
+	]
+	for d in animal_deco:
+		var a = world_scenes[d["key"]].instantiate()
+		a.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
+		a.rotation.y = randf() * TAU
+		world_root.add_child(a)
 
 	for c in range(-1, COLS + 1):
 		var f = world_scenes["fence"].instantiate()

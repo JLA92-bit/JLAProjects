@@ -20,12 +20,22 @@ required, but it's credited here anyway.
   contributors); no separate per-asset license file was present for this
   texture, so it falls under the repo's blanket MIT license.
 
+## Procedural (not sourced)
+
+- Chicken and pig scenery models (`_build_animal_scene()` in
+  `scripts/Main.gd`) are built from primitive meshes (spheres/boxes/
+  cylinders) at runtime, not a sourced asset pack. The usual CC0 low-poly
+  farm-animal packs (itch.io, poly.pizza) aren't reachable from this
+  sandbox's network, and no GitHub mirror of one turned up either. Good
+  enough to read clearly as ambient scenery at the farm's camera distance;
+  swap for a real model if one becomes reachable later.
+
 ## Known gaps (follow-up work)
 
-- No farm animal models sourced yet (pig/sheep/cow/chicken) — the animal
-  scenery from the old 2D art was dropped rather than left as inconsistent
-  flat sprites in the new 3D scene.
-- No farmhouse model — dropped for the same reason.
+- Sheep and cow are still missing (see the procedural note above for why
+  a real asset pack couldn't be sourced) - could be added the same way
+  the chicken and pig were.
+- No farmhouse model.
 - Tomato and Pumpkin have no dedicated staged-growth model in Nature Kit;
   both use the generic "leafs" plant for their growing stages, with the
   melon model as tomato's ready-to-harvest stand-in and the pumpkin model
