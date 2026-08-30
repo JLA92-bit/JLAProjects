@@ -567,6 +567,21 @@ func _build_farm_grid():
 		tile_nodes.append(row)
 
 func _build_scenery():
+	# "The world keeps going" backdrop: a skirt of the exact same grass tile
+	# used on the real farm grid, extending well past the fence in every
+	# direction, so the empty space beyond the playable plot reads as more
+	# unclaimed farmland stretching toward the horizon instead of a flat
+	# sky-blue void. Individual real tiles (not one scaled-up mesh) so the
+	# shading matches the actual grid perfectly with no visible seam.
+	const BACKDROP_MARGIN := 20
+	for tz in range(-BACKDROP_MARGIN, ROWS + BACKDROP_MARGIN):
+		for tx in range(-BACKDROP_MARGIN, COLS + BACKDROP_MARGIN):
+			if tx >= 0 and tx < COLS and tz >= 0 and tz < ROWS:
+				continue # the real playable grid already covers this cell
+			var backdrop_tile: Node3D = world_scenes["ground_grass"].instantiate()
+			backdrop_tile.position = Vector3(tx * WORLD_TILE, -0.01, tz * WORLD_TILE)
+			world_root.add_child(backdrop_tile)
+
 	var deco = [
 		{"key": "tree", "tx": -1, "tz": -1},
 		{"key": "pine", "tx": COLS, "tz": -1},
