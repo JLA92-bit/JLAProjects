@@ -83,7 +83,7 @@ const TERRAIN_FLAVOR := {
 
 # ---------- Equipment upgrades (durable money sinks, Act 2+) ----------
 const BASE_STORAGE_CAP := 15
-const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2", "sprinkler_system", "scarecrow", "greenhouse"]
+const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2", "sprinkler_system", "scarecrow", "greenhouse", "regional_council"]
 const UPGRADES := {
 	"watering_can_2": {"name": "Reinforced Watering Can", "cost": 200, "desc": "Waters a 3x3 area around you instead of a single tile."},
 	"storage_silo_1": {"name": "Storage Silo", "cost": 150, "desc": "+20 storage capacity per crop."},
@@ -91,6 +91,7 @@ const UPGRADES := {
 	"sprinkler_system": {"name": "Sprinkler System", "cost": 600, "desc": "Automatically waters every planted tile on whichever farm you're actively working, every morning - no more manual watering there."},
 	"scarecrow": {"name": "Scarecrow", "cost": 180, "desc": "Halves the chance of blight starting or spreading on whichever farm you're actively working."},
 	"greenhouse": {"name": "Greenhouse", "cost": 500, "desc": "Lets you plant any unlocked crop in any season, ignoring its normal growing season."},
+	"regional_council": {"name": "Regional Council", "cost": 1000, "desc": "Each morning, automatically pays to maintain as many owned world regions as you can afford (cheapest first) instead of maintaining them one by one from the World Map."},
 }
 
 const TOOLS := {
@@ -943,6 +944,11 @@ func _day_tick() -> void:
 		target["health"] = max(5.0, target["health"] - 15.0)
 		_log("Outbreak spread back and hurt your region: %s!" % target["name"])
 
+	if owned_upgrades.get("regional_council", false):
+		var auto_maintain_count = _auto_maintain_regions()
+		if auto_maintain_count > 0:
+			_log("Regional Council auto-maintained %d region(s)." % auto_maintain_count)
+
 	for reg in regions:
 		if not reg["owned"]:
 			if reg["health"] < 100.0:
@@ -1034,6 +1040,8 @@ func _upgrade_locked_reason(key: String) -> String:
 		return "unlocks in Act 3"
 	if key == "greenhouse" and current_act < 2:
 		return "unlocks in Act 3"
+	if key == "regional_council" and current_act < 2:
+		return "unlocks in Act 3"
 	return ""
 
 # ---------- Market events ----------
@@ -1061,6 +1069,25 @@ func _advance_market_event() -> void:
 
 func _maintenance_cost(reg: Dictionary) -> int:
 	return max(5, int(round(_region_price(reg) * 0.15)))
+
+func _auto_maintain_regions() -> int:
+	# Owning dozens (or all 198) of the world's regions makes clicking
+	# "Maintain" on each one by hand every day untenable, and affording all
+	# of them at once often isn't possible either. This upgrade pays for as
+	# many as the player can currently afford, cheapest first, so the money
+	# available covers the most regions rather than being wasted maintaining
+	# expensive ones while cheap ones are left to decay.
+	var candidates = regions.filter(func(r): return r["owned"] and not r.get("maintained_today", false))
+	candidates.sort_custom(func(a, b): return _maintenance_cost(a) < _maintenance_cost(b))
+	var maintained_count := 0
+	for reg in candidates:
+		var cost = _maintenance_cost(reg)
+		if cash < cost:
+			break # sorted ascending - nothing pricier is affordable either
+		cash -= cost
+		reg["maintained_today"] = true
+		maintained_count += 1
+	return maintained_count
 
 func _maintain_region(reg: Dictionary) -> void:
 	if reg.get("maintained_today", false):
@@ -1293,10 +1320,16 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 	inventory_panel.add_child(processing_rows_container)
 
 	_add_label(inventory_panel, "Upgrades", Vector2(20, 820), Vector2(400, 30), 24)
+	# Scrollable so the growing upgrade list (already past the point of
+	# fitting statically) can never again push Soil Care/Save/Reset out of
+	# position - same pattern as the World Map's region list.
+	var upgrades_scroll := ScrollContainer.new()
+	upgrades_scroll.position = Vector2(20, 860)
+	upgrades_scroll.size = Vector2(640, 300)
+	inventory_panel.add_child(upgrades_scroll)
 	upgrade_rows_container = VBoxContainer.new()
-	upgrade_rows_container.position = Vector2(20, 860)
-	upgrade_rows_container.size = Vector2(640, 300)
-	inventory_panel.add_child(upgrade_rows_container)
+	upgrade_rows_container.custom_minimum_size = Vector2(620, 0)
+	upgrades_scroll.add_child(upgrade_rows_container)
 
 	_add_label(inventory_panel, "Soil Care", Vector2(20, 1175), Vector2(400, 30), 24)
 	soil_label = _add_label(inventory_panel, "", Vector2(20, 1213), Vector2(640, 26), 16, Color(0.8, 0.7, 0.5))
