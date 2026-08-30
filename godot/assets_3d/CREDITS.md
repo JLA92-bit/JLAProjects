@@ -15,6 +15,7 @@ required, but it's credited here anyway.
   scenery from the old 2D art was dropped rather than left as inconsistent
   flat sprites in the new 3D scene.
 - No farmhouse model — dropped for the same reason.
-- Tomato has no dedicated crop model in Nature Kit; it uses the generic
-  "leafs" plant for its growing stages and the melon model as a ready-to-
-  harvest stand-in (see `_crop_mesh_key()` in `scripts/Main.gd`).
+- Tomato and Pumpkin have no dedicated staged-growth model in Nature Kit;
+  both use the generic "leafs" plant for their growing stages, with the
+  melon model as tomato's ready-to-harvest stand-in and the pumpkin model
+  as pumpkin's (see `_crop_mesh_key()` in `scripts/Main.gd`).
