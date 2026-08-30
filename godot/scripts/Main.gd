@@ -142,11 +142,45 @@ const PROCESSING := {
 const PROCESSED_KEYS := ["flour", "cornmeal", "sauce", "pumpkin_pie"]
 
 const TERRAINS := ["grass", "farmland", "beach", "cliff", "water"]
+# ---------- World map (real continents, real countries) ----------
+# Each "region" is a real country, grouped under its real continent, in
+# roughly the order a farmer expanding from nothing would plausibly reach
+# it - not a fictional set piece. 96 countries across all six inhabited
+# continents and both hemispheres (Europe and most of Asia/North America
+# sit entirely in the Northern Hemisphere in reality, so they're left
+# that way here rather than artificially split).
 const CONTINENTS := [
-	{"name": "Verdant Plains", "regions": ["Ashville Fields", "Green Hollow", "Prairie Union", "Millbrook", "Oakmere"]},
-	{"name": "Sunspire Coast", "regions": ["Sunset Basin", "Shellhaven", "Tideward Cove", "Palmrest", "Coral Landing"]},
-	{"name": "Ironcrest Highlands", "regions": ["Ironcrest Farms", "North Ridge", "Stonefall", "Greywatch", "Craggen Hold"]},
-	{"name": "Blueriver Delta", "regions": ["Riverside Union", "Mossy Bend", "Willowmere", "Deepwater Flats", "Marsh Landing"]},
+	{"name": "Africa", "regions": [
+		"Egypt", "Libya", "Algeria", "Morocco", "Tunisia",
+		"Nigeria", "Ghana", "Senegal", "Mali", "Ethiopia",
+		"Kenya", "Tanzania", "Uganda", "Democratic Republic of the Congo", "Angola",
+		"Zambia", "Zimbabwe", "Botswana", "South Africa", "Madagascar",
+	]},
+	{"name": "Asia", "regions": [
+		"China", "India", "Japan", "South Korea", "Indonesia",
+		"Thailand", "Vietnam", "Philippines", "Malaysia", "Saudi Arabia",
+		"Turkey", "Iran", "Pakistan", "Bangladesh", "Kazakhstan",
+		"Mongolia", "Israel", "United Arab Emirates", "Sri Lanka", "Nepal",
+	]},
+	{"name": "Europe", "regions": [
+		"United Kingdom", "France", "Germany", "Italy", "Spain",
+		"Portugal", "Netherlands", "Belgium", "Poland", "Sweden",
+		"Norway", "Finland", "Denmark", "Greece", "Ukraine",
+		"Romania", "Switzerland", "Austria", "Ireland", "Iceland",
+	]},
+	{"name": "North America", "regions": [
+		"United States", "Canada", "Mexico", "Cuba", "Jamaica",
+		"Haiti", "Dominican Republic", "Guatemala", "Honduras", "Nicaragua",
+		"Costa Rica", "Panama", "Belize", "El Salvador", "Bahamas", "Greenland",
+	]},
+	{"name": "South America", "regions": [
+		"Brazil", "Argentina", "Chile", "Peru", "Colombia",
+		"Venezuela", "Ecuador", "Bolivia", "Paraguay", "Uruguay", "Guyana", "Suriname",
+	]},
+	{"name": "Oceania", "regions": [
+		"Australia", "New Zealand", "Papua New Guinea", "Fiji",
+		"Solomon Islands", "Vanuatu", "Samoa", "Tonga",
+	]},
 ]
 
 const SAVE_PATH := "user://farmworld_save_v2.json"
@@ -164,30 +198,30 @@ const ACTS := [
 	},
 	{
 		"title": "Act 2: The Outbreak Begins",
-		"intro": "A mysterious blight has appeared on the farm! The Cure Spray is now in your toolkit. The world map has opened - stake your first claim in Verdant Plains.",
+		"intro": "A mysterious blight has appeared on the farm! The Cure Spray is now in your toolkit. The world map has opened - stake your first claim in Africa.",
 		"tools": ["hoe", "water", "seed", "cure", "fertilize"],
 		"crops": ["wheat", "corn"],
-		"continents": ["Verdant Plains"],
+		"continents": ["Africa"],
 		"blight": true,
-		"goal_text": "Own all 5 regions of Verdant Plains.",
+		"goal_text": "Own all 20 regions of Africa.",
 	},
 	{
 		"title": "Act 3: Expanding Empire",
-		"intro": "Your empire is spreading. Tomatoes fetch a fine price, and three more continents are open for the taking.",
+		"intro": "Your empire is spreading. Tomatoes fetch a fine price, and every other continent on Earth is open for the taking.",
 		"tools": ["hoe", "water", "seed", "cure", "fertilize"],
 		"crops": ["wheat", "corn", "tomato"],
-		"continents": ["Verdant Plains", "Sunspire Coast", "Ironcrest Highlands", "Blueriver Delta"],
+		"continents": ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"],
 		"blight": true,
-		"goal_text": "Own at least 10 of the world's 20 regions.",
+		"goal_text": "Own at least half of the world's 96 regions.",
 	},
 	{
 		"title": "Act 4: World Domination",
 		"intro": "Every continent is in play. Finish what you started. Pumpkins are now in season - a premium late-game crop for the truly advanced farmer.",
 		"tools": ["hoe", "water", "seed", "cure", "fertilize"],
 		"crops": ["wheat", "corn", "tomato", "pumpkin"],
-		"continents": ["Verdant Plains", "Sunspire Coast", "Ironcrest Highlands", "Blueriver Delta"],
+		"continents": ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"],
 		"blight": true,
-		"goal_text": "Own all 20 regions - total world domination.",
+		"goal_text": "Own all 96 regions - total world domination.",
 	},
 ]
 
@@ -1076,11 +1110,12 @@ func _check_act_progress() -> void:
 			if cash >= 150:
 				advanced = true
 		1:
-			var verdant_owned = regions.filter(func(r): return r["continent"] == "Verdant Plains" and r["owned"]).size()
-			if verdant_owned >= 5:
+			var first_continent = CONTINENTS[0]["name"]
+			var first_owned = regions.filter(func(r): return r["continent"] == first_continent and r["owned"]).size()
+			if first_owned >= CONTINENTS[0]["regions"].size():
 				advanced = true
 		2:
-			if _owned_count() >= 10:
+			if _owned_count() >= int(regions.size() / 2.0):
 				advanced = true
 	if advanced:
 		current_act += 1
@@ -1775,7 +1810,26 @@ func _load_game() -> void:
 	if not (active_event.is_empty() or (active_event.has("crop") and CROPS.has(active_event["crop"]))):
 		active_event = {}
 	if parsed.has("regions"):
-		regions = parsed["regions"]
+		var loaded_regions = parsed["regions"]
+		# `regions` here still holds the freshly initialized real-world roster
+		# built by _init_fresh_state() before this function ran. A save from
+		# before the real-world map overhaul (or any future roster change)
+		# would carry a different set of names/counts entirely - trusting it
+		# wholesale would silently resurrect fictional countries that no
+		# longer exist anywhere in CONTINENTS. Only accept the loaded list
+		# when it actually matches the current roster; otherwise keep the
+		# fresh one and let region ownership reset cleanly.
+		var valid_names := {}
+		for r in regions:
+			valid_names[r["name"]] = true
+		var regions_valid = loaded_regions.size() == regions.size()
+		if regions_valid:
+			for r in loaded_regions:
+				if not valid_names.has(r.get("name", "")):
+					regions_valid = false
+					break
+		if regions_valid:
+			regions = loaded_regions
 
 	if parsed.has("plots"):
 		plots = parsed["plots"]
@@ -1789,6 +1843,8 @@ func _load_game() -> void:
 			plots[reg["name"]] = _make_empty_grid()
 
 	active_plot_id = parsed.get("active_plot_id", "home")
+	if active_plot_id != "home" and not regions.any(func(r): return r["name"] == active_plot_id):
+		active_plot_id = "home"
 	if not plots.has(active_plot_id):
 		active_plot_id = "home"
 	tiles = plots[active_plot_id]
