@@ -299,7 +299,13 @@ func _ready():
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
 	world_scenes["ground_grass"] = load(NK + "ground_grass.glb")
-	world_scenes["ground_soil"] = load(NK + "crops_dirtSingle.glb")
+	# crops_dirtSingle.glb is a small raised dirt MOUND meant to sit decoratively
+	# on top of a full grass tile, not a full-tile ground mesh - using it as the
+	# tilled-soil ground left every tilled/planted tile with no ground plane at
+	# all (sky showing through, mound floating above nothing). ground_pathTile
+	# is a proper flat 1x1 tile with a dirt-path center, so it reads correctly
+	# as tilled soil.
+	world_scenes["ground_soil"] = load(NK + "ground_pathTile.glb")
 	world_scenes["wheat_a"] = load(NK + "crops_wheatStageA.glb")
 	world_scenes["wheat_b"] = load(NK + "crops_wheatStageB.glb")
 	world_scenes["corn_a"] = load(NK + "crops_cornStageA.glb")
