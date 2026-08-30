@@ -498,6 +498,8 @@ func _build_animal_scene(kind: String) -> PackedScene:
 	var dark_pink := Color(0.8, 0.45, 0.52)
 	var red := Color(0.85, 0.15, 0.15)
 	var orange := Color(0.95, 0.6, 0.1)
+	var black := Color(0.15, 0.15, 0.15)
+	var horn_color := Color(0.85, 0.82, 0.75)
 
 	match kind:
 		"chicken":
@@ -572,6 +574,80 @@ func _build_animal_scene(kind: String) -> PackedScene:
 				ear.position = Vector3(ex, 0.4, 0.24)
 				_set_flat_material(ear, pink)
 				root.add_child(ear)
+		"sheep":
+			var body := MeshInstance3D.new()
+			var body_mesh := SphereMesh.new()
+			body_mesh.radius = 0.22
+			body_mesh.height = 0.44
+			body.mesh = body_mesh
+			body.position = Vector3(0, 0.22, 0)
+			_set_flat_material(body, white)
+			root.add_child(body)
+
+			var head := MeshInstance3D.new()
+			var head_mesh := SphereMesh.new()
+			head_mesh.radius = 0.09
+			head_mesh.height = 0.18
+			head.mesh = head_mesh
+			head.position = Vector3(0, 0.24, 0.2)
+			_set_flat_material(head, black)
+			root.add_child(head)
+
+			for ex in [-0.09, 0.09]:
+				var ear := MeshInstance3D.new()
+				var ear_mesh := BoxMesh.new()
+				ear_mesh.size = Vector3(0.03, 0.07, 0.03)
+				ear.mesh = ear_mesh
+				ear.position = Vector3(ex, 0.28, 0.18)
+				ear.rotation.z = deg_to_rad(30.0 * sign(ex))
+				_set_flat_material(ear, black)
+				root.add_child(ear)
+		"cow":
+			var body := MeshInstance3D.new()
+			var body_mesh := CapsuleMesh.new()
+			body_mesh.radius = 0.24
+			body_mesh.height = 0.62
+			body.mesh = body_mesh
+			body.rotation.z = PI / 2.0
+			body.position = Vector3(0, 0.26, 0)
+			_set_flat_material(body, white)
+			root.add_child(body)
+
+			var patch := MeshInstance3D.new()
+			var patch_mesh := SphereMesh.new()
+			patch_mesh.radius = 0.14
+			patch.mesh = patch_mesh
+			patch.position = Vector3(0.12, 0.3, -0.05)
+			_set_flat_material(patch, black)
+			root.add_child(patch)
+
+			var head := MeshInstance3D.new()
+			var head_mesh := SphereMesh.new()
+			head_mesh.radius = 0.17
+			head.mesh = head_mesh
+			head.position = Vector3(0, 0.3, 0.32)
+			_set_flat_material(head, white)
+			root.add_child(head)
+
+			var snout := MeshInstance3D.new()
+			var snout_mesh := CylinderMesh.new()
+			snout_mesh.top_radius = 0.08
+			snout_mesh.bottom_radius = 0.08
+			snout_mesh.height = 0.05
+			snout.mesh = snout_mesh
+			snout.rotation.x = PI / 2.0
+			snout.position = Vector3(0, 0.26, 0.48)
+			_set_flat_material(snout, pink)
+			root.add_child(snout)
+
+			for ex in [-0.08, 0.08]:
+				var horn := MeshInstance3D.new()
+				var horn_mesh := BoxMesh.new()
+				horn_mesh.size = Vector3(0.03, 0.06, 0.03)
+				horn.mesh = horn_mesh
+				horn.position = Vector3(ex, 0.42, 0.28)
+				_set_flat_material(horn, horn_color)
+				root.add_child(horn)
 
 	root.scale = Vector3.ONE * 1.8 # a bit larger - too subtle to read at the actual farm-view resolution otherwise
 	# PackedScene.pack() only serializes descendants whose `owner` is set to
@@ -634,6 +710,8 @@ func _load_world_assets():
 	player_skin_material.albedo_texture = load("res://assets_3d/character/skin_man.png")
 	world_scenes["chicken"] = _build_animal_scene("chicken")
 	world_scenes["pig"] = _build_animal_scene("pig")
+	world_scenes["sheep"] = _build_animal_scene("sheep")
+	world_scenes["cow"] = _build_animal_scene("cow")
 
 func _init_fresh_state():
 	plots = {"home": _make_empty_grid()}
@@ -787,6 +865,8 @@ func _build_scenery():
 		{"key": "chicken", "tx": 2.3, "tz": -1.6},
 		{"key": "chicken", "tx": 3.1, "tz": -1.4},
 		{"key": "pig", "tx": COLS - 2, "tz": ROWS + 0.5},
+		{"key": "sheep", "tx": -1.7, "tz": ROWS * 0.35},
+		{"key": "cow", "tx": COLS + 1.6, "tz": ROWS * 0.6},
 	]
 	for d in animal_deco:
 		var a = world_scenes[d["key"]].instantiate()

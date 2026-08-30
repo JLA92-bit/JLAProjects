@@ -22,19 +22,16 @@ required, but it's credited here anyway.
 
 ## Procedural (not sourced)
 
-- Chicken and pig scenery models (`_build_animal_scene()` in
+- Chicken, pig, sheep, and cow scenery models (`_build_animal_scene()` in
   `scripts/Main.gd`) are built from primitive meshes (spheres/boxes/
   cylinders) at runtime, not a sourced asset pack. The usual CC0 low-poly
   farm-animal packs (itch.io, poly.pizza) aren't reachable from this
   sandbox's network, and no GitHub mirror of one turned up either. Good
   enough to read clearly as ambient scenery at the farm's camera distance;
-  swap for a real model if one becomes reachable later.
+  swap for real models if one becomes reachable later.
 
 ## Known gaps (follow-up work)
 
-- Sheep and cow are still missing (see the procedural note above for why
-  a real asset pack couldn't be sourced) - could be added the same way
-  the chicken and pig were.
 - No farmhouse model.
 - Tomato and Pumpkin have no dedicated staged-growth model in Nature Kit;
   both use the generic "leafs" plant for their growing stages, with the
