@@ -118,6 +118,18 @@ const QUALITY_KEYS := ["poor", "good", "excellent"]
 const QUALITY_LABELS := {"poor": "Poor", "good": "Good", "excellent": "Excellent"}
 const QUALITY_MULTIPLIER := {"poor": 0.7, "good": 1.0, "excellent": 1.35}
 
+# ---------- Processing (turns raw produce into a higher-value good) ----------
+# Unlocked alongside the market, Act 2+. Consumes the WORST-quality raw
+# produce first (poor, then good, then excellent) so a Poor harvest that
+# would otherwise sell for a pittance still has a use, while top-quality
+# produce stays worth selling raw at full price.
+const PROCESSING := {
+	"wheat": {"product": "flour", "product_name": "Flour", "input_amount": 3, "price": 45},
+	"corn": {"product": "cornmeal", "product_name": "Cornmeal", "input_amount": 3, "price": 95},
+	"tomato": {"product": "sauce", "product_name": "Tomato Sauce", "input_amount": 3, "price": 180},
+}
+const PROCESSED_KEYS := ["flour", "cornmeal", "sauce"]
+
 const TERRAINS := ["grass", "farmland", "beach", "cliff", "water"]
 const CONTINENTS := [
 	{"name": "Verdant Plains", "regions": ["Ashville Fields", "Green Hollow", "Prairie Union", "Millbrook", "Oakmere"]},
@@ -179,6 +191,7 @@ var produce := {
 	"corn": {"poor": 0, "good": 0, "excellent": 0},
 	"tomato": {"poor": 0, "good": 0, "excellent": 0},
 }
+var processed_goods := {"flour": 0, "cornmeal": 0, "sauce": 0}
 var prices := {"wheat": 10, "corn": 22, "tomato": 45}
 var selected_crop := "wheat"
 var selected_tool := "hoe"
@@ -233,6 +246,7 @@ var move_right_held := false
 var inventory_panel: Panel
 var seed_rows_container: VBoxContainer
 var market_rows_container: VBoxContainer
+var processing_rows_container: VBoxContainer
 var upgrade_rows_container: VBoxContainer
 var blight_label: Label
 var soil_label: Label
@@ -866,6 +880,28 @@ func _harvest_quality(tile: Dictionary, sq: float, well_tended: bool) -> String:
 	else:
 		return "good"
 
+func _processing_unlocked() -> bool:
+	return current_act >= 1
+
+func _process_batches_available(key: String) -> int:
+	return _produce_total(key) / PROCESSING[key]["input_amount"]
+
+func _process_crop(key: String) -> void:
+	var recipe = PROCESSING[key]
+	var needed = recipe["input_amount"]
+	if _produce_total(key) < needed:
+		return
+	var remaining = needed
+	for q in QUALITY_KEYS:
+		var take = min(remaining, produce[key][q])
+		produce[key][q] -= take
+		remaining -= take
+		if remaining <= 0:
+			break
+	processed_goods[recipe["product"]] += 1
+	_log("Processed %d %s into 1 %s." % [needed, CROPS[key]["name"], recipe["product_name"]])
+	_refresh_all()
+
 func _upgrade_locked_reason(key: String) -> String:
 	if key == "storage_silo_2" and not owned_upgrades.get("storage_silo_1", false):
 		return "requires Storage Silo first"
@@ -1119,16 +1155,22 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 	_add_label(inventory_panel, "Outbreak Status", Vector2(20, 520), Vector2(400, 30), 24)
 	blight_label = _add_label(inventory_panel, "No active blight.", Vector2(20, 560), Vector2(640, 60), 18)
 
-	_add_label(inventory_panel, "Upgrades", Vector2(20, 630), Vector2(400, 30), 24)
+	_add_label(inventory_panel, "Processing", Vector2(20, 630), Vector2(400, 30), 24)
+	processing_rows_container = VBoxContainer.new()
+	processing_rows_container.position = Vector2(20, 670)
+	processing_rows_container.size = Vector2(640, 140)
+	inventory_panel.add_child(processing_rows_container)
+
+	_add_label(inventory_panel, "Upgrades", Vector2(20, 820), Vector2(400, 30), 24)
 	upgrade_rows_container = VBoxContainer.new()
-	upgrade_rows_container.position = Vector2(20, 670)
+	upgrade_rows_container.position = Vector2(20, 860)
 	upgrade_rows_container.size = Vector2(640, 300)
 	inventory_panel.add_child(upgrade_rows_container)
 
-	_add_label(inventory_panel, "Soil Care", Vector2(20, 985), Vector2(400, 30), 24)
-	soil_label = _add_label(inventory_panel, "", Vector2(20, 1023), Vector2(640, 26), 16, Color(0.8, 0.7, 0.5))
+	_add_label(inventory_panel, "Soil Care", Vector2(20, 1175), Vector2(400, 30), 24)
+	soil_label = _add_label(inventory_panel, "", Vector2(20, 1213), Vector2(640, 26), 16, Color(0.8, 0.7, 0.5))
 	var fert_row := HBoxContainer.new()
-	fert_row.position = Vector2(20, 1055)
+	fert_row.position = Vector2(20, 1245)
 	inventory_panel.add_child(fert_row)
 	fertilizer_label = Label.new()
 	fertilizer_label.custom_minimum_size = Vector2(340, 0)
@@ -1145,8 +1187,8 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 	)
 	fert_row.add_child(fert_buy_btn)
 
-	_add_button(inventory_panel, "Save Game", Vector2(20, 1120), Vector2(300, 56), _on_save_button_pressed)
-	_add_button(inventory_panel, "Reset Game", Vector2(340, 1120), Vector2(300, 56), func(): _reset_game())
+	_add_button(inventory_panel, "Save Game", Vector2(20, 1310), Vector2(300, 56), _on_save_button_pressed)
+	_add_button(inventory_panel, "Reset Game", Vector2(340, 1310), Vector2(300, 56), func(): _reset_game())
 
 func _build_map_panel(layer: CanvasLayer) -> void:
 	map_panel = Panel.new()
@@ -1308,6 +1350,56 @@ func _refresh_inventory_panel() -> void:
 			breakdown.add_theme_color_override("font_color", Color(0.7, 0.75, 0.7))
 			row.add_child(breakdown)
 		market_rows_container.add_child(row)
+
+	for child in processing_rows_container.get_children():
+		child.queue_free()
+	if not _processing_unlocked():
+		var locked_label := Label.new()
+		locked_label.text = "Processing unlocks in Act 2."
+		locked_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		processing_rows_container.add_child(locked_label)
+	else:
+		for key in CROP_KEYS:
+			if not _crop_unlocked(key):
+				continue
+			var recipe = PROCESSING[key]
+			var batches = _process_batches_available(key)
+			var row := HBoxContainer.new()
+			var label := Label.new()
+			label.text = "%d %s -> 1 %s (sells $%d)" % [recipe["input_amount"], CROPS[key]["name"], recipe["product_name"], recipe["price"]]
+			label.custom_minimum_size = Vector2(420, 0)
+			row.add_child(label)
+			var process_btn := Button.new()
+			process_btn.text = "Process"
+			process_btn.disabled = batches <= 0
+			process_btn.pressed.connect(func(): _process_crop(key))
+			row.add_child(process_btn)
+			processing_rows_container.add_child(row)
+		for product in PROCESSED_KEYS:
+			var amount = processed_goods[product]
+			if amount <= 0:
+				continue
+			var price = 0
+			for key in CROP_KEYS:
+				if PROCESSING[key]["product"] == product:
+					price = PROCESSING[key]["price"]
+					break
+			var row2 := HBoxContainer.new()
+			var label2 := Label.new()
+			label2.text = "In storage: %s x%d ($%d ea)" % [product.capitalize(), amount, price]
+			label2.custom_minimum_size = Vector2(420, 0)
+			row2.add_child(label2)
+			var sell_btn2 := Button.new()
+			sell_btn2.text = "Sell all"
+			sell_btn2.pressed.connect(func():
+				var earnings = amount * price
+				cash += earnings
+				processed_goods[product] = 0
+				_log("Sold %d %s for $%d." % [amount, product.capitalize(), earnings])
+				_refresh_all()
+			)
+			row2.add_child(sell_btn2)
+			processing_rows_container.add_child(row2)
 
 	var infected_count := 0
 	var infected_here := 0
@@ -1525,7 +1617,8 @@ func _on_update_check_completed(result: int, response_code: int, _headers: Packe
 # ---------- Save / Load ----------
 func _save_game() -> void:
 	var data := {
-		"cash": cash, "day": day, "seeds": seeds, "fertilizer": fertilizer, "produce": produce, "prices": prices,
+		"cash": cash, "day": day, "seeds": seeds, "fertilizer": fertilizer, "produce": produce,
+		"processed_goods": processed_goods, "prices": prices,
 		"selected_crop": selected_crop, "selected_tool": selected_tool,
 		"current_act": current_act, "victory_shown": victory_shown,
 		"season_idx": season_idx, "season_day": season_day,
@@ -1565,6 +1658,11 @@ func _load_game() -> void:
 			else:
 				# Pre-quality-grade save: a flat int count. Treat it as "good".
 				produce[key] = {"poor": 0, "good": int(entry), "excellent": 0}
+	var loaded_processed = parsed.get("processed_goods", null)
+	if typeof(loaded_processed) == TYPE_DICTIONARY:
+		for key in PROCESSED_KEYS:
+			if loaded_processed.has(key):
+				processed_goods[key] = int(loaded_processed[key])
 	prices = parsed.get("prices", prices)
 	selected_crop = parsed.get("selected_crop", selected_crop)
 	selected_tool = parsed.get("selected_tool", selected_tool)
@@ -1616,6 +1714,7 @@ func _reset_game() -> void:
 		"corn": {"poor": 0, "good": 0, "excellent": 0},
 		"tomato": {"poor": 0, "good": 0, "excellent": 0},
 	}
+	processed_goods = {"flour": 0, "cornmeal": 0, "sauce": 0}
 	prices = {"wheat": 10, "corn": 22, "tomato": 45}
 	selected_crop = "wheat"
 	selected_tool = "hoe"
