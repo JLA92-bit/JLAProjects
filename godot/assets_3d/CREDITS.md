@@ -19,6 +19,16 @@ required, but it's credited here anyway.
   repository is MIT licensed (Copyright (c) 2014-present Godot Engine
   contributors); no separate per-asset license file was present for this
   texture, so it falls under the repo's blanket MIT license.
+- `fantasy_town_kit/` — a handful of pieces (`wallWood`, `wallWoodDoor`,
+  `roofGable`, `chimney`) from Kenney's "Fantasy Town Kit", sourced from
+  the same `ETdoFresh/kenney.nl` mirror as everything else above, used as
+  the farmhouse landmark (see `_build_farmhouse_scene()` in
+  `scripts/Main.gd`). No per-kit license file exists in that folder of the
+  mirror, so it falls under the repo's blanket CC0 README statement -
+  independently corroborated against kenney.nl's own listing for this kit.
+  The wall pieces are each modeled to occupy one edge of a 1x1x1 cell, so
+  the same piece is instantiated 4 times at 90-degree yaw increments to
+  close a small box, with the gable roof capping it.
 
 ## Procedural (not sourced)
 
@@ -32,7 +42,6 @@ required, but it's credited here anyway.
 
 ## Known gaps (follow-up work)
 
-- No farmhouse model.
 - Tomato and Pumpkin have no dedicated staged-growth model in Nature Kit;
   both use the generic "leafs" plant for their growing stages, with the
   melon model as tomato's ready-to-harvest stand-in and the pumpkin model

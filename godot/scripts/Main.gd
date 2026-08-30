@@ -663,6 +663,39 @@ func _set_owner_recursive(node: Node, root: Node) -> void:
 		child.owner = root
 		_set_owner_recursive(child, root)
 
+# A small cottage assembled from real Kenney "Fantasy Town Kit" pieces (CC0,
+# see CREDITS.md) rather than another procedural stand-in - these wood wall
+# models are each authored to occupy one edge of a 1x1x1 cell (a thin slab
+# spanning the full width of one side), so instantiating the same cell's
+# four wall pieces at yaw 0/90/180/270 around a shared origin closes them
+# into a simple box, with the gable roof piece sized to cap that same cell.
+func _build_farmhouse_scene() -> PackedScene:
+	const FT := "res://assets_3d/fantasy_town_kit/"
+	var root := Node3D.new()
+	var walls = [
+		{"path": "wallWoodDoor.glb", "yaw": 0.0}, # front, the only side with an entrance
+		{"path": "wallWood.glb", "yaw": PI / 2.0},
+		{"path": "wallWood.glb", "yaw": PI},
+		{"path": "wallWood.glb", "yaw": -PI / 2.0},
+	]
+	for w in walls:
+		var inst = load(FT + w["path"]).instantiate()
+		inst.rotation.y = w["yaw"]
+		root.add_child(inst)
+
+	var roof_inst = load(FT + "roofGable.glb").instantiate()
+	roof_inst.position = Vector3(0, 1.0, 0)
+	root.add_child(roof_inst)
+
+	var chimney_inst = load(FT + "chimney.glb").instantiate()
+	chimney_inst.position = Vector3(0.2, 1.0, -0.2)
+	root.add_child(chimney_inst)
+
+	_set_owner_recursive(root, root)
+	var scene := PackedScene.new()
+	scene.pack(root)
+	return scene
+
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
 	# Kenney's ground_grass.glb is a flat solid vertex color (no texture at
@@ -712,6 +745,7 @@ func _load_world_assets():
 	world_scenes["pig"] = _build_animal_scene("pig")
 	world_scenes["sheep"] = _build_animal_scene("sheep")
 	world_scenes["cow"] = _build_animal_scene("cow")
+	world_scenes["farmhouse"] = _build_farmhouse_scene()
 
 func _init_fresh_state():
 	plots = {"home": _make_empty_grid()}
@@ -858,6 +892,12 @@ func _build_scenery():
 		var s = world_scenes[d["key"]].instantiate()
 		s.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
 		world_root.add_child(s)
+
+	# The farmhouse - a landmark sitting in the backdrop behind the top
+	# fence, not on the playable grid itself.
+	var farmhouse: Node3D = world_scenes["farmhouse"].instantiate()
+	farmhouse.position = Vector3((COLS - 1) * 0.5 * WORLD_TILE, 0, -3.0 * WORLD_TILE)
+	world_root.add_child(farmhouse)
 
 	# A few farm animals wandering just outside the fence, purely for
 	# ambience - not interactive, not on the playable grid.
