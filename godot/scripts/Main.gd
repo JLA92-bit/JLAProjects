@@ -223,6 +223,8 @@ var selected_crop := "wheat"
 var selected_tool := "hoe"
 var current_act := 0 # index into ACTS
 var victory_shown := false
+var lifetime_harvested := 0 # total crop units ever harvested, never decreases
+var lifetime_earned := 0 # total $ ever earned selling crops/processed goods, never decreases
 var owned_upgrades := {} # upgrade key -> bool
 var active_event := {} # {} = none, else {"crop":key, "multiplier":float, "days_left":int}
 var season_idx := 0
@@ -277,6 +279,7 @@ var upgrade_rows_container: VBoxContainer
 var blight_label: Label
 var soil_label: Label
 var fertilizer_label: Label
+var lifetime_stats_label: Label
 
 var map_panel: Panel
 var map_summary_label: Label
@@ -579,6 +582,7 @@ func _do_action() -> void:
 					return
 				var quality = _harvest_quality(tile, sq, watered_enough)
 				produce[tile["crop"]][quality] += amount
+				lifetime_harvested += amount
 				_log("Harvested %dx %s (%s quality)%s." % [amount, CROPS[tile["crop"]]["name"], QUALITY_LABELS[quality], " - well-tended bonus!" if well_tended else ""])
 				tile["type"] = "soil"
 			var same_crop = tile.get("last_crop", "") == tile["crop"]
@@ -1256,6 +1260,7 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 
 	_add_button(inventory_panel, "Save Game", Vector2(20, 1310), Vector2(300, 56), _on_save_button_pressed)
 	_add_button(inventory_panel, "Reset Game", Vector2(340, 1310), Vector2(300, 56), func(): _reset_game())
+	lifetime_stats_label = _add_label(inventory_panel, "", Vector2(20, 1390), Vector2(640, 26), 15, Color(0.65, 0.65, 0.7))
 
 func _build_map_panel(layer: CanvasLayer) -> void:
 	map_panel = Panel.new()
@@ -1409,6 +1414,7 @@ func _refresh_inventory_panel() -> void:
 				earnings += n * price
 				produce[key][q] = 0
 			cash += earnings
+			lifetime_earned += earnings
 			_log("Sold %d %s for $%d." % [amount, crop["name"], earnings])
 			_check_act_progress()
 			_refresh_all()
@@ -1471,6 +1477,7 @@ func _refresh_inventory_panel() -> void:
 			sell_btn2.pressed.connect(func():
 				var earnings = amount * price
 				cash += earnings
+				lifetime_earned += earnings
 				processed_goods[product] = 0
 				_log("Sold %d %s for $%d." % [amount, product.capitalize(), earnings])
 				_refresh_all()
@@ -1534,6 +1541,7 @@ func _refresh_inventory_panel() -> void:
 	else:
 		soil_label.text = "Avg soil quality on this plot: %d%% (%s)" % [int(round(_avg_soil_quality())), _soil_quality_label(_avg_soil_quality())]
 		fertilizer_label.text = "Fertilizer: %d in stock (+%d%% quality per use)" % [fertilizer, int(SOIL_FERTILIZE_BOOST)]
+	lifetime_stats_label.text = "Lifetime: %d crops harvested, $%d earned from farming" % [lifetime_harvested, lifetime_earned]
 
 func _avg_soil_quality() -> float:
 	var total := 0.0
@@ -1698,6 +1706,7 @@ func _save_game() -> void:
 		"processed_goods": processed_goods, "prices": prices,
 		"selected_crop": selected_crop, "selected_tool": selected_tool,
 		"current_act": current_act, "victory_shown": victory_shown,
+		"lifetime_harvested": lifetime_harvested, "lifetime_earned": lifetime_earned,
 		"season_idx": season_idx, "season_day": season_day,
 		"current_weather": current_weather, "forecast_weather": forecast_weather,
 		"plots": plots, "active_plot_id": active_plot_id, "regions": regions,
@@ -1751,6 +1760,8 @@ func _load_game() -> void:
 	selected_tool = parsed.get("selected_tool", selected_tool)
 	current_act = clampi(int(parsed.get("current_act", current_act)), 0, ACTS.size() - 1)
 	victory_shown = parsed.get("victory_shown", victory_shown)
+	lifetime_harvested = int(parsed.get("lifetime_harvested", lifetime_harvested))
+	lifetime_earned = int(parsed.get("lifetime_earned", lifetime_earned))
 	season_idx = clampi(int(parsed.get("season_idx", season_idx)), 0, SEASONS.size() - 1)
 	season_day = clampi(int(parsed.get("season_day", season_day)), 0, SEASON_LENGTH - 1)
 	current_weather = parsed.get("current_weather", current_weather)
@@ -1804,6 +1815,8 @@ func _reset_game() -> void:
 	selected_tool = "hoe"
 	current_act = 0
 	victory_shown = false
+	lifetime_harvested = 0
+	lifetime_earned = 0
 	player_pos = Vector2(TILE * 2, TILE * 2)
 	tiles.clear()
 	regions.clear()
