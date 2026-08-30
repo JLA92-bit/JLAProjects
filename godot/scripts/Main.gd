@@ -429,9 +429,41 @@ func _ready():
 	_load_build_commit()
 	_check_for_update()
 
+func _build_textured_ground_scene(texture_path: String, tint: Color = Color.WHITE) -> PackedScene:
+	var mesh_instance := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(WORLD_TILE, WORLD_TILE)
+	mesh_instance.mesh = plane
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load(texture_path)
+	mat.albedo_color = tint
+	mat.roughness = 0.95 # matte, not shiny/plastic-looking under the directional light
+	# Mipmapped filtering (the default) is what keeps the far backdrop tiles
+	# from turning into visual static - the viewport is only a few hundred
+	# pixels across, so a huge swath of distant tiles has to compress into a
+	# handful of pixels, and only mipmaps can average that down cleanly.
+	mesh_instance.material_override = mat
+	var scene := PackedScene.new()
+	scene.pack(mesh_instance)
+	return scene
+
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
-	world_scenes["ground_grass"] = load(NK + "ground_grass.glb")
+	# Kenney's ground_grass.glb is a flat solid vertex color (no texture at
+	# all), which read as an unrealistic flat-green void once it was also
+	# used to fill the whole backdrop beyond the farm. Swapped for a real
+	# photographed, seamless grass texture (see CREDITS.md) applied to a
+	# plain 1x1 quad, built once here and reused via .instantiate() exactly
+	# like the other world_scenes entries.
+	world_scenes["ground_grass"] = _build_textured_ground_scene("res://assets_3d/textures/grass_real.webp")
+	# The backdrop skirt (see _build_scenery) sits much farther from the
+	# camera on average than the real playable grid, so the GPU samples a
+	# coarser, blurred-down mip level for it - and averaging this specific
+	# photo's texel data skews noticeably brighter, leaving a visible tonal
+	# seam right at the grid's edge. A dedicated, gently-darkened tint on the
+	# backdrop-only copy brings its far-mip average back in line with the
+	# grid's close-up tone, without touching the real tiles or the texture.
+	world_scenes["ground_grass_backdrop"] = _build_textured_ground_scene("res://assets_3d/textures/grass_real.webp", Color(0.82, 0.86, 0.78))
 	# crops_dirtSingle.glb is a small raised dirt MOUND meant to sit decoratively
 	# on top of a full grass tile, not a full-tile ground mesh - using it as the
 	# tilled-soil ground left every tilled/planted tile with no ground plane at
@@ -578,7 +610,7 @@ func _build_scenery():
 		for tx in range(-BACKDROP_MARGIN, COLS + BACKDROP_MARGIN):
 			if tx >= 0 and tx < COLS and tz >= 0 and tz < ROWS:
 				continue # the real playable grid already covers this cell
-			var backdrop_tile: Node3D = world_scenes["ground_grass"].instantiate()
+			var backdrop_tile: Node3D = world_scenes["ground_grass_backdrop"].instantiate()
 			backdrop_tile.position = Vector3(tx * WORLD_TILE, -0.01, tz * WORLD_TILE)
 			world_root.add_child(backdrop_tile)
 
