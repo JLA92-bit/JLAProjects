@@ -29,10 +29,13 @@ const PLAYER_Y_OFFSET := 0.1 # compensates its feet sitting slightly below y=0
 # with the same committed keystore.
 const UPDATE_CHECK_URL := "https://api.github.com/repos/JLA92-bit/JLAProjects/releases/tags/android-latest"
 
+# "thirsty" crops dry out one day faster than normal every day (not just
+# during a heatwave), giving each crop a distinct watering-frequency
+# requirement - a simple boolean tag rather than a numeric water-need stat.
 const CROPS := {
-	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"], "frost_hardy": true, "heat_sensitive": false},
-	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"], "frost_hardy": false, "heat_sensitive": false},
-	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45, "seasons": ["Summer", "Fall"], "frost_hardy": false, "heat_sensitive": true},
+	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"], "frost_hardy": true, "heat_sensitive": false, "thirsty": false},
+	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"], "frost_hardy": false, "heat_sensitive": false, "thirsty": true},
+	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45, "seasons": ["Summer", "Fall"], "frost_hardy": false, "heat_sensitive": true, "thirsty": false},
 }
 const CROP_KEYS := ["wheat", "corn", "tomato"]
 
@@ -717,6 +720,8 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 			var dry_step := 2 if terrain == "beach" else 1
 			if current_weather == "heatwave" and crop_info.get("heat_sensitive", false) and terrain != "water":
 				dry_step += 1
+			if crop_info.get("thirsty", false) and terrain != "water":
+				dry_step += 1
 
 			if current_weather == "frost" and terrain != "water" and not crop_info.get("frost_hardy", false):
 				if randf() < 0.5:
@@ -1281,6 +1286,8 @@ func _refresh_inventory_panel() -> void:
 			trait_tag = "  🥶 frost-hardy"
 		elif crop.get("heat_sensitive", false):
 			trait_tag = "  🌡 heat-sensitive"
+		elif crop.get("thirsty", false):
+			trait_tag = "  💧 thirsty"
 		var row := HBoxContainer.new()
 		var label := Label.new()
 		label.text = "%s (seeds: %d)%s%s" % [crop["name"], seeds[key], trait_tag, "  [selected]" if key == selected_crop else ""]
