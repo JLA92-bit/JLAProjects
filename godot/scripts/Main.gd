@@ -83,12 +83,13 @@ const TERRAIN_FLAVOR := {
 
 # ---------- Equipment upgrades (durable money sinks, Act 2+) ----------
 const BASE_STORAGE_CAP := 15
-const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2", "sprinkler_system"]
+const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2", "sprinkler_system", "scarecrow"]
 const UPGRADES := {
 	"watering_can_2": {"name": "Reinforced Watering Can", "cost": 200, "desc": "Waters a 3x3 area around you instead of a single tile."},
 	"storage_silo_1": {"name": "Storage Silo", "cost": 150, "desc": "+20 storage capacity per crop."},
 	"storage_silo_2": {"name": "Storage Silo II", "cost": 400, "desc": "+20 more storage capacity per crop."},
 	"sprinkler_system": {"name": "Sprinkler System", "cost": 600, "desc": "Automatically waters every planted tile on whichever farm you're actively working, every morning - no more manual watering there."},
+	"scarecrow": {"name": "Scarecrow", "cost": 180, "desc": "Halves the chance of blight starting or spreading on whichever farm you're actively working."},
 }
 
 const TOOLS := {
@@ -731,13 +732,15 @@ func _redraw_all_tiles() -> void:
 # Advances one plot's tile grid by a day: growth, watering/weather, wilt,
 # and blight infection/spread. Runs for every plot the player owns (not
 # just the one on screen) so farms left untended elsewhere keep changing.
-func _advance_tiles(t_grid: Array, terrain: String, sprinklered: bool = false) -> Dictionary:
+func _advance_tiles(t_grid: Array, terrain: String, sprinklered: bool = false, warded: bool = false) -> Dictionary:
 	var infected_tiles := []
 	var wilted := 0
 	var storm_damaged := 0
 	var frost_damaged := 0
 	var auto_watered := current_weather == "rainy" or current_weather == "storm" or terrain == "water" or sprinklered
 	var blight_mult := 0.5 if terrain == "cliff" else 1.0
+	if warded:
+		blight_mult *= 0.5
 
 	for r in range(ROWS):
 		for c in range(COLS):
@@ -838,7 +841,8 @@ func _day_tick() -> void:
 
 	for plot_id in plots.keys():
 		var sprinklered = plot_id == active_plot_id and owned_upgrades.get("sprinkler_system", false)
-		var result := _advance_tiles(plots[plot_id], _terrain_for_plot(plot_id), sprinklered)
+		var warded = plot_id == active_plot_id and owned_upgrades.get("scarecrow", false)
+		var result := _advance_tiles(plots[plot_id], _terrain_for_plot(plot_id), sprinklered, warded)
 		total_infected += result["infected_count"]
 		if plot_id == active_plot_id:
 			wilted = result["wilted"]
