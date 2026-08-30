@@ -39,8 +39,9 @@ const CROPS := {
 	"wheat": {"name": "Wheat", "seed_cost": 5, "grow_days": 3, "base_price": 10, "seasons": ["Spring", "Summer", "Fall", "Winter"], "frost_hardy": true, "heat_sensitive": false, "thirsty": false, "blight_resistant": true},
 	"corn": {"name": "Corn", "seed_cost": 10, "grow_days": 4, "base_price": 22, "seasons": ["Spring", "Summer"], "frost_hardy": false, "heat_sensitive": false, "thirsty": true, "blight_resistant": false},
 	"tomato": {"name": "Tomato", "seed_cost": 20, "grow_days": 5, "base_price": 45, "seasons": ["Summer", "Fall"], "frost_hardy": false, "heat_sensitive": true, "thirsty": false, "blight_resistant": false},
+	"pumpkin": {"name": "Pumpkin", "seed_cost": 35, "grow_days": 6, "base_price": 70, "seasons": ["Fall"], "frost_hardy": false, "heat_sensitive": false, "thirsty": false, "blight_resistant": false},
 }
-const CROP_KEYS := ["wheat", "corn", "tomato"]
+const CROP_KEYS := ["wheat", "corn", "tomato", "pumpkin"]
 
 # ---------- Seasons & weather ----------
 const SEASONS := ["Spring", "Summer", "Fall", "Winter"]
@@ -133,8 +134,9 @@ const PROCESSING := {
 	"wheat": {"product": "flour", "product_name": "Flour", "input_amount": 3, "price": 45},
 	"corn": {"product": "cornmeal", "product_name": "Cornmeal", "input_amount": 3, "price": 95},
 	"tomato": {"product": "sauce", "product_name": "Tomato Sauce", "input_amount": 3, "price": 180},
+	"pumpkin": {"product": "pumpkin_pie", "product_name": "Pumpkin Pie", "input_amount": 3, "price": 275},
 }
-const PROCESSED_KEYS := ["flour", "cornmeal", "sauce"]
+const PROCESSED_KEYS := ["flour", "cornmeal", "sauce", "pumpkin_pie"]
 
 const TERRAINS := ["grass", "farmland", "beach", "cliff", "water"]
 const CONTINENTS := [
@@ -177,9 +179,9 @@ const ACTS := [
 	},
 	{
 		"title": "Act 4: World Domination",
-		"intro": "Every continent is in play. Finish what you started.",
+		"intro": "Every continent is in play. Finish what you started. Pumpkins are now in season - a premium late-game crop for the truly advanced farmer.",
 		"tools": ["hoe", "water", "seed", "cure", "fertilize"],
-		"crops": ["wheat", "corn", "tomato"],
+		"crops": ["wheat", "corn", "tomato", "pumpkin"],
 		"continents": ["Verdant Plains", "Sunspire Coast", "Ironcrest Highlands", "Blueriver Delta"],
 		"blight": true,
 		"goal_text": "Own all 20 regions - total world domination.",
@@ -204,15 +206,16 @@ const TIER_PRICE_BONUS_PER_LEVEL := 0.03 # +3% sell price per tier above Basic
 var cash := 100
 var day := 1
 var day_progress := 0.0
-var seeds := {"wheat": 6, "corn": 2, "tomato": 0}
+var seeds := {"wheat": 6, "corn": 2, "tomato": 0, "pumpkin": 0}
 var fertilizer := 3
 var produce := {
 	"wheat": {"poor": 0, "good": 0, "excellent": 0},
 	"corn": {"poor": 0, "good": 0, "excellent": 0},
 	"tomato": {"poor": 0, "good": 0, "excellent": 0},
+	"pumpkin": {"poor": 0, "good": 0, "excellent": 0},
 }
-var processed_goods := {"flour": 0, "cornmeal": 0, "sauce": 0}
-var prices := {"wheat": 10, "corn": 22, "tomato": 45}
+var processed_goods := {"flour": 0, "cornmeal": 0, "sauce": 0, "pumpkin_pie": 0}
+var prices := {"wheat": 10, "corn": 22, "tomato": 45, "pumpkin": 70}
 var selected_crop := "wheat"
 var selected_tool := "hoe"
 var current_act := 0 # index into ACTS
@@ -308,6 +311,9 @@ func _load_world_assets():
 	world_scenes["tomato_a"] = load(NK + "crops_leafsStageA.glb")
 	world_scenes["tomato_b"] = load(NK + "crops_leafsStageB.glb")
 	world_scenes["tomato_ready"] = load(NK + "crop_melon.glb")
+	world_scenes["pumpkin_a"] = load(NK + "crops_leafsStageA.glb")
+	world_scenes["pumpkin_b"] = load(NK + "crops_leafsStageB.glb")
+	world_scenes["pumpkin_ready"] = load(NK + "crop_pumpkin.glb")
 	world_scenes["fence"] = load(NK + "fence_simple.glb")
 	world_scenes["fence_corner"] = load(NK + "fence_corner.glb")
 	world_scenes["tree"] = load(NK + "tree_default.glb")
@@ -669,6 +675,10 @@ func _crop_mesh_key(crop: String, stage: int) -> String:
 			if stage <= 1: return "tomato_a"
 			elif stage <= 3: return "tomato_b"
 			else: return "tomato_ready"
+		"pumpkin":
+			if stage <= 1: return "pumpkin_a"
+			elif stage <= 3: return "pumpkin_b"
+			else: return "pumpkin_ready"
 	return "wheat_a"
 
 func _tint_node(node: Node, color: Color) -> void:
@@ -1693,6 +1703,9 @@ func _load_game() -> void:
 	cash = parsed.get("cash", cash)
 	day = parsed.get("day", day)
 	seeds = parsed.get("seeds", seeds)
+	for key in CROP_KEYS:
+		if not seeds.has(key):
+			seeds[key] = 0
 	fertilizer = parsed.get("fertilizer", fertilizer)
 	var loaded_produce = parsed.get("produce", null)
 	if typeof(loaded_produce) == TYPE_DICTIONARY:
@@ -1711,6 +1724,9 @@ func _load_game() -> void:
 			if loaded_processed.has(key):
 				processed_goods[key] = int(loaded_processed[key])
 	prices = parsed.get("prices", prices)
+	for key in CROP_KEYS:
+		if not prices.has(key):
+			prices[key] = CROPS[key]["base_price"]
 	selected_crop = parsed.get("selected_crop", selected_crop)
 	selected_tool = parsed.get("selected_tool", selected_tool)
 	current_act = clampi(int(parsed.get("current_act", current_act)), 0, ACTS.size() - 1)
@@ -1754,15 +1770,16 @@ func _reset_game() -> void:
 	cash = 100
 	day = 1
 	day_progress = 0.0
-	seeds = {"wheat": 6, "corn": 2, "tomato": 0}
+	seeds = {"wheat": 6, "corn": 2, "tomato": 0, "pumpkin": 0}
 	fertilizer = 3
 	produce = {
 		"wheat": {"poor": 0, "good": 0, "excellent": 0},
 		"corn": {"poor": 0, "good": 0, "excellent": 0},
 		"tomato": {"poor": 0, "good": 0, "excellent": 0},
+		"pumpkin": {"poor": 0, "good": 0, "excellent": 0},
 	}
-	processed_goods = {"flour": 0, "cornmeal": 0, "sauce": 0}
-	prices = {"wheat": 10, "corn": 22, "tomato": 45}
+	processed_goods = {"flour": 0, "cornmeal": 0, "sauce": 0, "pumpkin_pie": 0}
+	prices = {"wheat": 10, "corn": 22, "tomato": 45, "pumpkin": 70}
 	selected_crop = "wheat"
 	selected_tool = "hoe"
 	current_act = 0
