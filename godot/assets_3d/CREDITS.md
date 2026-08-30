@@ -8,6 +8,13 @@ required, but it's credited here anyway.
   See `nature_kit/LICENSE.txt`.
 - `character/` — Kenney "Blocky Characters" (player model + skin texture).
   See `character/LICENSE.txt`.
+- `textures/grass_real.webp` — a real, seamless, tileable grass photo
+  texture from the official Godot Engine `godot-demo-projects` repository
+  (`3d/truck_town/town/materials/grass.webp`), used in place of Kenney's
+  flat solid-color grass tile for a more realistic farmland look. That
+  repository is MIT licensed (Copyright (c) 2014-present Godot Engine
+  contributors); no separate per-asset license file was present for this
+  texture, so it falls under the repo's blanket MIT license.
 
 ## Known gaps (follow-up work)
 
