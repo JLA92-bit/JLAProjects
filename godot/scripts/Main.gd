@@ -187,15 +187,18 @@ const ACTS := [
 ]
 
 # ---------- Farm progression (infrastructure ladder, separate from the Acts) ----------
-# The Acts above are the story/unlock gate; this ladder is a read-only label
-# reflecting how built-out the player's actual farming operation is, driven
-# by a simple score: +1 per Act reached beyond the first, +1 per equipment
-# upgrade owned. It labels the same growth the player is already causing
-# (more Acts, more upgrades) rather than gating anything new of its own.
+# The Acts above are the story/unlock gate; this ladder reflects how
+# built-out the player's actual farming operation is, driven by a simple
+# score: +1 per Act reached beyond the first, +1 per equipment upgrade
+# owned. It tracks the same growth the player is already causing (more
+# Acts, more upgrades) rather than gating anything new of its own - but a
+# higher tier means the farm's reputation now earns a small, real sell-price
+# bonus, so the label isn't purely cosmetic.
 const FARM_TIERS := [
 	"Basic Farm", "Improved Farm", "Specialised Farm",
 	"Productive Farm", "Commercial Operation", "Advanced Agricultural Business",
 ]
+const TIER_PRICE_BONUS_PER_LEVEL := 0.03 # +3% sell price per tier above Basic
 
 # ---------- Game state ----------
 var cash := 100
@@ -945,9 +948,10 @@ func _upgrade_locked_reason(key: String) -> String:
 
 # ---------- Market events ----------
 func _effective_price(key: String) -> int:
+	var base = prices[key] * (1.0 + TIER_PRICE_BONUS_PER_LEVEL * _farm_tier_index())
 	if active_event.get("crop", "") == key:
-		return int(round(prices[key] * active_event["multiplier"]))
-	return prices[key]
+		return int(round(base * active_event["multiplier"]))
+	return int(round(base))
 
 func _advance_market_event() -> void:
 	if active_event.is_empty():
@@ -1281,7 +1285,9 @@ func _refresh_all() -> void:
 		event_suffix,
 	]
 	var terrain = _terrain_for_plot(active_plot_id)
-	hud_farm.text = "Farming: %s%s  |  Tier: %s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain, _farm_tier_name()]
+	var tier_idx = _farm_tier_index()
+	var tier_bonus_tag = ("  (+%d%% sell price)" % int(round(TIER_PRICE_BONUS_PER_LEVEL * tier_idx * 100))) if tier_idx > 0 else ""
+	hud_farm.text = "Farming: %s%s  |  Tier: %s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain, _farm_tier_name(), tier_bonus_tag]
 	map_button.visible = _act()["continents"].size() > 0
 	_refresh_tool_ui()
 	_refresh_inventory_panel()
