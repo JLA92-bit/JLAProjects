@@ -143,43 +143,68 @@ const PROCESSED_KEYS := ["flour", "cornmeal", "sauce", "pumpkin_pie"]
 
 const TERRAINS := ["grass", "farmland", "beach", "cliff", "water"]
 # ---------- World map (real continents, real countries) ----------
-# Each "region" is a real country, grouped under its real continent, in
-# roughly the order a farmer expanding from nothing would plausibly reach
-# it - not a fictional set piece. 96 countries across all six inhabited
-# continents and both hemispheres (Europe and most of Asia/North America
-# sit entirely in the Northern Hemisphere in reality, so they're left
-# that way here rather than artificially split).
+# Each "region" is a real country, grouped under its real continent. This
+# is the full roster: essentially every UN member state grouped by its
+# real continent (Africa's 54, Europe's ~44, etc.), plus a handful of
+# widely-recognized non-UN places commonly included in "countries of the
+# world" lists (Taiwan, Kosovo, Palestine, Vatican City, Greenland) -
+# matching how atlases and geography games usually scope "every country",
+# rather than a fictional set piece. Hemisphere placement follows reality:
+# Europe and virtually all of North America sit entirely in the Northern
+# Hemisphere, Oceania and most of South America in the Southern.
 const CONTINENTS := [
 	{"name": "Africa", "regions": [
-		"Egypt", "Libya", "Algeria", "Morocco", "Tunisia",
-		"Nigeria", "Ghana", "Senegal", "Mali", "Ethiopia",
-		"Kenya", "Tanzania", "Uganda", "Democratic Republic of the Congo", "Angola",
-		"Zambia", "Zimbabwe", "Botswana", "South Africa", "Madagascar",
+		"Algeria", "Angola", "Benin", "Botswana", "Burkina Faso",
+		"Burundi", "Cabo Verde", "Cameroon", "Central African Republic", "Chad",
+		"Comoros", "Democratic Republic of the Congo", "Republic of the Congo", "Djibouti", "Egypt",
+		"Equatorial Guinea", "Eritrea", "Eswatini", "Ethiopia", "Gabon",
+		"Gambia", "Ghana", "Guinea", "Guinea-Bissau", "Ivory Coast",
+		"Kenya", "Lesotho", "Liberia", "Libya", "Madagascar",
+		"Malawi", "Mali", "Mauritania", "Mauritius", "Morocco",
+		"Mozambique", "Namibia", "Niger", "Nigeria", "Rwanda",
+		"Sao Tome and Principe", "Senegal", "Seychelles", "Sierra Leone", "Somalia",
+		"South Africa", "South Sudan", "Sudan", "Tanzania", "Togo",
+		"Tunisia", "Uganda", "Zambia", "Zimbabwe",
 	]},
 	{"name": "Asia", "regions": [
-		"China", "India", "Japan", "South Korea", "Indonesia",
-		"Thailand", "Vietnam", "Philippines", "Malaysia", "Saudi Arabia",
-		"Turkey", "Iran", "Pakistan", "Bangladesh", "Kazakhstan",
-		"Mongolia", "Israel", "United Arab Emirates", "Sri Lanka", "Nepal",
+		"Afghanistan", "Armenia", "Azerbaijan", "Bahrain", "Bangladesh",
+		"Bhutan", "Brunei", "Cambodia", "China", "Cyprus",
+		"Georgia", "India", "Indonesia", "Iran", "Iraq",
+		"Israel", "Japan", "Jordan", "Kazakhstan", "Kuwait",
+		"Kyrgyzstan", "Laos", "Lebanon", "Malaysia", "Maldives",
+		"Mongolia", "Myanmar", "Nepal", "North Korea", "Oman",
+		"Pakistan", "Palestine", "Philippines", "Qatar", "Saudi Arabia",
+		"Singapore", "South Korea", "Sri Lanka", "Syria", "Taiwan",
+		"Tajikistan", "Thailand", "Timor-Leste", "Turkey", "Turkmenistan",
+		"United Arab Emirates", "Uzbekistan", "Vietnam", "Yemen",
 	]},
 	{"name": "Europe", "regions": [
-		"United Kingdom", "France", "Germany", "Italy", "Spain",
-		"Portugal", "Netherlands", "Belgium", "Poland", "Sweden",
-		"Norway", "Finland", "Denmark", "Greece", "Ukraine",
-		"Romania", "Switzerland", "Austria", "Ireland", "Iceland",
+		"Albania", "Andorra", "Austria", "Belarus", "Belgium",
+		"Bosnia and Herzegovina", "Bulgaria", "Croatia", "Czechia", "Denmark",
+		"Estonia", "Finland", "France", "Germany", "Greece",
+		"Hungary", "Iceland", "Ireland", "Italy", "Kosovo",
+		"Latvia", "Liechtenstein", "Lithuania", "Luxembourg", "Malta",
+		"Moldova", "Monaco", "Montenegro", "Netherlands", "North Macedonia",
+		"Norway", "Poland", "Portugal", "Romania", "Russia",
+		"San Marino", "Serbia", "Slovakia", "Slovenia", "Spain",
+		"Sweden", "Switzerland", "Ukraine", "United Kingdom", "Vatican City",
 	]},
 	{"name": "North America", "regions": [
-		"United States", "Canada", "Mexico", "Cuba", "Jamaica",
-		"Haiti", "Dominican Republic", "Guatemala", "Honduras", "Nicaragua",
-		"Costa Rica", "Panama", "Belize", "El Salvador", "Bahamas", "Greenland",
+		"Antigua and Barbuda", "Bahamas", "Barbados", "Belize", "Canada",
+		"Costa Rica", "Cuba", "Dominica", "Dominican Republic", "El Salvador",
+		"Grenada", "Guatemala", "Haiti", "Honduras", "Jamaica",
+		"Mexico", "Nicaragua", "Panama", "Saint Kitts and Nevis", "Saint Lucia",
+		"Saint Vincent and the Grenadines", "Trinidad and Tobago", "United States", "Greenland",
 	]},
 	{"name": "South America", "regions": [
-		"Brazil", "Argentina", "Chile", "Peru", "Colombia",
-		"Venezuela", "Ecuador", "Bolivia", "Paraguay", "Uruguay", "Guyana", "Suriname",
+		"Argentina", "Bolivia", "Brazil", "Chile", "Colombia",
+		"Ecuador", "Guyana", "Paraguay", "Peru", "Suriname",
+		"Uruguay", "Venezuela",
 	]},
 	{"name": "Oceania", "regions": [
-		"Australia", "New Zealand", "Papua New Guinea", "Fiji",
-		"Solomon Islands", "Vanuatu", "Samoa", "Tonga",
+		"Australia", "Fiji", "Kiribati", "Marshall Islands", "Micronesia",
+		"Nauru", "New Zealand", "Palau", "Papua New Guinea", "Samoa",
+		"Solomon Islands", "Tonga", "Tuvalu", "Vanuatu",
 	]},
 ]
 
@@ -203,7 +228,7 @@ const ACTS := [
 		"crops": ["wheat", "corn"],
 		"continents": ["Africa"],
 		"blight": true,
-		"goal_text": "Own all 20 regions of Africa.",
+		"goal_text": "Own all 54 regions of Africa.",
 	},
 	{
 		"title": "Act 3: Expanding Empire",
@@ -212,7 +237,7 @@ const ACTS := [
 		"crops": ["wheat", "corn", "tomato"],
 		"continents": ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"],
 		"blight": true,
-		"goal_text": "Own at least half of the world's 96 regions.",
+		"goal_text": "Own at least half of the world's 198 regions.",
 	},
 	{
 		"title": "Act 4: World Domination",
@@ -221,7 +246,7 @@ const ACTS := [
 		"crops": ["wheat", "corn", "tomato", "pumpkin"],
 		"continents": ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"],
 		"blight": true,
-		"goal_text": "Own all 96 regions - total world domination.",
+		"goal_text": "Own all 198 regions - total world domination.",
 	},
 ]
 
