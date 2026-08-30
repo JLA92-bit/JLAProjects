@@ -265,6 +265,16 @@ const FARM_TIERS := [
 ]
 const TIER_PRICE_BONUS_PER_LEVEL := 0.03 # +3% sell price per tier above Basic
 
+# ---------- Continent mastery bonus ----------
+# Owning HALF the world (the Act 3 goal) is a checkpoint, but fully owning
+# an individual continent gets no reward of its own beyond that one-time
+# gate - once past Act 2 there's no reason to finish off Africa's last few
+# countries instead of spreading thin everywhere. This gives each of the
+# 6 continents its own permanent sell-price bonus once every region in it
+# is owned, so "clean up this continent completely" is worth doing at any
+# point in the game, not just the first one.
+const CONTINENT_MASTERY_BONUS_PER_CONTINENT := 0.02 # +2% sell price per fully-owned continent
+
 # ---------- Game state ----------
 var cash := 100
 var day := 1
@@ -1033,6 +1043,14 @@ func _farm_tier_index() -> int:
 func _farm_tier_name() -> String:
 	return FARM_TIERS[_farm_tier_index()]
 
+func _fully_owned_continent_count() -> int:
+	var count := 0
+	for continent in CONTINENTS:
+		var owned_here = regions.filter(func(r): return r["continent"] == continent["name"] and r["owned"]).size()
+		if owned_here >= continent["regions"].size():
+			count += 1
+	return count
+
 func _upgrade_locked_reason(key: String) -> String:
 	if key == "storage_silo_2" and not owned_upgrades.get("storage_silo_1", false):
 		return "requires Storage Silo first"
@@ -1046,7 +1064,9 @@ func _upgrade_locked_reason(key: String) -> String:
 
 # ---------- Market events ----------
 func _effective_price(key: String) -> int:
-	var base = prices[key] * (1.0 + TIER_PRICE_BONUS_PER_LEVEL * _farm_tier_index())
+	var bonus_mult = 1.0 + TIER_PRICE_BONUS_PER_LEVEL * _farm_tier_index()
+	bonus_mult += CONTINENT_MASTERY_BONUS_PER_CONTINENT * _fully_owned_continent_count()
+	var base = prices[key] * bonus_mult
 	if active_event.get("crop", "") == key:
 		return int(round(base * active_event["multiplier"]))
 	return int(round(base))
@@ -1653,7 +1673,11 @@ func _soil_quality_label(sq: float) -> String:
 
 func _refresh_map_panel() -> void:
 	var owned_count = regions.filter(func(r): return r["owned"]).size()
-	map_summary_label.text = "%d / %d regions under your control across %d continents." % [owned_count, regions.size(), CONTINENTS.size()]
+	var mastered = _fully_owned_continent_count()
+	var mastery_tag = ""
+	if mastered > 0:
+		mastery_tag = "  |  %d continent(s) fully owned: +%d%% sell price" % [mastered, int(round(mastered * CONTINENT_MASTERY_BONUS_PER_CONTINENT * 100))]
+	map_summary_label.text = "%d / %d regions under your control across %d continents.%s" % [owned_count, regions.size(), CONTINENTS.size(), mastery_tag]
 
 	for child in map_scroll_content.get_children():
 		child.queue_free()
@@ -1670,7 +1694,7 @@ func _refresh_map_panel() -> void:
 	for continent in CONTINENTS:
 		var owned_here = regions.filter(func(r): return r["continent"] == continent["name"] and r["owned"]).size()
 		var locked = not _continent_unlocked(continent["name"])
-		var heading = "%s (%d/%d)" % [continent["name"], owned_here, continent["regions"].size()]
+		var heading = "%s (%d/%d)%s" % [continent["name"], owned_here, continent["regions"].size(), "  👑 mastered" if owned_here >= continent["regions"].size() else ""]
 		if locked:
 			heading = "🔒 %s - unlock in a later Act" % continent["name"]
 		_add_label_child(map_scroll_content, heading, 20, Color(0.6, 0.6, 0.6) if locked else Color(1, 0.85, 0.3))
