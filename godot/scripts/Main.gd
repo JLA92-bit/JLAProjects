@@ -409,6 +409,8 @@ var lifetime_stats_label: Label
 var map_panel: Panel
 var map_summary_label: Label
 var map_scroll_content: VBoxContainer
+var map_scroll: ScrollContainer
+var map_continent_headings := {} # continent name -> Label, for jump buttons
 
 # ---------- Lifecycle ----------
 func _ready():
@@ -1439,14 +1441,35 @@ func _build_map_panel(layer: CanvasLayer) -> void:
 	_add_label(map_panel, "World Map - Farm Empire Expansion", Vector2(20, 10), Vector2(560, 30), 20)
 	map_summary_label = _add_label(map_panel, "", Vector2(20, 46), Vector2(640, 30), 16, Color(0.7, 0.8, 0.7))
 
-	var scroll := ScrollContainer.new()
-	scroll.position = Vector2(20, 84)
-	scroll.size = Vector2(640, 1380)
-	map_panel.add_child(scroll)
+	# Jump buttons - with up to 198 countries in the scrollable list below,
+	# scrolling past 54 African entries just to reach Oceania is real
+	# tedium. Each button scrolls straight to that continent's heading.
+	var jump_scroll := ScrollContainer.new()
+	jump_scroll.position = Vector2(20, 78)
+	jump_scroll.size = Vector2(640, 44)
+	jump_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	map_panel.add_child(jump_scroll)
+	var jump_row := HBoxContainer.new()
+	jump_row.add_theme_constant_override("separation", 6)
+	jump_scroll.add_child(jump_row)
+	for continent in CONTINENTS:
+		var cname = continent["name"]
+		var jump_btn := Button.new()
+		jump_btn.text = cname
+		jump_btn.pressed.connect(func():
+			if map_continent_headings.has(cname) and is_instance_valid(map_continent_headings[cname]):
+				map_scroll.ensure_control_visible(map_continent_headings[cname])
+		)
+		jump_row.add_child(jump_btn)
+
+	map_scroll = ScrollContainer.new()
+	map_scroll.position = Vector2(20, 130)
+	map_scroll.size = Vector2(640, 1334)
+	map_panel.add_child(map_scroll)
 
 	map_scroll_content = VBoxContainer.new()
 	map_scroll_content.custom_minimum_size = Vector2(620, 0)
-	scroll.add_child(map_scroll_content)
+	map_scroll.add_child(map_scroll_content)
 
 func _open_inventory() -> void:
 	inventory_panel.visible = true
@@ -1750,7 +1773,8 @@ func _refresh_map_panel() -> void:
 		var heading = "%s (%d/%d)%s" % [continent["name"], owned_here, continent["regions"].size(), "  👑 mastered" if owned_here >= continent["regions"].size() else ""]
 		if locked:
 			heading = "🔒 %s - unlock in a later Act" % continent["name"]
-		_add_label_child(map_scroll_content, heading, 20, Color(0.6, 0.6, 0.6) if locked else Color(1, 0.85, 0.3))
+		var heading_label = _add_label_child(map_scroll_content, heading, 20, Color(0.6, 0.6, 0.6) if locked else Color(1, 0.85, 0.3))
+		map_continent_headings[continent["name"]] = heading_label
 		if locked:
 			continue
 
@@ -1815,12 +1839,13 @@ func _refresh_map_panel() -> void:
 				vb.add_child(farm_btn)
 			map_scroll_content.add_child(card)
 
-func _add_label_child(parent: Node, text: String, font_size: int, color: Color) -> void:
+func _add_label_child(parent: Node, text: String, font_size: int, color: Color) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", font_size)
 	l.add_theme_color_override("font_color", color)
 	parent.add_child(l)
+	return l
 
 # ---------- In-app update check ----------
 func _load_build_commit() -> void:
