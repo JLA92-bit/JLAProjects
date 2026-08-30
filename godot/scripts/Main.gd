@@ -80,7 +80,7 @@ const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2"]
 const UPGRADES := {
 	"watering_can_2": {"name": "Reinforced Watering Can", "cost": 200, "desc": "Waters a 3x3 area around you instead of a single tile."},
 	"storage_silo_1": {"name": "Storage Silo", "cost": 150, "desc": "+20 storage capacity per crop."},
-	"storage_silo_2": {"name": "Storage Silo II", "cost": 400, "desc": "+20 more storage capacity per crop (requires Storage Silo)."},
+	"storage_silo_2": {"name": "Storage Silo II", "cost": 400, "desc": "+20 more storage capacity per crop."},
 }
 
 const TOOLS := {
@@ -109,6 +109,14 @@ const SOIL_DEPLETED_THRESHOLD := 70.0
 const SOIL_EXHAUSTED_THRESHOLD := 40.0
 const SOIL_EXHAUSTED_FAIL_CHANCE := 0.3
 const FERTILIZER_COST := 12
+
+# ---------- Harvest quality (separate from yield/quantity) ----------
+# Quantity (well-tended 2x bonus) already existed; this adds a distinct
+# quality grade affecting SALE PRICE, so "how much you grew" and "how good
+# it is" are two different, both-visible outcomes of the same care.
+const QUALITY_KEYS := ["poor", "good", "excellent"]
+const QUALITY_LABELS := {"poor": "Poor", "good": "Good", "excellent": "Excellent"}
+const QUALITY_MULTIPLIER := {"poor": 0.7, "good": 1.0, "excellent": 1.35}
 
 const TERRAINS := ["grass", "farmland", "beach", "cliff", "water"]
 const CONTINENTS := [
@@ -166,7 +174,11 @@ var day := 1
 var day_progress := 0.0
 var seeds := {"wheat": 6, "corn": 2, "tomato": 0}
 var fertilizer := 3
-var produce := {"wheat": 0, "corn": 0, "tomato": 0}
+var produce := {
+	"wheat": {"poor": 0, "good": 0, "excellent": 0},
+	"corn": {"poor": 0, "good": 0, "excellent": 0},
+	"tomato": {"poor": 0, "good": 0, "excellent": 0},
+}
 var prices := {"wheat": 10, "corn": 22, "tomato": 45}
 var selected_crop := "wheat"
 var selected_tool := "hoe"
@@ -509,14 +521,16 @@ func _do_action() -> void:
 				_log("The exhausted soil ruined this %s harvest - fertilize or rotate crops here." % CROPS[tile["crop"]]["name"])
 				tile["type"] = "soil"
 			else:
-				var well_tended = tile.get("times_watered", 0) >= CROPS[tile["crop"]]["grow_days"] and sq >= SOIL_DEPLETED_THRESHOLD
+				var watered_enough = tile.get("times_watered", 0) >= CROPS[tile["crop"]]["grow_days"]
+				var well_tended = watered_enough and sq >= SOIL_DEPLETED_THRESHOLD
 				var amount = 2 if well_tended else 1
 				var cap = _storage_cap()
-				if produce[tile["crop"]] + amount > cap:
-					_log("Storage is full for %s (%d/%d) - sell some or upgrade your silo." % [CROPS[tile["crop"]]["name"], produce[tile["crop"]], cap])
+				if _produce_total(tile["crop"]) + amount > cap:
+					_log("Storage is full for %s (%d/%d) - sell some or upgrade your silo." % [CROPS[tile["crop"]]["name"], _produce_total(tile["crop"]), cap])
 					return
-				produce[tile["crop"]] += amount
-				_log("Harvested %dx %s%s." % [amount, CROPS[tile["crop"]]["name"], " (well-tended bonus!)" if well_tended else ""])
+				var quality = _harvest_quality(tile, sq, watered_enough)
+				produce[tile["crop"]][quality] += amount
+				_log("Harvested %dx %s (%s quality)%s." % [amount, CROPS[tile["crop"]]["name"], QUALITY_LABELS[quality], " - well-tended bonus!" if well_tended else ""])
 				tile["type"] = "soil"
 			var same_crop = tile.get("last_crop", "") == tile["crop"]
 			tile["soil_quality"] = max(0.0, sq - (SOIL_DEGRADE_SAME_CROP if same_crop else SOIL_DEGRADE_ROTATED))
@@ -551,6 +565,7 @@ func _do_action() -> void:
 			tile["infected"] = false
 			tile["infected_days"] = 0
 			tile["dry_days"] = 0
+			tile["damaged"] = false
 			_log("Planted %s." % CROPS[selected_crop]["name"])
 		"water":
 			if not owned_upgrades.get("watering_can_2", false):
@@ -697,6 +712,7 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 					continue
 				else:
 					t["stage"] = max(0, t.get("stage", 0) - 1)
+					t["damaged"] = true
 					frost_damaged += 1
 
 			if current_weather == "drought" and terrain != "water":
@@ -727,6 +743,7 @@ func _advance_tiles(t_grid: Array, terrain: String) -> Dictionary:
 
 			if current_weather == "storm" and t.get("stage", 0) < 4 and randf() < 0.2:
 				t["stage"] = max(0, t.get("stage", 0) - 1)
+				t["damaged"] = true
 				storm_damaged += 1
 
 			if t.get("infected", false):
@@ -834,6 +851,20 @@ func _storage_cap() -> int:
 	if owned_upgrades.get("storage_silo_2", false):
 		cap += 20
 	return cap
+
+func _produce_total(key: String) -> int:
+	var total := 0
+	for q in QUALITY_KEYS:
+		total += produce[key][q]
+	return total
+
+func _harvest_quality(tile: Dictionary, sq: float, well_tended: bool) -> String:
+	if tile.get("damaged", false) or sq < SOIL_EXHAUSTED_THRESHOLD:
+		return "poor"
+	elif well_tended and sq >= SOIL_DEPLETED_THRESHOLD:
+		return "excellent"
+	else:
+		return "good"
 
 func _upgrade_locked_reason(key: String) -> String:
 	if key == "storage_silo_2" and not owned_upgrades.get("storage_silo_1", false):
@@ -1235,26 +1266,47 @@ func _refresh_inventory_panel() -> void:
 		if not _crop_unlocked(key):
 			continue
 		var crop = CROPS[key]
-		var row := HBoxContainer.new()
+		var row := VBoxContainer.new()
+		var top_row := HBoxContainer.new()
 		var label := Label.new()
 		var eff_price = _effective_price(key)
 		var spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if active_event.get("crop", "") == key else ""
-		label.text = "%s  seeds:%d  produce:%d/%d  $%d%s" % [crop["name"], seeds[key], produce[key], storage_cap, eff_price, spike_tag]
+		var total = _produce_total(key)
+		label.text = "%s  seeds:%d  produce:%d/%d  $%d base%s" % [crop["name"], seeds[key], total, storage_cap, eff_price, spike_tag]
 		label.custom_minimum_size = Vector2(420, 0)
-		row.add_child(label)
+		top_row.add_child(label)
 		var sell_btn := Button.new()
 		sell_btn.text = "Sell all"
-		sell_btn.disabled = produce[key] == 0
+		sell_btn.disabled = total == 0
 		sell_btn.pressed.connect(func():
-			var amount = produce[key]
-			var earnings = amount * _effective_price(key)
+			var amount = 0
+			var earnings = 0
+			for q in QUALITY_KEYS:
+				var n = produce[key][q]
+				if n == 0:
+					continue
+				var price = int(round(_effective_price(key) * QUALITY_MULTIPLIER[q]))
+				amount += n
+				earnings += n * price
+				produce[key][q] = 0
 			cash += earnings
-			produce[key] = 0
 			_log("Sold %d %s for $%d." % [amount, crop["name"], earnings])
 			_check_act_progress()
 			_refresh_all()
 		)
-		row.add_child(sell_btn)
+		top_row.add_child(sell_btn)
+		row.add_child(top_row)
+		var quality_parts := []
+		for q in QUALITY_KEYS:
+			if produce[key][q] > 0:
+				var price = int(round(_effective_price(key) * QUALITY_MULTIPLIER[q]))
+				quality_parts.append("%s x%d ($%d ea)" % [QUALITY_LABELS[q], produce[key][q], price])
+		if quality_parts.size() > 0:
+			var breakdown := Label.new()
+			breakdown.text = "  " + ", ".join(quality_parts)
+			breakdown.add_theme_font_size_override("font_size", 14)
+			breakdown.add_theme_color_override("font_color", Color(0.7, 0.75, 0.7))
+			row.add_child(breakdown)
 		market_rows_container.add_child(row)
 
 	var infected_count := 0
@@ -1502,7 +1554,17 @@ func _load_game() -> void:
 	day = parsed.get("day", day)
 	seeds = parsed.get("seeds", seeds)
 	fertilizer = parsed.get("fertilizer", fertilizer)
-	produce = parsed.get("produce", produce)
+	var loaded_produce = parsed.get("produce", null)
+	if typeof(loaded_produce) == TYPE_DICTIONARY:
+		for key in CROP_KEYS:
+			if not loaded_produce.has(key):
+				continue
+			var entry = loaded_produce[key]
+			if typeof(entry) == TYPE_DICTIONARY:
+				produce[key] = entry
+			else:
+				# Pre-quality-grade save: a flat int count. Treat it as "good".
+				produce[key] = {"poor": 0, "good": int(entry), "excellent": 0}
 	prices = parsed.get("prices", prices)
 	selected_crop = parsed.get("selected_crop", selected_crop)
 	selected_tool = parsed.get("selected_tool", selected_tool)
@@ -1549,7 +1611,11 @@ func _reset_game() -> void:
 	day_progress = 0.0
 	seeds = {"wheat": 6, "corn": 2, "tomato": 0}
 	fertilizer = 3
-	produce = {"wheat": 0, "corn": 0, "tomato": 0}
+	produce = {
+		"wheat": {"poor": 0, "good": 0, "excellent": 0},
+		"corn": {"poor": 0, "good": 0, "excellent": 0},
+		"tomato": {"poor": 0, "good": 0, "excellent": 0},
+	}
 	prices = {"wheat": 10, "corn": 22, "tomato": 45}
 	selected_crop = "wheat"
 	selected_tool = "hoe"
