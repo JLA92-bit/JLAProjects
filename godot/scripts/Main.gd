@@ -361,6 +361,8 @@ var plots := {} # plot_id ("home" or an owned region's name) -> ROWSxCOLS tile g
 var active_plot_id := "home"
 var regions := []
 var log_text := "Welcome! Hoe tills grass, Seed Bag plants, Watering Can grows crops. Harvest by hand when ready."
+var farm_name := "" # player-chosen name for the Home Farm, set on the first-launch intro screen
+var is_new_game := false # true only for the very first _ready() before any save file exists
 
 var player_pos := Vector2(TILE * 2, TILE * 2)
 var player_facing := "down"
@@ -391,6 +393,13 @@ var update_banner: Panel
 var update_banner_label: Label
 var current_build_commit := ""
 var update_download_url := ""
+
+var intro_name_panel: Panel
+var farm_name_edit: LineEdit
+var intro_dialog_panel: Panel
+var intro_dialog_body: Label
+var intro_dialog_next_btn: Button
+var intro_dialog_index := 0
 var move_up_held := false
 var move_down_held := false
 var move_left_held := false
@@ -415,6 +424,7 @@ var map_continent_headings := {} # continent name -> Label, for jump buttons
 # ---------- Lifecycle ----------
 func _ready():
 	randomize()
+	is_new_game = not FileAccess.file_exists(SAVE_PATH)
 	_load_world_assets()
 	_init_fresh_state()
 	_load_game()
@@ -424,7 +434,9 @@ func _ready():
 	_build_scenery()
 	_build_player()
 	_refresh_all()
-	if current_act == 0:
+	if is_new_game:
+		intro_name_panel.visible = true
+	elif current_act == 0:
 		_show_act_banner(0)
 	_load_build_commit()
 	_check_for_update()
@@ -502,7 +514,9 @@ func _terrain_for_plot(plot_id: String) -> String:
 	return "grass"
 
 func _plot_display_name(plot_id: String) -> String:
-	return "Home Farm" if plot_id == "home" else plot_id
+	if plot_id == "home":
+		return farm_name if farm_name != "" else "Home Farm"
+	return plot_id
 
 func _switch_active_plot(plot_id: String) -> void:
 	if plot_id == active_plot_id or not plots.has(plot_id):
@@ -1291,6 +1305,18 @@ func _add_label(parent: Node, text: String, pos: Vector2, size := Vector2.ZERO, 
 	parent.add_child(l)
 	return l
 
+func _add_opaque_backdrop(parent: Control) -> void:
+	# Plain Panel controls use the theme's default translucent style, which
+	# lets whatever is underneath (the 3D farm view, HUD buttons) show
+	# through - fine for small overlays, but confusing for a full-screen
+	# intro/dialogue screen that should read as its own separate scene.
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.08, 0.13, 0.09)
+	backdrop.size = parent.size
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(backdrop)
+	parent.move_child(backdrop, 0)
+
 func _add_button(parent: Node, text: String, pos: Vector2, size: Vector2, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
@@ -1344,6 +1370,91 @@ func _build_ui() -> void:
 	_build_map_panel(layer)
 	_build_act_banner(layer)
 	_build_update_banner(layer)
+	_build_intro_ui(layer)
+
+func _build_intro_ui(layer: CanvasLayer) -> void:
+	# Screen 1, first launch only: name the Home Farm before anything else happens.
+	intro_name_panel = Panel.new()
+	intro_name_panel.position = Vector2.ZERO
+	intro_name_panel.size = Vector2(720, 1560)
+	intro_name_panel.visible = false
+	layer.add_child(intro_name_panel)
+	_add_opaque_backdrop(intro_name_panel)
+
+	var title_label := _add_label(intro_name_panel, "Farm World", Vector2(0, 420), Vector2(720, 50), 34, Color(1, 0.85, 0.3))
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var subtitle_label := _add_label(intro_name_panel, "Outbreak & Empire", Vector2(0, 472), Vector2(720, 30), 18, Color(0.75, 0.85, 0.95))
+	subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var prompt_label := _add_label(intro_name_panel, "What will you name your farm?", Vector2(60, 640), Vector2(600, 30), 20)
+	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	farm_name_edit = LineEdit.new()
+	farm_name_edit.position = Vector2(110, 690)
+	farm_name_edit.size = Vector2(500, 60)
+	farm_name_edit.placeholder_text = "e.g. Sunny Acres"
+	farm_name_edit.max_length = 24
+	farm_name_edit.add_theme_font_size_override("font_size", 22)
+	farm_name_edit.text_submitted.connect(func(_t): _on_farm_name_confirmed())
+	intro_name_panel.add_child(farm_name_edit)
+
+	_add_button(intro_name_panel, "Start Farming", Vector2(210, 780), Vector2(300, 64), _on_farm_name_confirmed)
+
+	# Screen 2, right after naming: Kacie's onboarding dialogue - the game's
+	# goal, how Act 1 works and what it takes to clear it, hazards to watch
+	# for, and how clearing Acts opens up more of the world map.
+	intro_dialog_panel = Panel.new()
+	intro_dialog_panel.position = Vector2.ZERO
+	intro_dialog_panel.size = Vector2(720, 1560)
+	intro_dialog_panel.visible = false
+	layer.add_child(intro_dialog_panel)
+	_add_opaque_backdrop(intro_dialog_panel)
+
+	var portrait_label := _add_label(intro_dialog_panel, "🧑‍🌾", Vector2(0, 360), Vector2(720, 120), 90)
+	portrait_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var speaker_label := _add_label(intro_dialog_panel, "Kacie", Vector2(0, 500), Vector2(720, 36), 26, Color(1, 0.85, 0.3))
+	speaker_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	var body_panel := Panel.new()
+	body_panel.position = Vector2(40, 560)
+	body_panel.size = Vector2(640, 340)
+	intro_dialog_panel.add_child(body_panel)
+	intro_dialog_body = _add_label(body_panel, "", Vector2(20, 20), Vector2(600, 300), 18)
+	intro_dialog_body.autowrap_mode = TextServer.AUTOWRAP_WORD
+
+	intro_dialog_next_btn = _add_button(intro_dialog_panel, "Next", Vector2(440, 930), Vector2(240, 64), _advance_intro_dialog)
+
+func _kacie_intro_pages() -> Array:
+	var shown_name = farm_name if farm_name != "" else "Home Farm"
+	return [
+		"Hi there! I'm Kacie - I run the co-op down the road, and I'll be showing you the ropes.",
+		"Here's the big picture: your goal is to become the biggest farm in the world. Every region on the map, from tiny islands to whole continents, can eventually be yours.",
+		"Right now you're just getting started on %s. Till soil with the Hoe, plant seeds with the Seed Bag, keep the crop watered with the Watering Can, then harvest it by hand and sell it for cash." % shown_name,
+		"Act 1 - First Harvest: reach $150 in cash to prove you can run a farm. Clearing it unlocks the World Map, where you can start claiming real regions around the globe.",
+		"Watch out, though: once the Outbreak begins, blight can infect your crops; bad weather like drought and frost can ruin a harvest; and regions you own need upkeep, or you'll lose them.",
+		"Clearing each Act's goal unlocks bigger tools, new crops, and more of the map to conquer - check the banner at the top any time to see what's next and what it takes to get there.",
+		"That's the whole pitch! Grab your Hoe and get started - I'll be cheering you on.",
+	]
+
+func _on_farm_name_confirmed() -> void:
+	var typed := farm_name_edit.text.strip_edges()
+	farm_name = typed if typed != "" else "Sunny Acres"
+	intro_name_panel.visible = false
+	_refresh_all()
+	intro_dialog_index = 0
+	_show_intro_dialog_page()
+	intro_dialog_panel.visible = true
+
+func _show_intro_dialog_page() -> void:
+	var pages := _kacie_intro_pages()
+	intro_dialog_body.text = pages[intro_dialog_index]
+	intro_dialog_next_btn.text = "Let's Go!" if intro_dialog_index == pages.size() - 1 else "Next"
+
+func _advance_intro_dialog() -> void:
+	intro_dialog_index += 1
+	if intro_dialog_index >= _kacie_intro_pages().size():
+		intro_dialog_panel.visible = false
+		return
+	_show_intro_dialog_page()
 
 func _build_act_banner(layer: CanvasLayer) -> void:
 	act_banner = Panel.new()
@@ -1922,6 +2033,7 @@ func _save_game() -> void:
 		"plots": plots, "active_plot_id": active_plot_id, "regions": regions,
 		"owned_upgrades": owned_upgrades, "active_event": active_event,
 		"player_x": player_pos.x, "player_y": player_pos.y,
+		"farm_name": farm_name,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -1969,6 +2081,7 @@ func _load_game() -> void:
 	selected_crop = parsed.get("selected_crop", selected_crop)
 	selected_tool = parsed.get("selected_tool", selected_tool)
 	current_act = clampi(int(parsed.get("current_act", current_act)), 0, ACTS.size() - 1)
+	farm_name = parsed.get("farm_name", farm_name)
 	victory_shown = parsed.get("victory_shown", victory_shown)
 	lifetime_harvested = int(parsed.get("lifetime_harvested", lifetime_harvested))
 	lifetime_earned = int(parsed.get("lifetime_earned", lifetime_earned))
