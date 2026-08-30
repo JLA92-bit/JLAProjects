@@ -8,6 +8,10 @@ required, but it's credited here anyway.
   See `nature_kit/LICENSE.txt`.
 - `character/` — Kenney "Blocky Characters" (player model + skin texture).
   See `character/LICENSE.txt`.
+- `textures/kacie_portrait.png` — portrait of Kacie, the game's first NPC,
+  provided directly by the project owner for use in the intro dialogue.
+  Background checkerboard removed and image cropped/downscaled for use as
+  an in-game dialogue portrait.
 
 ## Known gaps (follow-up work)
 

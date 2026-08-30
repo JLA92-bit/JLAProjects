@@ -1,9 +1,9 @@
 extends Node2D
 
 # ---------- Constants ----------
-const TILE := 64
-const COLS := 10
-const ROWS := 7
+const TILE := 40
+const COLS := 16
+const ROWS := 11
 const DAY_LENGTH := 25.0
 const PLAYER_SPEED := 220.0
 const FARM_ORIGIN := Vector2(40, 110)
@@ -564,7 +564,16 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 	cam.size = COLS * WORLD_TILE * 1.7
 	var center := Vector3((COLS - 1) * WORLD_TILE * 0.5, 0, (ROWS - 1) * WORLD_TILE * 0.5)
-	cam.position = center + Vector3(8, 7, 8)
+	# The camera offset's height (the "7") has to grow with cam.size, not stay
+	# fixed: for this fixed viewing angle, an orthogonal camera's bottom-row
+	# rays start at world Y = offset.y - half_frustum_height * 0.85 (0.85 is
+	# this angle's vertical basis component) and travel further downward from
+	# there - so if that start point is already below Y=0, those rays never
+	# reach the ground plane at all and the sky shows through no matter how
+	# much backdrop is added. Scaling the whole offset with COLS keeps the
+	# same angle while keeping the start point comfortably above the ground.
+	var cam_offset := Vector3(8, 7, 8) * (COLS / 10.0) * 1.3
+	cam.position = center + cam_offset
 	world_root.add_child(cam)
 	cam.look_at(center, Vector3.UP)
 	cam.current = true
@@ -587,7 +596,10 @@ func _build_scenery():
 	# unclaimed farmland stretching toward the horizon instead of a flat
 	# sky-blue void. Individual real tiles (not one scaled-up mesh) so the
 	# shading matches the actual grid perfectly with no visible seam.
-	const BACKDROP_MARGIN := 20
+	# Scaled off COLS (tuned as 20 tiles at the original COLS=10) so a bigger
+	# playable grid - which also zooms the camera out further, see cam.size
+	# in _build_farm_view - still gets enough backdrop to hide the sky.
+	var BACKDROP_MARGIN := int(COLS * 2.0)
 	for tz in range(-BACKDROP_MARGIN, ROWS + BACKDROP_MARGIN):
 		for tx in range(-BACKDROP_MARGIN, COLS + BACKDROP_MARGIN):
 			if tx >= 0 and tx < COLS and tz >= 0 and tz < ROWS:
@@ -1409,19 +1421,30 @@ func _build_intro_ui(layer: CanvasLayer) -> void:
 	layer.add_child(intro_dialog_panel)
 	_add_opaque_backdrop(intro_dialog_panel)
 
-	var portrait_label := _add_label(intro_dialog_panel, "🧑‍🌾", Vector2(0, 360), Vector2(720, 120), 90)
-	portrait_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var speaker_label := _add_label(intro_dialog_panel, "Kacie", Vector2(0, 500), Vector2(720, 36), 26, Color(1, 0.85, 0.3))
+	var portrait_rect := TextureRect.new()
+	portrait_rect.texture = load("res://assets_3d/textures/kacie_portrait.png")
+	portrait_rect.position = Vector2(240, 250)
+	portrait_rect.size = Vector2(240, 304)
+	portrait_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	portrait_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	portrait_rect.custom_minimum_size = Vector2(240, 304)
+	intro_dialog_panel.add_child(portrait_rect)
+	# Controls clamp to their computed minimum size the instant they enter the
+	# tree, and a TextureRect's minimum size tracks its texture regardless of
+	# expand_mode - so the requested size only sticks if it's (re)applied
+	# after add_child, once that one-time clamp has already happened.
+	portrait_rect.size = Vector2(240, 304)
+	var speaker_label := _add_label(intro_dialog_panel, "Kacie", Vector2(0, 566), Vector2(720, 36), 26, Color(1, 0.85, 0.3))
 	speaker_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 	var body_panel := Panel.new()
-	body_panel.position = Vector2(40, 560)
-	body_panel.size = Vector2(640, 340)
+	body_panel.position = Vector2(40, 620)
+	body_panel.size = Vector2(640, 300)
 	intro_dialog_panel.add_child(body_panel)
-	intro_dialog_body = _add_label(body_panel, "", Vector2(20, 20), Vector2(600, 300), 18)
+	intro_dialog_body = _add_label(body_panel, "", Vector2(20, 20), Vector2(600, 260), 18)
 	intro_dialog_body.autowrap_mode = TextServer.AUTOWRAP_WORD
 
-	intro_dialog_next_btn = _add_button(intro_dialog_panel, "Next", Vector2(440, 930), Vector2(240, 64), _advance_intro_dialog)
+	intro_dialog_next_btn = _add_button(intro_dialog_panel, "Next", Vector2(440, 950), Vector2(240, 64), _advance_intro_dialog)
 
 func _kacie_intro_pages() -> Array:
 	var shown_name = farm_name if farm_name != "" else "Home Farm"
@@ -2124,6 +2147,15 @@ func _load_game() -> void:
 	elif parsed.has("tiles"):
 		# Pre-multi-plot save: the single grid it had becomes the home plot.
 		plots = {"home": parsed["tiles"]}
+	# A save from before a ROWS/COLS change carries grids sized to the old
+	# dimensions - indexing those with the current ROWS/COLS would run past
+	# their bounds. Replace any mismatched grid with a fresh one rather than
+	# trying to splice old tile data into a different-sized grid.
+	for plot_key in plots.keys():
+		var grid = plots[plot_key]
+		var grid_ok = typeof(grid) == TYPE_ARRAY and grid.size() == ROWS and (ROWS == 0 or (typeof(grid[0]) == TYPE_ARRAY and grid[0].size() == COLS))
+		if not grid_ok:
+			plots[plot_key] = _make_empty_grid()
 	if not plots.has("home"):
 		plots["home"] = _make_empty_grid()
 	for reg in regions:
