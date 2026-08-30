@@ -142,7 +142,6 @@ const PROCESSING := {
 }
 const PROCESSED_KEYS := ["flour", "cornmeal", "sauce", "pumpkin_pie"]
 
-const TERRAINS := ["grass", "farmland", "beach", "cliff", "water"]
 # ---------- World map (real continents, real countries) ----------
 # Each "region" is a real country, grouped under its real continent. This
 # is the full roster: essentially every UN member state grouped by its
@@ -208,6 +207,62 @@ const CONTINENTS := [
 		"Solomon Islands", "Tonga", "Tuvalu", "Vanuatu",
 	]},
 ]
+
+# Each country's terrain reflects its real, well-known dominant geography
+# (mountainous nations get "cliff", major agricultural exporters get
+# "farmland", small island/atoll nations get "water" or "beach", etc.)
+# rather than an arbitrary round-robin - keeping the "accurate to real
+# Earth" goal from CONTINENTS consistent down to the terrain flavor text
+# each region shows. Falls back to "grass" for anything not listed.
+const COUNTRY_TERRAIN := {
+	# Africa
+	"Algeria": "cliff", "Angola": "grass", "Benin": "farmland", "Botswana": "grass", "Burkina Faso": "farmland",
+	"Burundi": "cliff", "Cabo Verde": "water", "Cameroon": "grass", "Central African Republic": "grass", "Chad": "grass",
+	"Comoros": "water", "Democratic Republic of the Congo": "grass", "Republic of the Congo": "grass", "Djibouti": "beach", "Egypt": "water",
+	"Equatorial Guinea": "water", "Eritrea": "beach", "Eswatini": "cliff", "Ethiopia": "cliff", "Gabon": "grass",
+	"Gambia": "farmland", "Ghana": "farmland", "Guinea": "cliff", "Guinea-Bissau": "beach", "Ivory Coast": "farmland",
+	"Kenya": "grass", "Lesotho": "cliff", "Liberia": "beach", "Libya": "beach", "Madagascar": "grass",
+	"Malawi": "water", "Mali": "grass", "Mauritania": "grass", "Mauritius": "beach", "Morocco": "cliff",
+	"Mozambique": "beach", "Namibia": "cliff", "Niger": "grass", "Nigeria": "farmland", "Rwanda": "cliff",
+	"Sao Tome and Principe": "water", "Senegal": "beach", "Seychelles": "beach", "Sierra Leone": "beach", "Somalia": "beach",
+	"South Africa": "cliff", "South Sudan": "water", "Sudan": "grass", "Tanzania": "grass", "Togo": "farmland",
+	"Tunisia": "beach", "Uganda": "water", "Zambia": "water", "Zimbabwe": "cliff",
+	# Asia
+	"Afghanistan": "cliff", "Armenia": "cliff", "Azerbaijan": "water", "Bahrain": "water", "Bangladesh": "water",
+	"Bhutan": "cliff", "Brunei": "beach", "Cambodia": "water", "China": "farmland", "Cyprus": "beach",
+	"Georgia": "cliff", "India": "farmland", "Indonesia": "beach", "Iran": "cliff", "Iraq": "farmland",
+	"Israel": "beach", "Japan": "cliff", "Jordan": "cliff", "Kazakhstan": "grass", "Kuwait": "beach",
+	"Kyrgyzstan": "cliff", "Laos": "cliff", "Lebanon": "cliff", "Malaysia": "beach", "Maldives": "water",
+	"Mongolia": "grass", "Myanmar": "farmland", "Nepal": "cliff", "North Korea": "cliff", "Oman": "cliff",
+	"Pakistan": "farmland", "Palestine": "beach", "Philippines": "beach", "Qatar": "beach", "Saudi Arabia": "grass",
+	"Singapore": "water", "South Korea": "cliff", "Sri Lanka": "beach", "Syria": "farmland", "Taiwan": "cliff",
+	"Tajikistan": "cliff", "Thailand": "beach", "Timor-Leste": "beach", "Turkey": "cliff", "Turkmenistan": "grass",
+	"United Arab Emirates": "beach", "Uzbekistan": "grass", "Vietnam": "water", "Yemen": "cliff",
+	# Europe
+	"Albania": "cliff", "Andorra": "cliff", "Austria": "cliff", "Belarus": "farmland", "Belgium": "farmland",
+	"Bosnia and Herzegovina": "cliff", "Bulgaria": "farmland", "Croatia": "beach", "Czechia": "farmland", "Denmark": "farmland",
+	"Estonia": "water", "Finland": "water", "France": "farmland", "Germany": "farmland", "Greece": "beach",
+	"Hungary": "farmland", "Iceland": "cliff", "Ireland": "grass", "Italy": "beach", "Kosovo": "cliff",
+	"Latvia": "water", "Liechtenstein": "cliff", "Lithuania": "water", "Luxembourg": "farmland", "Malta": "beach",
+	"Moldova": "farmland", "Monaco": "beach", "Montenegro": "cliff", "Netherlands": "water", "North Macedonia": "cliff",
+	"Norway": "cliff", "Poland": "farmland", "Portugal": "beach", "Romania": "cliff", "Russia": "grass",
+	"San Marino": "cliff", "Serbia": "farmland", "Slovakia": "cliff", "Slovenia": "cliff", "Spain": "beach",
+	"Sweden": "water", "Switzerland": "cliff", "Ukraine": "farmland", "United Kingdom": "beach", "Vatican City": "grass",
+	# North America
+	"Antigua and Barbuda": "beach", "Bahamas": "water", "Barbados": "beach", "Belize": "water", "Canada": "grass",
+	"Costa Rica": "beach", "Cuba": "beach", "Dominica": "cliff", "Dominican Republic": "beach", "El Salvador": "cliff",
+	"Grenada": "beach", "Guatemala": "cliff", "Haiti": "cliff", "Honduras": "beach", "Jamaica": "beach",
+	"Mexico": "cliff", "Nicaragua": "water", "Panama": "water", "Saint Kitts and Nevis": "beach", "Saint Lucia": "cliff",
+	"Saint Vincent and the Grenadines": "beach", "Trinidad and Tobago": "beach", "United States": "farmland", "Greenland": "cliff",
+	# South America
+	"Argentina": "grass", "Bolivia": "cliff", "Brazil": "farmland", "Chile": "cliff", "Colombia": "farmland",
+	"Ecuador": "cliff", "Guyana": "water", "Paraguay": "grass", "Peru": "cliff", "Suriname": "water",
+	"Uruguay": "grass", "Venezuela": "beach",
+	# Oceania
+	"Australia": "grass", "Fiji": "beach", "Kiribati": "water", "Marshall Islands": "water", "Micronesia": "water",
+	"Nauru": "water", "New Zealand": "cliff", "Palau": "water", "Papua New Guinea": "cliff", "Samoa": "beach",
+	"Solomon Islands": "water", "Tonga": "beach", "Tuvalu": "water", "Vanuatu": "beach",
+}
 
 const SAVE_PATH := "user://farmworld_save_v2.json"
 
@@ -412,17 +467,15 @@ func _init_fresh_state():
 	active_event = {}
 	regions.clear()
 	for continent in CONTINENTS:
-		var i := 0
 		for rname in continent["regions"]:
 			regions.append({
 				"name": rname,
 				"continent": continent["name"],
-				"terrain": TERRAINS[i % TERRAINS.size()],
+				"terrain": COUNTRY_TERRAIN.get(rname, "grass"),
 				"health": 100.0,
 				"owned": false,
 				"maintained_today": false,
 			})
-			i += 1
 	season_idx = 0
 	season_day = 0
 	current_weather = "sunny"
