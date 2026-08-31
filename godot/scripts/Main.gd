@@ -149,6 +149,24 @@ const PROCESSING := {
 }
 const PROCESSED_KEYS := ["flour", "cornmeal", "sauce", "pumpkin_pie"]
 
+# ---------- Livestock (feed -> produce -> sell, the drought->feed->meat chain) ----------
+# Feed is bought with cash rather than a dedicated wheat/corn recipe (those
+# crops already have their own flour/cornmeal processing recipe, and this
+# keeps "buy feed" a single action instead of a second competing use for
+# the same harvest) - its price is derived from live wheat/corn prices in
+# _feed_price_per_unit(), so a grain shortage still raises feed cost exactly
+# like the real crop would have.
+const LIVESTOCK := {
+	"chicken": {"name": "Chicken", "cost": 30, "feed_per_day": 1, "product": "eggs", "product_name": "Eggs", "base_price": 8},
+	"sheep": {"name": "Sheep", "cost": 70, "feed_per_day": 2, "product": "wool", "product_name": "Wool", "base_price": 20},
+	"cow": {"name": "Cow", "cost": 150, "feed_per_day": 4, "product": "milk", "product_name": "Milk", "base_price": 18},
+	"pig": {"name": "Pig", "cost": 90, "feed_per_day": 3, "product": "pork", "product_name": "Pork", "base_price": 35},
+}
+const LIVESTOCK_KEYS := ["chicken", "sheep", "cow", "pig"]
+const LIVESTOCK_PRODUCT_KEYS := ["eggs", "wool", "milk", "pork"]
+const FEED_BATCH_SIZE := 10
+const FEED_COST_FACTOR := 0.5 # feed $/unit = avg(wheat, corn effective price) * this
+
 # ---------- World map (real continents, real countries) ----------
 # Each "region" is a real country, grouped under its real continent. This
 # is the full roster: essentially every UN member state grouped by its
@@ -337,6 +355,37 @@ const TIER_PRICE_BONUS_PER_LEVEL := 0.03 # +3% sell price per tier above Basic
 # point in the game, not just the first one.
 const CONTINENT_MASTERY_BONUS_PER_CONTINENT := 0.02 # +2% sell price per fully-owned continent
 
+# ---------- Dynamic economy ----------
+# Replaces the old pure-random daily price drift with real causes:
+#   WEATHER -> world_supply_index (a per-crop scarcity/surplus aggregate,
+#     nudged by the same weather rules _advance_tiles already applies to
+#     the player's own tiles) -> prices[key] eases toward base/index, so a
+#     drought that hurts a thirsty crop's growth also raises its price
+#     market-wide, not just on the player's own farm.
+#   PLAYER SUPPLY -> oversupply_pressure (rises when the player sells,
+#     decays daily) -> a price penalty, so flooding the market with one
+#     crop actually softens its own price for a while.
+#   REGIONAL DEMAND -> owned region count feeds the same sell-price bonus
+#     multiplier the farm-tier/continent-mastery bonuses already use, so
+#     territory expansion is also economic demand growth, not just a
+#     separate passive-income minigame.
+# All three combine multiplicatively in _effective_price().
+const REGIONAL_DEMAND_PER_REGION := 0.001 # +0.1% sell price per owned region (198 max -> ~+20% at full ownership)
+const OVERSUPPLY_PER_UNIT := 0.02 # price-pressure added per unit sold
+const OVERSUPPLY_DECAY := 0.85 # daily multiplicative decay of that pressure
+const OVERSUPPLY_MIN_MULT := 0.6 # price floor from oversupply (never crashes below 60% of the driven base)
+const WORLD_SUPPLY_STEP := 0.06 # daily nudge to world_supply_index from a weather shock
+const WORLD_SUPPLY_RECOVER := 0.05 # fraction of the gap back to the 1.0 baseline closed each day
+const WORLD_SUPPLY_MIN := 0.6
+const WORLD_SUPPLY_MAX := 1.4
+const PRICE_EASE := 0.35 # how much of the gap to the driven target price prices[key] closes per day - eases as a visible trend rather than snapping
+# Storage upkeep: hoarding past a small free buffer costs a little cash
+# each day, so waiting out a low-price dip is a real tradeoff rather than
+# a strictly-dominant strategy. Counts raw produce + processed goods +
+# livestock goods together as one pool.
+const STORAGE_FREE_THRESHOLD := 40
+const STORAGE_UPKEEP_PER_UNIT := 0.1
+
 # ---------- Game state ----------
 var cash := 100
 var day := 1
@@ -351,6 +400,12 @@ var produce := {
 }
 var processed_goods := {"flour": 0, "cornmeal": 0, "sauce": 0, "pumpkin_pie": 0}
 var prices := {"wheat": 10, "corn": 22, "tomato": 45, "pumpkin": 70}
+var price_trend := {"wheat": 0, "corn": 0, "tomato": 0, "pumpkin": 0} # -1/0/1, set each day tick for the UI's trend arrow
+var oversupply_pressure := {"wheat": 0.0, "corn": 0.0, "tomato": 0.0, "pumpkin": 0.0}
+var world_supply_index := {"wheat": 1.0, "corn": 1.0, "tomato": 1.0, "pumpkin": 1.0}
+var livestock := {"chicken": 0, "sheep": 0, "cow": 0, "pig": 0}
+var feed_stock := 0
+var livestock_goods := {"eggs": 0, "wool": 0, "milk": 0, "pork": 0}
 var selected_crop := "wheat"
 var selected_tool := "hoe"
 var current_act := 0 # index into ACTS
@@ -444,6 +499,10 @@ var map_summary_label: Label
 var map_scroll_content: VBoxContainer
 var map_scroll: ScrollContainer
 var map_continent_headings := {} # continent name -> Label, for jump buttons
+
+var livestock_panel: Panel
+var feed_label: Label
+var livestock_rows_container: VBoxContainer
 
 # ---------- Lifecycle ----------
 func _ready():
@@ -1322,12 +1381,10 @@ func _day_tick() -> void:
 	elif frost_damaged > 0:
 		_log("Frost nipped %d crop(s), setting their growth back." % frost_damaged)
 
-	for key in CROP_KEYS:
-		var base = CROPS[key]["base_price"]
-		var drift = (randf() - 0.5) * base * 0.3
-		var np = clamp(prices[key] + drift, base * 0.4, base * 1.8)
-		prices[key] = int(round(np))
-
+	_update_world_supply()
+	_update_crop_prices()
+	_tick_livestock()
+	_apply_storage_upkeep()
 	_advance_market_event()
 
 	var pressure = total_infected
@@ -1452,14 +1509,138 @@ func _upgrade_locked_reason(key: String) -> String:
 		return "unlocks in Act 3"
 	return ""
 
-# ---------- Market events ----------
+# ---------- Dynamic economy ----------
+# Weather shock to one crop's aggregate world supply - the same trait
+# checks _advance_tiles() already runs per-tile against the player's own
+# crops, applied here as one abstracted market-wide number per crop
+# instead of simulating individual NPC farms.
+func _update_world_supply() -> void:
+	for key in CROP_KEYS:
+		var crop_info = CROPS[key]
+		var idx = world_supply_index.get(key, 1.0)
+		match current_weather:
+			"drought":
+				idx -= WORLD_SUPPLY_STEP * (1.5 if crop_info.get("thirsty", false) else 0.5)
+			"frost":
+				if not crop_info.get("frost_hardy", false):
+					idx -= WORLD_SUPPLY_STEP
+			"heatwave":
+				if crop_info.get("heat_sensitive", false):
+					idx -= WORLD_SUPPLY_STEP
+			"storm":
+				idx -= WORLD_SUPPLY_STEP * 0.4
+			"rainy":
+				idx += WORLD_SUPPLY_STEP * 0.5
+			"sunny":
+				idx += WORLD_SUPPLY_STEP * 0.3
+		idx += (1.0 - idx) * WORLD_SUPPLY_RECOVER # a run of good weather fully heals a past shock over time
+		world_supply_index[key] = clamp(idx, WORLD_SUPPLY_MIN, WORLD_SUPPLY_MAX)
+
+# Eases prices[key] toward base/world_supply_index (scarcity raises it,
+# surplus lowers it) instead of the old pure random walk, and decays
+# oversupply_pressure - call once per day, after _update_world_supply().
+func _update_crop_prices() -> void:
+	for key in CROP_KEYS:
+		var base = CROPS[key]["base_price"]
+		var target = base / world_supply_index.get(key, 1.0)
+		var eased = lerp(float(prices[key]), clamp(target, base * 0.5, base * 2.0), PRICE_EASE)
+		var rounded = int(round(eased))
+		price_trend[key] = sign(rounded - prices[key])
+		prices[key] = rounded
+		oversupply_pressure[key] = max(0.0, oversupply_pressure.get(key, 0.0) * OVERSUPPLY_DECAY - 0.01)
+
+# One line explaining the dominant reason behind a crop's current price,
+# so the causes above stay visible to the player instead of just moving a
+# number - checked in priority order from most to least specific.
+func _market_reason(key: String) -> String:
+	if active_event.get("crop", "") == key:
+		return "Demand spike in effect!"
+	var idx = world_supply_index.get(key, 1.0)
+	if idx <= 0.8:
+		return "Weather has hurt %s supply - prices are up." % CROPS[key]["name"].to_lower()
+	if oversupply_pressure.get(key, 0.0) >= 0.25:
+		return "You've been flooding the market with %s." % CROPS[key]["name"].to_lower()
+	if idx >= 1.2:
+		return "Good weather has kept %s plentiful - prices are down." % CROPS[key]["name"].to_lower()
+	return "Prices are steady."
+
+func _trend_arrow(key: String) -> String:
+	var t = price_trend.get(key, 0)
+	return "▲" if t > 0 else ("▼" if t < 0 else "→")
+
 func _effective_price(key: String) -> int:
 	var bonus_mult = 1.0 + TIER_PRICE_BONUS_PER_LEVEL * _farm_tier_index()
 	bonus_mult += CONTINENT_MASTERY_BONUS_PER_CONTINENT * _fully_owned_continent_count()
-	var base = prices[key] * bonus_mult
+	bonus_mult += REGIONAL_DEMAND_PER_REGION * _owned_count()
+	var oversupply_mult = clamp(1.0 - oversupply_pressure.get(key, 0.0), OVERSUPPLY_MIN_MULT, 1.0)
+	var base = prices[key] * bonus_mult * oversupply_mult
 	if active_event.get("crop", "") == key:
 		return int(round(base * active_event["multiplier"]))
 	return int(round(base))
+
+# A processed good's price rides the same supply/demand/weather drivers as
+# its source crop, scaled by the same ratio _effective_price() moved that
+# crop's own price - so a wheat shortage raises flour's price too, without
+# needing a second tracked-price system just for processed goods.
+func _effective_processed_price(source_crop_key: String) -> int:
+	var recipe = PROCESSING[source_crop_key]
+	var ratio = float(_effective_price(source_crop_key)) / float(CROPS[source_crop_key]["base_price"])
+	return int(round(recipe["price"] * ratio))
+
+# ---------- Livestock (feed -> produce -> sell) ----------
+func _feed_price_per_unit() -> int:
+	return max(1, int(round((_effective_price("wheat") + _effective_price("corn")) * 0.5 * FEED_COST_FACTOR)))
+
+# Cost-plus pricing: a livestock good's sell price rises with how expensive
+# feed currently is relative to its own long-run baseline - the direct
+# "higher feed costs -> higher livestock production costs -> higher meat
+# prices" chain from the design brief, without needing a second supply/
+# demand tracker just for animal goods.
+func _livestock_sell_price(product_key: String) -> int:
+	var baseline_feed = (CROPS["wheat"]["base_price"] + CROPS["corn"]["base_price"]) * 0.5 * FEED_COST_FACTOR
+	var feed_cost_mult = clamp(_feed_price_per_unit() / max(1.0, baseline_feed), 0.7, 1.8)
+	for key in LIVESTOCK_KEYS:
+		if LIVESTOCK[key]["product"] == product_key:
+			return int(round(LIVESTOCK[key]["base_price"] * feed_cost_mult))
+	return 0
+
+# Each owned animal eats its species' feed_per_day and, if fed, produces 1
+# unit of its good. Feed is consumed species-by-species so a shortage
+# leaves whichever species is processed later partly or fully unfed rather
+# than failing all of them at once.
+func _tick_livestock() -> void:
+	for key in LIVESTOCK_KEYS:
+		var count: int = livestock.get(key, 0)
+		if count <= 0:
+			continue
+		var per_day: int = LIVESTOCK[key]["feed_per_day"]
+		var fed_count = min(count, feed_stock / per_day)
+		feed_stock -= fed_count * per_day
+		if fed_count > 0:
+			var product = LIVESTOCK[key]["product"]
+			livestock_goods[product] = livestock_goods.get(product, 0) + fed_count
+
+func _total_stored_units() -> int:
+	var total := 0
+	for key in CROP_KEYS:
+		total += _produce_total(key)
+	for key in PROCESSED_KEYS:
+		total += processed_goods[key]
+	for key in LIVESTOCK_PRODUCT_KEYS:
+		total += livestock_goods[key]
+	return total
+
+func _apply_storage_upkeep() -> void:
+	var stored = _total_stored_units()
+	if stored <= STORAGE_FREE_THRESHOLD:
+		return
+	var upkeep = int(ceil((stored - STORAGE_FREE_THRESHOLD) * STORAGE_UPKEEP_PER_UNIT))
+	if upkeep <= 0:
+		return
+	cash = max(0, cash - upkeep)
+	_log("Storage upkeep cost $%d for %d units stored above the free threshold - sell some or process it." % [upkeep, stored - STORAGE_FREE_THRESHOLD])
+
+# ---------- Market events ----------
 
 func _advance_market_event() -> void:
 	if active_event.is_empty():
@@ -1662,6 +1843,9 @@ func _build_ui() -> void:
 	_add_button(layer, "Use Tool", Vector2(FARM_ORIGIN.x, action_y), Vector2(210, 72), func(): _do_action())
 	_add_button(layer, "Inventory", Vector2(FARM_ORIGIN.x + 222, action_y), Vector2(210, 72), _open_inventory)
 	map_button = _add_button(layer, "World Map", Vector2(FARM_ORIGIN.x + 444, action_y), Vector2(230, 72), func(): _toggle_map())
+	# A slim second row in the gap before the D-pad - opens the Livestock
+	# ranch panel (buy animals, buy feed, sell eggs/wool/milk/pork).
+	_add_button(layer, "Livestock", Vector2(FARM_ORIGIN.x, action_y + 80), Vector2(210, 36), func(): _toggle_livestock_panel())
 
 	# On-screen D-pad - sized generously for real touchscreens, using the
 	# extra vertical space the 19.5:9-ish canvas leaves below the farm UI.
@@ -1684,6 +1868,7 @@ func _build_ui() -> void:
 
 	_build_inventory_panel(layer)
 	_build_map_panel(layer)
+	_build_livestock_panel(layer)
 	_build_act_banner(layer)
 	_build_update_banner(layer)
 	_build_intro_ui(layer)
@@ -1885,10 +2070,16 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 	inventory_panel.add_child(seed_rows_container)
 
 	_add_label(inventory_panel, "Market", Vector2(20, 240), Vector2(400, 30), 24)
+	# Scrollable, same pattern as Upgrades below - each row now carries a
+	# trend arrow and a market-reason line on top of the existing quality
+	# breakdown, which no longer reliably fits 4 crops in a fixed-height box.
+	var market_scroll := ScrollContainer.new()
+	market_scroll.position = Vector2(20, 280)
+	market_scroll.size = Vector2(640, 220)
+	inventory_panel.add_child(market_scroll)
 	market_rows_container = VBoxContainer.new()
-	market_rows_container.position = Vector2(20, 280)
-	market_rows_container.size = Vector2(640, 220)
-	inventory_panel.add_child(market_rows_container)
+	market_rows_container.custom_minimum_size = Vector2(620, 0)
+	market_scroll.add_child(market_rows_container)
 
 	_add_label(inventory_panel, "Outbreak Status", Vector2(20, 520), Vector2(400, 30), 24)
 	blight_label = _add_label(inventory_panel, "No active blight.", Vector2(20, 560), Vector2(640, 60), 18)
@@ -1976,6 +2167,107 @@ func _build_map_panel(layer: CanvasLayer) -> void:
 	map_scroll_content.custom_minimum_size = Vector2(620, 0)
 	map_scroll.add_child(map_scroll_content)
 
+func _build_livestock_panel(layer: CanvasLayer) -> void:
+	livestock_panel = Panel.new()
+	livestock_panel.position = Vector2(20, 40)
+	livestock_panel.size = Vector2(680, 1480)
+	livestock_panel.visible = false
+	layer.add_child(livestock_panel)
+
+	_add_button(livestock_panel, "Close", Vector2(600, 10), Vector2(60, 40), func(): livestock_panel.visible = false)
+	_add_label(livestock_panel, "Livestock Ranch", Vector2(20, 10), Vector2(400, 30), 24)
+	_add_label(livestock_panel, "Feed comes from wheat/corn - its price rises and falls with theirs, so a grain shortage means pricier feed and pricier eggs/wool/milk/pork too.", Vector2(20, 50), Vector2(640, 50), 14, Color(0.7, 0.75, 0.7))
+
+	var feed_row := HBoxContainer.new()
+	feed_row.position = Vector2(20, 110)
+	livestock_panel.add_child(feed_row)
+	feed_label = Label.new()
+	feed_label.custom_minimum_size = Vector2(420, 0)
+	feed_row.add_child(feed_label)
+	var buy_feed_btn := Button.new()
+	buy_feed_btn.text = "Buy %d Feed" % FEED_BATCH_SIZE
+	buy_feed_btn.pressed.connect(func():
+		var cost = _feed_price_per_unit() * FEED_BATCH_SIZE
+		if cash >= cost:
+			cash -= cost
+			feed_stock += FEED_BATCH_SIZE
+			_log("Bought %d feed for $%d." % [FEED_BATCH_SIZE, cost])
+			_play_sfx("success")
+			_refresh_livestock_panel()
+		else:
+			_log("Need $%d for %d feed." % [cost, FEED_BATCH_SIZE])
+			_play_sfx("error")
+	)
+	feed_row.add_child(buy_feed_btn)
+
+	var livestock_scroll := ScrollContainer.new()
+	livestock_scroll.position = Vector2(20, 160)
+	livestock_scroll.size = Vector2(640, 1300)
+	livestock_panel.add_child(livestock_scroll)
+	livestock_rows_container = VBoxContainer.new()
+	livestock_rows_container.custom_minimum_size = Vector2(620, 0)
+	livestock_scroll.add_child(livestock_rows_container)
+
+func _toggle_livestock_panel() -> void:
+	livestock_panel.visible = not livestock_panel.visible
+	if livestock_panel.visible:
+		_refresh_livestock_panel()
+
+func _refresh_livestock_panel() -> void:
+	feed_label.text = "Feed in storage: %d  (buy price: $%d/unit)" % [feed_stock, _feed_price_per_unit()]
+
+	for child in livestock_rows_container.get_children():
+		child.queue_free()
+
+	for key in LIVESTOCK_KEYS:
+		var animal = LIVESTOCK[key]
+		var row := VBoxContainer.new()
+		var top_row := HBoxContainer.new()
+		var label := Label.new()
+		label.text = "%s  owned:%d  eats %d feed/day  buy $%d" % [animal["name"], livestock.get(key, 0), animal["feed_per_day"], animal["cost"]]
+		label.custom_minimum_size = Vector2(420, 0)
+		top_row.add_child(label)
+		var buy_btn := Button.new()
+		buy_btn.text = "Buy"
+		buy_btn.pressed.connect(func():
+			if cash >= animal["cost"]:
+				cash -= animal["cost"]
+				livestock[key] = livestock.get(key, 0) + 1
+				_log("Bought a %s." % animal["name"])
+				_play_sfx("success")
+				_refresh_all()
+			else:
+				_log("Need $%d for a %s." % [animal["cost"], animal["name"]])
+				_play_sfx("error")
+		)
+		top_row.add_child(buy_btn)
+		row.add_child(top_row)
+
+		var product = animal["product"]
+		var amount = livestock_goods.get(product, 0)
+		var sell_row := HBoxContainer.new()
+		var sell_label := Label.new()
+		var price = _livestock_sell_price(product)
+		sell_label.text = "  %s: %d in storage ($%d ea)" % [animal["product_name"], amount, price]
+		sell_label.custom_minimum_size = Vector2(420, 0)
+		sell_label.add_theme_font_size_override("font_size", 15)
+		sell_row.add_child(sell_label)
+		var sell_btn := Button.new()
+		sell_btn.text = "Sell all"
+		sell_btn.disabled = amount == 0
+		sell_btn.pressed.connect(func():
+			var earnings = amount * price
+			cash += earnings
+			lifetime_earned += earnings
+			livestock_goods[product] = 0
+			_log("Sold %d %s for $%d." % [amount, animal["product_name"], earnings])
+			_play_sfx("success")
+			_refresh_all()
+		)
+		sell_row.add_child(sell_btn)
+		row.add_child(sell_row)
+		livestock_rows_container.add_child(row)
+
 func _open_inventory() -> void:
 	inventory_panel.visible = true
 	_refresh_inventory_panel()
@@ -2019,6 +2311,8 @@ func _refresh_all() -> void:
 	_refresh_inventory_panel()
 	if map_panel and map_panel.visible:
 		_refresh_map_panel()
+	if livestock_panel and livestock_panel.visible:
+		_refresh_livestock_panel()
 
 func _refresh_tool_ui() -> void:
 	tool_label.text = "Tool: %s %s" % [TOOLS[selected_tool]["emoji"], TOOLS[selected_tool]["name"]]
@@ -2090,7 +2384,7 @@ func _refresh_inventory_panel() -> void:
 		var eff_price = _effective_price(key)
 		var spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if active_event.get("crop", "") == key else ""
 		var total = _produce_total(key)
-		label.text = "%s  seeds:%d  produce:%d/%d  $%d base%s" % [crop["name"], seeds[key], total, storage_cap, eff_price, spike_tag]
+		label.text = "%s  seeds:%d  produce:%d/%d  $%d base %s" % [crop["name"], seeds[key], total, storage_cap, eff_price, _trend_arrow(key)] + spike_tag
 		label.custom_minimum_size = Vector2(420, 0)
 		top_row.add_child(label)
 		var sell_btn := Button.new()
@@ -2109,6 +2403,7 @@ func _refresh_inventory_panel() -> void:
 				produce[key][q] = 0
 			cash += earnings
 			lifetime_earned += earnings
+			oversupply_pressure[key] = min(2.0, oversupply_pressure.get(key, 0.0) + amount * OVERSUPPLY_PER_UNIT)
 			_log("Sold %d %s for $%d." % [amount, crop["name"], earnings])
 			_play_sfx("success")
 			_check_act_progress()
@@ -2116,6 +2411,11 @@ func _refresh_inventory_panel() -> void:
 		)
 		top_row.add_child(sell_btn)
 		row.add_child(top_row)
+		var reason_label := Label.new()
+		reason_label.text = "  " + _market_reason(key)
+		reason_label.add_theme_font_size_override("font_size", 13)
+		reason_label.add_theme_color_override("font_color", Color(0.65, 0.7, 0.8))
+		row.add_child(reason_label)
 		var quality_parts := []
 		for q in QUALITY_KEYS:
 			if produce[key][q] > 0:
@@ -2144,7 +2444,7 @@ func _refresh_inventory_panel() -> void:
 			var batches = _process_batches_available(key)
 			var row := HBoxContainer.new()
 			var label := Label.new()
-			label.text = "%d %s -> 1 %s (sells $%d)" % [recipe["input_amount"], CROPS[key]["name"], recipe["product_name"], recipe["price"]]
+			label.text = "%d %s -> 1 %s (sells $%d)" % [recipe["input_amount"], CROPS[key]["name"], recipe["product_name"], _effective_processed_price(key)]
 			label.custom_minimum_size = Vector2(420, 0)
 			row.add_child(label)
 			var process_btn := Button.new()
@@ -2157,11 +2457,12 @@ func _refresh_inventory_panel() -> void:
 			var amount = processed_goods[product]
 			if amount <= 0:
 				continue
-			var price = 0
+			var source_key = ""
 			for key in CROP_KEYS:
 				if PROCESSING[key]["product"] == product:
-					price = PROCESSING[key]["price"]
+					source_key = key
 					break
+			var price = _effective_processed_price(source_key)
 			var row2 := HBoxContainer.new()
 			var label2 := Label.new()
 			label2.text = "In storage: %s x%d ($%d ea)" % [product.capitalize(), amount, price]
@@ -2174,6 +2475,10 @@ func _refresh_inventory_panel() -> void:
 				cash += earnings
 				lifetime_earned += earnings
 				processed_goods[product] = 0
+				# Processed goods still come from the source crop's supply, just
+				# at half weight since converting it already took the raw units
+				# out of the produce market.
+				oversupply_pressure[source_key] = min(2.0, oversupply_pressure.get(source_key, 0.0) + amount * OVERSUPPLY_PER_UNIT * 0.5)
 				_log("Sold %d %s for $%d." % [amount, product.capitalize(), earnings])
 				_play_sfx("success")
 				_refresh_all()
@@ -2415,6 +2720,8 @@ func _save_game() -> void:
 		"owned_upgrades": owned_upgrades, "active_event": active_event,
 		"player_x": player_pos.x, "player_y": player_pos.y,
 		"farm_name": farm_name,
+		"oversupply_pressure": oversupply_pressure, "world_supply_index": world_supply_index,
+		"livestock": livestock, "feed_stock": feed_stock, "livestock_goods": livestock_goods,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -2459,6 +2766,22 @@ func _load_game() -> void:
 	for key in CROP_KEYS:
 		if not prices.has(key):
 			prices[key] = CROPS[key]["base_price"]
+	oversupply_pressure = parsed.get("oversupply_pressure", oversupply_pressure)
+	world_supply_index = parsed.get("world_supply_index", world_supply_index)
+	for key in CROP_KEYS:
+		if not oversupply_pressure.has(key):
+			oversupply_pressure[key] = 0.0
+		if not world_supply_index.has(key):
+			world_supply_index[key] = 1.0
+	livestock = parsed.get("livestock", livestock)
+	for key in LIVESTOCK_KEYS:
+		if not livestock.has(key):
+			livestock[key] = 0
+	feed_stock = int(parsed.get("feed_stock", feed_stock))
+	livestock_goods = parsed.get("livestock_goods", livestock_goods)
+	for key in LIVESTOCK_PRODUCT_KEYS:
+		if not livestock_goods.has(key):
+			livestock_goods[key] = 0
 	selected_crop = parsed.get("selected_crop", selected_crop)
 	selected_tool = parsed.get("selected_tool", selected_tool)
 	current_act = clampi(int(parsed.get("current_act", current_act)), 0, ACTS.size() - 1)
@@ -2545,6 +2868,11 @@ func _reset_game() -> void:
 	}
 	processed_goods = {"flour": 0, "cornmeal": 0, "sauce": 0, "pumpkin_pie": 0}
 	prices = {"wheat": 10, "corn": 22, "tomato": 45, "pumpkin": 70}
+	oversupply_pressure = {"wheat": 0.0, "corn": 0.0, "tomato": 0.0, "pumpkin": 0.0}
+	world_supply_index = {"wheat": 1.0, "corn": 1.0, "tomato": 1.0, "pumpkin": 1.0}
+	livestock = {"chicken": 0, "sheep": 0, "cow": 0, "pig": 0}
+	feed_stock = 0
+	livestock_goods = {"eggs": 0, "wool": 0, "milk": 0, "pork": 0}
 	selected_crop = "wheat"
 	selected_tool = "hoe"
 	current_act = 0
@@ -2560,6 +2888,7 @@ func _reset_game() -> void:
 	_refresh_all()
 	inventory_panel.visible = false
 	map_panel.visible = false
+	livestock_panel.visible = false
 	_log("Game reset.")
 	# Route back through the same naming screen + Kacie intro a truly new
 	# game gets, rather than the old plain Act 1 banner - a manual reset
