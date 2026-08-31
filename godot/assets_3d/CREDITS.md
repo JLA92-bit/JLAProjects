@@ -4,8 +4,12 @@ All models in this directory are CC0 (public domain) by Kenney (www.kenney.nl),
 sourced from the `ETdoFresh/kenney.nl` GitHub mirror. No attribution is legally
 required, but it's credited here anyway.
 
-- `nature_kit/` — Kenney "Nature Kit" 2.1 (ground, crops, fences, trees).
-  See `nature_kit/LICENSE.txt`.
+- `nature_kit/` — Kenney "Nature Kit" 2.1 (ground, crops, fences, trees,
+  plus scattered rocks/flowers/mushrooms/a stump/a sign/a bush for
+  backdrop variety). See `nature_kit/LICENSE.txt`. This pack has 329
+  models total and only a fraction are pulled in here - see
+  `ASSET_LIBRARY.md` for the rest of what's available from it and other
+  Kenney packs without needing to re-search.
 - `character/` — Kenney "Blocky Characters" (player model + skin texture).
   See `character/LICENSE.txt`.
 - `textures/kacie_portrait.png` — portrait of Kacie, the game's first NPC,

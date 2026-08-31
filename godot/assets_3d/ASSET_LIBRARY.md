@@ -1,0 +1,157 @@
+# Asset library — what's available to pull from
+
+This is a reference catalog of CC0 assets confirmed reachable from this
+sandbox (all via `git clone` of `ETdoFresh/kenney.nl`, a GitHub mirror of
+Kenney's asset packs — see `CREDITS.md` for the licensing chain). Direct
+downloads from itch.io, poly.pizza, OpenGameArt, and similar sites are
+network-blocked here; GitHub mirrors are not, which is why every asset
+this project uses came from that route. Only a small fraction of what's
+listed below has actually been copied into this repo — everything else is
+one `git clone --filter=blob:none --sparse` away, listed here so a future
+request doesn't have to re-discover it from scratch.
+
+To pull a new file: sparse-clone the pack (see the commands under each
+section), copy the specific `.glb` into the relevant `assets_3d/<kit>/`
+folder here, add a `world_scenes["key"] = load(...)` line in
+`_load_world_assets()`, and run the standard headless editor pass
+(`--editor --rendering-driver opengl3 --quit-after 40`) once to generate
+its `.import` file — `scripts/Main.gd`'s existing `_load_world_assets()`
+and `_build_scenery()` show the pattern for both simple loads and
+multi-piece assemblies (see the farmhouse).
+
+## Already in this repo
+
+- `nature_kit/` — 27 of 329 available pieces (ground, crops, fences, trees,
+  rocks, flowers, mushrooms, a stump, a sign, a bush).
+- `character/` — full Blocky Characters kit (player model + skin).
+- `fantasy_town_kit/` — 4 of ~160 available pieces (the farmhouse's walls,
+  roof, and chimney).
+- `food_kit/` — 1 of 200 available pieces (tomato).
+- `textures/` — a real grass photo texture and Kacie's portrait (not from
+  Kenney; see CREDITS.md for those two specifically).
+
+## Kenney "Nature Kit" 2.1 — `kenney_natureKit_2.1/Models/GLTF format/`
+329 models total. Already a rich decoration set beyond what's copied in:
+
+- **More crops**: `crop_carrot.glb`, `crop_turnip.glb` — real models for
+  crop types beyond wheat/corn/tomato/pumpkin, if the game ever adds them.
+  `crops_bambooStageA/B.glb` also exists as another staged-growth plant.
+- **More trees**: every tree comes in `_dark` and `_fall` color variants
+  (e.g. `tree_oak.glb`, `tree_oak_dark.glb`, `tree_oak_fall.glb`) — could
+  tie the backdrop's tree color to the game's existing season system
+  (Spring/Summer/Fall/Winter) instead of using one tree year-round. Also:
+  `tree_palm*`, `tree_pine*` (many size variants), `tree_blocks`,
+  `tree_plateau`, `tree_thin`, `tree_tall`, `tree_small`.
+- **Water/river tiles**: `ground_river*.glb` (straight/bend/corner/cross/
+  end/split, plus a stone-bank variant) — a real water feature if the
+  farm ever gets a pond or stream.
+- **Paths**: `ground_path*.glb` (straight/bend/corner/cross/end/split) and
+  `path_stone*.glb` / `path_wood*.glb` — could lay an actual walking path
+  from the fence gate to the farmhouse instead of bare grass.
+- **Cliffs**: a full `cliff_*_rock.glb` / `cliff_*_stone.glb` modular set
+  (blocks, slopes, corners, steps, waterfalls) — enough for real terrain
+  elevation if the flat farm ever needs a hill or cliff edge.
+- **More rocks/stones**: `rock_large{A-F}`, `rock_small{A-I}`,
+  `rock_tall{A-J}`, `stone_large{A-F}`, `stone_small{A-I}`,
+  `stone_tall{A-J}` — dozens of unused variants for scatter variety.
+- **More flowers**: 3 variants each of red/yellow/purple
+  (`flower_redA/B/C.glb` etc.) — only one of each color used so far.
+- **Bushes**: `plant_bush.glb` (used), plus `plant_bushDetailed`,
+  `plant_bushLarge`, `plant_bushLargeTriangle`, `plant_bushSmall`,
+  `plant_bushTriangle`.
+- **Logs/stumps**: `log.glb`, `log_large.glb`, `log_stack.glb`,
+  `log_stackLarge.glb`, `stump_old(Tall)`, `stump_square(Detailed(Wide))`.
+- **Water plants**: `lily_large.glb`, `lily_small.glb`, `hanging_moss.glb`.
+- **Camp/rustic props**: `campfire_bricks/logs/planks/stones.glb`,
+  `pot_large.glb`, `pot_small.glb`, `canoe.glb` + paddle, `bridge_*`
+  (wood and stone, many variants), `sign.glb` (used, one instance).
+- **Ruins/statues** (less farm-appropriate, but available):
+  `statue_block/column/columnDamaged/head/obelisk/ring.glb`.
+- **Cactus, tents** (desert/camping, unlikely to fit this game's theme):
+  `cactus_short/tall.glb`, `tent_*.glb`.
+
+```bash
+git clone --filter=blob:none --sparse https://github.com/ETdoFresh/kenney.nl.git kenney_mirror
+cd kenney_mirror && git sparse-checkout set "kenney_natureKit_2.1/Models/GLTF format"
+```
+
+## Kenney "Fantasy Town Kit" — `fantasy-town-kit-1.0/Models/GLTF format/`
+~160 models, a full modular medieval/fantasy town-building kit (CC0,
+confirmed independently against kenney.nl - see CREDITS.md). Only the
+plain wood wall, door wall, gable roof, and chimney are used (the
+farmhouse). Still available:
+
+- **More wall variants**: stone walls (`wall.glb`, `wallBlock`,
+  `wallCorner`, `wallCurved`, `wallBroken`, arches, etc. - a full parallel
+  stone set to the wood one already used), plus `wallWoodWindowGlass`,
+  `wallWoodWindowRound`, `wallWoodWindowShutters`, `wallWoodWindowSmall`,
+  `wallWoodWindowStone` (window variety - the farmhouse tried the glass
+  one and reverted to plain walls because the glass read as a solid black
+  square at this camera's distance; the *small* or *shutters* window
+  might read better and is worth trying if the farmhouse gets revisited).
+- **More roofs**: `roofFlat`, `roofHigh` (+ corner/gable/flat variants),
+  `roofCorner`, `roofCornerRound` — could build a second, differently-
+  shaped building (a barn or shed) alongside the farmhouse.
+- **Fences/hedges**: `fence.glb`, `fenceBroken`, `fenceCurved`,
+  `fenceGate.glb`, `hedge.glb`, `hedgeCurved`, `hedgeGate` — an
+  alternative fence style if the Nature Kit one ever needs variety.
+  `fenceGate`/`hedgeGate` in particular could mark the farm's entrance.
+  visually rather than a plain fence segment.
+  - a `pillarWood`/`pillarStone`, `lantern.glb`, `chimney` variants, and
+  `cart.glb`/`cartHigh.glb` (a produce cart - thematically perfect for a
+  farm stand or market stall if that's ever added as a feature).
+
+```bash
+cd kenney_mirror && git sparse-checkout add "fantasy-town-kit-1.0/Models/GLTF format"
+```
+
+## Kenney "Food Kit" — `foodKit_v1.2/Models/GLTF format/`
+~200 models of real food items. Only `tomato.glb` used so far. Relevant
+if crop variety expands, though Nature Kit's own `crop_carrot`/
+`crop_turnip` (above) are a better style match for garden crops than Food
+Kit's kitchen-table-scale items (tomato needed a 2.4x scale-up to match).
+Worth checking for specific produce names if a new crop type is added.
+
+```bash
+cd kenney_mirror && git sparse-checkout add "foodKit_v1.2"
+```
+
+## Kenney "Holiday Pack" — `kenney_holidaypack/Models/GLTF format/`
+A full winter-cabin building kit (`cabinWall/Roof/Door/Window/Corner...`,
+much like Fantasy Town Kit's wood set) plus standalone winter/holiday
+props: `present.glb` (+ Low/Round variants), `candyCane.glb` (+ Mint),
+`lightsGreen/Multi/Red.glb`, `lightpost.glb`, `sled.glb`,
+`rockFormationLarge/Medium/Small.glb`, `bench.glb`. Not pulled in - would
+only make sense tied to the game's existing Winter season, e.g. seasonal
+decoration that only appears during the Winter season_idx.
+
+```bash
+cd kenney_mirror && git sparse-checkout add "kenney_holidaypack"
+```
+
+## Audio — not yet used at all (this game currently has no sound)
+- `kenney_interfacesounds/` — 100 short UI sound effects (clicks, taps,
+  confirms). Would fit tool-use/menu-open feedback.
+- `kenney_impactsounds/` — 130 short impact/hit sounds. Would fit
+  harvesting, tilling, or watering feedback.
+- `kenney_musicjingles/` — short musical stings (an "8-Bit jingles"
+  subfolder of NES-style clips among others). Would fit an Act-cleared
+  fanfare, playing right as the title/transition card in
+  `_show_act_transition()` appears.
+
+Wiring any of these in is a bigger step than the visual assets above -
+needs an `AudioStreamPlayer` node, format is `.ogg` (Godot handles these
+natively), and would be worth a dedicated pass rather than a quick pull.
+
+```bash
+cd kenney_mirror && git sparse-checkout add "kenney_interfacesounds" "kenney_impactsounds" "kenney_musicjingles"
+```
+
+## Not useful for this game (surveyed and ruled out)
+- `kenney-animalpack/`, `kenney_animalpackredux/` — 2D icon sprites (zoo
+  animals, not farm animals), not 3D models. This is why the farm animals
+  in this game are procedural rather than sourced - see the "Procedural"
+  section below in CREDITS.md for the fuller explanation.
+- `kenney_foliagepack` - listed in the mirror's top-level directory but
+  contains no `.glb`/`.gltf` files when checked (2D-only or empty in this
+  mirror).

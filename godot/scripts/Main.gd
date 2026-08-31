@@ -740,6 +740,21 @@ func _load_world_assets():
 	world_scenes["fence_corner"] = load(NK + "fence_corner.glb")
 	world_scenes["tree"] = load(NK + "tree_default.glb")
 	world_scenes["pine"] = load(NK + "tree_pineRoundA.glb")
+	# A pull of extra Nature Kit scenery for backdrop variety beyond the
+	# handful of pieces the farm grid itself needs - see
+	# assets_3d/ASSET_LIBRARY.md for the much larger set still available in
+	# the same upstream pack if more variety is ever wanted later.
+	world_scenes["rock_large_a"] = load(NK + "rock_largeA.glb")
+	world_scenes["rock_large_c"] = load(NK + "rock_largeC.glb")
+	world_scenes["rock_small_b"] = load(NK + "rock_smallB.glb")
+	world_scenes["flower_red"] = load(NK + "flower_redA.glb")
+	world_scenes["flower_yellow"] = load(NK + "flower_yellowB.glb")
+	world_scenes["flower_purple"] = load(NK + "flower_purpleC.glb")
+	world_scenes["mushroom_red"] = load(NK + "mushroom_red.glb")
+	world_scenes["mushroom_tan"] = load(NK + "mushroom_tan.glb")
+	world_scenes["stump"] = load(NK + "stump_round.glb")
+	world_scenes["sign"] = load(NK + "sign.glb")
+	world_scenes["bush"] = load(NK + "plant_bush.glb")
 	world_scenes["player"] = load("res://assets_3d/character/basicCharacter.gltf")
 	player_skin_material = StandardMaterial3D.new()
 	player_skin_material.albedo_texture = load("res://assets_3d/character/skin_man.png")
@@ -915,6 +930,27 @@ func _build_scenery():
 		a.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
 		a.rotation.y = randf() * TAU
 		world_root.add_child(a)
+
+	# Extra backdrop variety - flowers by the farmhouse, mushrooms and a
+	# stump in the treeline, rocks and a bush scattered further out.
+	var extra_deco = [
+		{"key": "sign", "tx": (COLS - 1) * 0.5, "tz": -2.2},
+		{"key": "flower_red", "tx": COLS * 0.3, "tz": -2.4},
+		{"key": "flower_yellow", "tx": COLS * 0.3 + 0.6, "tz": -2.6},
+		{"key": "flower_purple", "tx": COLS * 0.7, "tz": -2.3},
+		{"key": "mushroom_red", "tx": -2.2, "tz": ROWS * 0.3},
+		{"key": "mushroom_tan", "tx": -2.5, "tz": ROWS * 0.45},
+		{"key": "rock_large_a", "tx": COLS + 2.0, "tz": 2.0},
+		{"key": "rock_large_c", "tx": COLS + 2.6, "tz": 6.0},
+		{"key": "rock_small_b", "tx": -2.6, "tz": ROWS - 1.5},
+		{"key": "stump", "tx": COLS * 0.15, "tz": ROWS + 1.6},
+		{"key": "bush", "tx": COLS * 0.85, "tz": ROWS + 1.7},
+	]
+	for d in extra_deco:
+		var e = world_scenes[d["key"]].instantiate()
+		e.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
+		e.rotation.y = randf() * TAU
+		world_root.add_child(e)
 
 	for c in range(-1, COLS + 1):
 		var f = world_scenes["fence"].instantiate()
