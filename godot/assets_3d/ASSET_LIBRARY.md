@@ -198,11 +198,13 @@ more still unused:
   `maximize`, `minimize`, `open`, `pluck`, `question`, `scratch`,
   `scroll`, `select`, `switch`, `tick`, `toggle`) could round out menu-
   open/close feedback if the UI grows more panels.
-- `kenney_impactsounds/` — 130 short impact/hit sounds total, 2 pulled in
-  (mining/soft-medium for till/water). Remaining categories include
-  footsteps (carpet/concrete/grass/snow/wood - could tie to player
-  movement) and more impact material types (bell, glass, metal, plank,
-  plate, punch, tin, wood) if specific actions want a more distinct sound.
+- `kenney_impactsounds/` — 130 short impact/hit sounds total, 3 pulled in
+  (mining/soft-medium for till/water, grass footstep for player movement).
+  Remaining footstep surfaces (carpet/concrete/snow/wood) are unused -
+  could swap in if the farm ever gets a real path/floor surface underfoot
+  instead of always grass. More impact material types (bell, glass,
+  metal, plank, plate, punch, tin, wood) also unused if specific actions
+  want a more distinct sound.
 - `kenney_musicjingles/` — 1 of ~59 clips pulled in (`jingles_NES00` from
   the "8-Bit jingles" subfolder, for Act-cleared/victory - see
   `assets_audio/CREDITS.md`). Also has "Hit jingles" (17), "Pizzicato

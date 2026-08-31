@@ -31,3 +31,8 @@ looping background music yet.
   Act's goal is reached (`_check_act_progress()`, right as the title card
   for the next Act appears) and again on the final victory banner when
   every region is owned.
+- `footstep.ogg` (footstep_grass_000) — plays on a timer while the player
+  is moving (`_handle_movement()`), through its own `footstep_player`
+  rather than the shared `sfx_player` so a footstep never cuts off a
+  tool-use/harvest sound mid-play. Quieted by -6dB since it repeats
+  constantly during normal play, unlike the one-shot feedback sounds.

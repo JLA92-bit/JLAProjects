@@ -383,6 +383,9 @@ var player_node: Node3D
 var player_skin_material: StandardMaterial3D
 var sfx_player: AudioStreamPlayer
 var sfx := {} # key -> AudioStream
+var footstep_player: AudioStreamPlayer # separate from sfx_player so walking never cuts off a tool-use/harvest sound
+var footstep_timer := 0.0
+const FOOTSTEP_INTERVAL := 0.32
 
 var hud_cash: Label
 var hud_day: Label
@@ -548,8 +551,12 @@ func _load_audio() -> void:
 	sfx["error"] = load(AUD + "error.ogg")
 	sfx["click"] = load(AUD + "click.ogg")
 	sfx["act_complete"] = load(AUD + "act_complete.ogg")
+	sfx["footstep"] = load(AUD + "footstep.ogg")
 	sfx_player = AudioStreamPlayer.new()
 	add_child(sfx_player)
+	footstep_player = AudioStreamPlayer.new()
+	footstep_player.volume_db = -6.0 # footsteps repeat constantly while walking - quieter so they sit as texture, not a nag
+	add_child(footstep_player)
 
 func _play_sfx(key: String) -> void:
 	if not sfx.has(key):
@@ -875,6 +882,13 @@ func _handle_movement(delta: float) -> void:
 		player_pos += dir * PLAYER_SPEED * delta
 		player_pos.x = clamp(player_pos.x, 0, (COLS - 1) * TILE)
 		player_pos.y = clamp(player_pos.y, 0, (ROWS - 1) * TILE)
+		footstep_timer -= delta
+		if footstep_timer <= 0.0:
+			footstep_timer = FOOTSTEP_INTERVAL
+			footstep_player.stream = sfx["footstep"]
+			footstep_player.play()
+	else:
+		footstep_timer = 0.0 # next step plays immediately on the next move, not after a stale leftover cooldown
 
 func _update_player_visual() -> void:
 	var world_x = (player_pos.x / TILE) * WORLD_TILE
