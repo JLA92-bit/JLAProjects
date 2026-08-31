@@ -13,7 +13,23 @@ const COLS := 16
 const ROWS := 11
 const DAY_LENGTH := 25.0
 const PLAYER_SPEED := 220.0
-const FARM_ORIGIN := Vector2(40, 110)
+
+# ---------- HUD v2 (glass HUD over a full-bleed 3D viewport) ----------
+# Design spec was authored at 392x860 dp (a reference Android portrait
+# screen); this game's actual canvas is 720x1560 - UI_SCALE converts the
+# spec's dp measurements to this canvas's pixels 1:1 in true physical size
+# (720/392 and 1560/860 are both ~1.82-1.84, close enough to treat as one
+# scale factor). _dp() below is the intended way to use it.
+const UI_SCALE := 1.82
+const COL_CREAM := Color(0.949, 0.929, 0.890)      # #F2EDE3 - primary HUD text/glyphs
+const COL_GLASS_BG := Color(0.0549, 0.0784, 0.0667) # base RGB for every glass chip/card (alpha varies per element)
+const COL_AMBER := Color(0.949, 0.761, 0.302)       # ~oklch(0.85 0.14 85) - selection/action/focus
+const COL_AMBER_DEEP := Color(0.816, 0.514, 0.204)  # ~oklch(0.72 0.16 62) - action gradient's dark end
+const COL_SEASON_FALL := Color(0.890, 0.604, 0.361) # ~oklch(0.8 0.13 55) - season text, toast dot
+const COL_BERRY := Color(0.831, 0.451, 0.659)       # ~oklch(0.75 0.13 350) - act label
+const COL_LEAF := Color(0.475, 0.831, 0.541)        # ~oklch(0.84 0.14 145) - seeds glyph
+const COL_WATER := Color(0.561, 0.776, 0.910)       # ~oklch(0.85 0.09 220) - water glyph, frost
+const COL_ALERT := Color(0.910, 0.384, 0.235)       # ~oklch(0.72 0.17 28) - badges
 
 # ---------- 3D farm view ----------
 # The farm is rendered as a real 3D scene (Kenney "Nature Kit" models, CC0)
@@ -449,20 +465,41 @@ var footstep_player: AudioStreamPlayer # separate from sfx_player so walking nev
 var footstep_timer := 0.0
 const FOOTSTEP_INTERVAL := 0.32
 
-var hud_cash: Label
-var hud_day: Label
-var hud_dom: Label
-var hud_act: Label
-var hud_season: Label
-var hud_farm: Label
-var tool_label: Label
-var log_label: Label
-var tool_row: HBoxContainer
+var hud_cash: Label            # coin pill value
+var hud_day: Label             # day pill's "DAY N" mono label
+var hud_dom: Label             # act card's "N% owned" label
+var hud_act: Label             # act card title ("First Harvest")
+var hud_season: Label          # day pill's season text ("Fall 6/7")
+var hud_farm: Label            # small livestock/feed status line under the act card
+var tool_label: Label          # kept for _refresh_tool_ui() compatibility; not shown (no on-screen equivalent in HUD v2)
+var log_label: Label           # kept for _log() compatibility; not shown (messages now surface as toasts)
+var tool_row: GridContainer
 var tool_buttons := {}
+var tool_belt_bottom_y: float
+var tool_belt_side: float
+var tool_belt_card_h: float
+var act_roman_label: Label     # "ACT I"
+var act_progress_fill: Panel   # width-driven progress bar fill
+var act_progress_track_w: float
+var act_farmname_label: Label
+var act_tier_label: Label
+var act_tier_badge: Panel
+var forecast_today_label: Label
+var forecast_tomorrow_label: Label
+var shop_badge_label: Label
+var toast_panel: Panel
+var toast_label: Label
+var toast_timer: Timer
+var action_button: Control
+var action_sublabel: Label
+var bag_button: Control
+var thumbstick_base: Control
+var thumbstick_knob: Control
+var thumbstick_dragging := false
 var act_banner: Panel
 var act_banner_title: Label
 var act_banner_body: Label
-var map_button: Button
+var map_button: Control
 var update_banner: Panel
 var update_banner_label: Label
 var current_build_commit := ""
@@ -759,14 +796,18 @@ func _switch_active_plot(plot_id: String) -> void:
 
 # ---------- Farm grid rendering (3D) ----------
 func _build_farm_view(layer: CanvasLayer) -> void:
+	# Full-bleed per the HUD v2 design: the 3D render fills the entire
+	# 720x1560 canvas edge to edge, with every HUD element floating over it
+	# on its own CanvasLayer children rather than the world being boxed into
+	# a letterboxed sub-region.
 	var container := SubViewportContainer.new()
-	container.position = FARM_ORIGIN
-	container.size = Vector2(COLS * TILE, ROWS * TILE)
+	container.position = Vector2.ZERO
+	container.size = Vector2(720, 1560)
 	container.stretch = true
 	layer.add_child(container)
 
 	farm_viewport = SubViewport.new()
-	farm_viewport.size = Vector2i(COLS * TILE, ROWS * TILE)
+	farm_viewport.size = Vector2i(720, 1560)
 	farm_viewport.transparent_bg = false
 	farm_viewport.own_world_3d = true
 	container.add_child(farm_viewport)
@@ -791,6 +832,12 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 
 	var cam := Camera3D.new()
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	# KEEP_WIDTH pins the horizontal extent to cam.size (below) regardless of
+	# viewport aspect - needed now that the viewport is a tall 720x1560 full-
+	# bleed rect rather than the old ~1:1 letterboxed box, so the same COLS-
+	# wide framing holds and the extra height just reveals more world above/
+	# below instead of squishing or over-zooming the scene.
+	cam.keep_aspect = Camera3D.KEEP_WIDTH
 	cam_base_size = COLS * WORLD_TILE * 1.7
 	cam.size = cam_base_size * cam_zoom
 	var center := Vector3((COLS - 1) * WORLD_TILE * 0.5, 0, (ROWS - 1) * WORLD_TILE * 0.5)
@@ -802,7 +849,7 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 	# reach the ground plane at all and the sky shows through no matter how
 	# much backdrop is added. Scaling the whole offset with COLS keeps the
 	# same angle while keeping the start point comfortably above the ground.
-	var cam_offset := Vector3(8, 7, 8) * (COLS / 10.0) * 1.3
+	var cam_offset := Vector3(8, 22, 8) * (COLS / 10.0) * 1.3
 	cam.position = center + cam_offset
 	world_root.add_child(cam)
 	cam.look_at(center, Vector3.UP)
@@ -834,6 +881,23 @@ func _build_scenery():
 	# Scaled off COLS (tuned as 20 tiles at the original COLS=10) so a bigger
 	# playable grid - which also zooms the camera out further, see cam.size
 	# in _build_farm_view - still gets enough backdrop to hide the sky.
+	# A single huge flat plane beneath everything as a horizon fallback - the
+	# full-bleed HUD v2 viewport reveals a much taller vertical slice of the
+	# world than before, wide enough that the finite tiled backdrop's edge
+	# could show sky past its corners at some zoom levels; this guarantees
+	# grass-colored ground to the horizon in every direction without having
+	# to further balloon the backdrop tile count (already ~6000 tiles).
+	var horizon_plane := MeshInstance3D.new()
+	var horizon_mesh := PlaneMesh.new()
+	horizon_mesh.size = Vector2(500, 500)
+	horizon_plane.mesh = horizon_mesh
+	var horizon_mat := StandardMaterial3D.new()
+	horizon_mat.albedo_color = Color(0.55, 0.68, 0.42)
+	horizon_mat.roughness = 0.95
+	horizon_plane.material_override = horizon_mat
+	horizon_plane.position = Vector3((COLS - 1) * WORLD_TILE * 0.5, -0.03, (ROWS - 1) * WORLD_TILE * 0.5)
+	world_root.add_child(horizon_plane)
+
 	var BACKDROP_MARGIN := int(COLS * 2.0)
 	for tz in range(-BACKDROP_MARGIN, ROWS + BACKDROP_MARGIN):
 		for tx in range(-BACKDROP_MARGIN, COLS + BACKDROP_MARGIN):
@@ -1048,6 +1112,7 @@ func _log(msg: String) -> void:
 	log_text = msg
 	if log_label:
 		log_label.text = msg
+	_show_toast(msg)
 
 func _do_action() -> void:
 	var f := _facing_tile()
@@ -1857,56 +1922,382 @@ func _add_button(parent: Node, text: String, pos: Vector2, size: Vector2, cb: Ca
 	parent.add_child(b)
 	return b
 
+# ---------- HUD v2 helpers ----------
+func _dp(v: float) -> float:
+	return v * UI_SCALE
+
+# Screen width/height expressed in the same dp space the design spec uses,
+# so positions below can be transcribed straight from the spec's numbers.
+func _screen_w_dp() -> float:
+	return 720.0 / UI_SCALE
+func _screen_h_dp() -> float:
+	return 1560.0 / UI_SCALE
+
+func _glass_style(bg_alpha: float, radius: float, border_alpha: float = 0.12) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(COL_GLASS_BG.r, COL_GLASS_BG.g, COL_GLASS_BG.b, bg_alpha)
+	sb.set_corner_radius_all(int(radius))
+	sb.set_border_width_all(1)
+	sb.border_color = Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, border_alpha)
+	sb.shadow_color = Color(0, 0, 0, 0.5)
+	sb.shadow_size = int(_dp(8))
+	return sb
+
+func _glass_panel(parent: Node, pos: Vector2, size: Vector2, radius: float, bg_alpha := 0.62, border_alpha := 0.12) -> Panel:
+	var p := Panel.new()
+	p.position = pos
+	p.size = size
+	p.add_theme_stylebox_override("panel", _glass_style(bg_alpha, radius, border_alpha))
+	parent.add_child(p)
+	return p
+
+func _solid_panel(parent: Node, pos: Vector2, size: Vector2, radius: float, color: Color, border_color := Color(0, 0, 0, 0), border_w := 0) -> Panel:
+	var p := Panel.new()
+	p.position = pos
+	p.size = size
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.set_corner_radius_all(int(radius))
+	if border_w > 0:
+		sb.set_border_width_all(border_w)
+		sb.border_color = border_color
+	p.add_theme_stylebox_override("panel", sb)
+	parent.add_child(p)
+	return p
+
+# A square Panel rotated 45deg reads as a diamond - used for the map rail
+# icon and the forecast chip's "frost" marker, matching the design spec's
+# own primitive-shape iconography (no image assets).
+func _diamond(parent: Node, center: Vector2, size: float, border_color: Color, filled: bool) -> Panel:
+	var p: Panel
+	if filled:
+		p = _solid_panel(parent, Vector2.ZERO, Vector2(size, size), size * 0.15, border_color)
+	else:
+		p = _solid_panel(parent, Vector2.ZERO, Vector2(size, size), size * 0.15, Color(0, 0, 0, 0), border_color, 2)
+	p.pivot_offset = Vector2(size, size) * 0.5
+	p.rotation = PI / 4.0
+	p.position = center - Vector2(size, size) * 0.5
+	return p
+
+func _circle(parent: Node, pos: Vector2, size: float, color: Color, border_color := Color(0, 0, 0, 0), border_w := 0) -> Panel:
+	return _solid_panel(parent, pos, Vector2(size, size), size * 0.5, color, border_color, border_w)
+
+# Coin pill, day/season pill, menu button, forecast chip, act card - the
+# always-visible top status stack, floating over the full-bleed 3D view.
+func _build_hud_top(layer: CanvasLayer) -> void:
+	var side = _dp(16)
+	var top_y = _dp(34)
+	var row1_h = _dp(36)
+
+	# A. Coin pill
+	var coin_w = _dp(80)
+	var coin_pill := _glass_panel(layer, Vector2(side, top_y), Vector2(coin_w, row1_h), row1_h * 0.5)
+	var coin_dot_sb := StyleBoxFlat.new()
+	coin_dot_sb.bg_color = Color(0.918, 0.706, 0.263) # midpoint of the spec's gold gradient
+	coin_dot_sb.set_corner_radius_all(int(_dp(10)))
+	coin_dot_sb.set_border_width_all(1)
+	coin_dot_sb.border_color = Color(1, 1, 1, 0.25)
+	var coin_dot := Panel.new()
+	coin_dot.position = Vector2(_dp(9), row1_h * 0.5 - _dp(10))
+	coin_dot.size = Vector2(_dp(20), _dp(20))
+	coin_dot.add_theme_stylebox_override("panel", coin_dot_sb)
+	coin_pill.add_child(coin_dot)
+	hud_cash = _add_label(coin_pill, "100", Vector2(_dp(33), row1_h * 0.5 - _dp(11)), Vector2(_dp(45), _dp(22)), int(_dp(15)), COL_CREAM)
+
+	# B. Day/season pill
+	var day_x = side + coin_w + _dp(9)
+	var day_w = _dp(155)
+	var day_pill := _glass_panel(layer, Vector2(day_x, top_y), Vector2(day_w, row1_h), row1_h * 0.5)
+	hud_day = _add_label(day_pill, "DAY 1", Vector2(_dp(14), row1_h * 0.5 - _dp(9)), Vector2(_dp(70), _dp(18)), int(_dp(12)), COL_CREAM)
+	_solid_panel(day_pill, Vector2(_dp(88), row1_h * 0.5 - _dp(6)), Vector2(1, _dp(12)), 0, Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.18))
+	hud_season = _add_label(day_pill, "Spring 1/7", Vector2(_dp(96), row1_h * 0.5 - _dp(9)), Vector2(_dp(60), _dp(18)), int(_dp(12)), COL_SEASON_FALL)
+
+	# C. Menu button - purely decorative in the design spec (no bound
+	# behavior in the prototype either; a future settings menu would live
+	# here).
+	var menu_size = _dp(38)
+	var menu_btn := _glass_panel(layer, Vector2(720.0 - side - menu_size, top_y), Vector2(menu_size, menu_size), menu_size * 0.5)
+	for i in range(3):
+		_circle(menu_btn, Vector2(menu_size * 0.5 - _dp(1.5), _dp(11) + i * _dp(6)), _dp(3), COL_CREAM)
+
+	# D. Forecast chip
+	var forecast_y = top_y + row1_h + _dp(9)
+	var forecast_w = _dp(180)
+	var forecast_h = _dp(27)
+	var forecast_chip := _glass_panel(layer, Vector2(side, forecast_y), Vector2(forecast_w, forecast_h), 999, 0.5, 0.09)
+	_diamond(forecast_chip, Vector2(_dp(17), forecast_h * 0.5), _dp(9), COL_WATER, true)
+	forecast_today_label = _add_label(forecast_chip, "Sunny today", Vector2(_dp(26), forecast_h * 0.5 - _dp(8)), Vector2(_dp(90), _dp(16)), int(_dp(11.5)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.9))
+	_add_label(forecast_chip, "→", Vector2(_dp(118), forecast_h * 0.5 - _dp(8)), Vector2(_dp(12), _dp(16)), int(_dp(11)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.35))
+	_circle(forecast_chip, Vector2(_dp(134), forecast_h * 0.5 - _dp(4.5)), _dp(9), COL_AMBER)
+	forecast_tomorrow_label = _add_label(forecast_chip, "Sunny", Vector2(_dp(147), forecast_h * 0.5 - _dp(8)), Vector2(_dp(60), _dp(16)), int(_dp(11.5)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.6))
+
+	# E. Act card
+	var act_y = forecast_y + forecast_h + _dp(9)
+	var act_w = 720.0 - side * 2.0
+	var act_h = _dp(78)
+	var act_card := _glass_panel(layer, Vector2(side, act_y), Vector2(act_w, act_h), _dp(16), 0.5, 0.09)
+	var pad = _dp(13)
+	act_roman_label = _add_label(act_card, "ACT I", Vector2(pad, _dp(11)), Vector2(_dp(50), _dp(14)), int(_dp(9.5)), COL_BERRY)
+	hud_act = _add_label(act_card, "First Harvest", Vector2(pad + _dp(46), _dp(9)), Vector2(_dp(160), _dp(18)), int(_dp(12.5)), COL_CREAM)
+	hud_dom = _add_label(act_card, "0% owned", Vector2(act_w - pad - _dp(90), _dp(11)), Vector2(_dp(90), _dp(14)), int(_dp(10.5)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.5))
+	hud_dom.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+	var bar_y = _dp(35)
+	act_progress_track_w = act_w - pad * 2.0
+	var bar_track := _solid_panel(act_card, Vector2(pad, bar_y), Vector2(act_progress_track_w, _dp(4)), _dp(2), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.12))
+	act_progress_fill = _solid_panel(bar_track, Vector2.ZERO, Vector2(0, _dp(4)), _dp(2), COL_BERRY)
+
+	var row2_y = bar_y + _dp(12)
+	act_farmname_label = _add_label(act_card, "Home Farm", Vector2(pad, row2_y), Vector2(_dp(115), _dp(16)), int(_dp(11)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.75))
+	act_tier_badge = _glass_panel(act_card, Vector2(pad + _dp(120), row2_y - _dp(1)), Vector2(_dp(70), _dp(18)), _dp(6), 0.09, 0.0)
+	act_tier_label = _add_label(act_tier_badge, "BASIC", Vector2(_dp(7), _dp(3)), Vector2(_dp(200), _dp(12)), int(_dp(9)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.6))
+
+	hud_farm = _add_label(act_card, "", Vector2(pad, row2_y + _dp(20)), Vector2(act_w - pad * 2.0, _dp(16)), int(_dp(10)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.6))
+
+# One 44x44 glass tile + micro label underneath, used by the right rail -
+# returns the tile Control so callers can toggle .visible.
+func _build_rail_tile(layer: CanvasLayer, pos: Vector2, label_text: String, cb: Callable) -> Control:
+	var tile_size = _dp(44)
+	var tile := _glass_panel(layer, pos, Vector2(tile_size, tile_size), _dp(15), 0.6)
+	var btn := Button.new()
+	btn.flat = true
+	btn.size = Vector2(tile_size, tile_size)
+	btn.pressed.connect(cb)
+	tile.add_child(btn)
+	# Parented to the tile (not the layer) so hiding the tile - e.g. the MAP
+	# tile before the World Map unlocks - hides its label too, instead of
+	# leaving the micro-label floating with no icon above it.
+	var label := _add_label(tile, label_text, Vector2(-_dp(18), tile_size + _dp(4)), Vector2(tile_size + _dp(36), _dp(12)), int(_dp(8)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.45))
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	return tile
+
+# Right rail: MAP / SHOP / FARM (livestock) - three quick-access tiles,
+# plus a small camera zoom rocker tucked underneath (not part of the
+# design spec, which has no zoom control, but this game already has one
+# and it needs a home somewhere out of the primary thumb zone).
+func _build_hud_rail(layer: CanvasLayer) -> void:
+	var tile_size = _dp(44)
+	var rail_x = 720.0 - _dp(14) - tile_size
+	var rail_y = _dp(264)
+	var pitch = tile_size + _dp(10) + _dp(16)
+
+	map_button = _build_rail_tile(layer, Vector2(rail_x, rail_y), "MAP", func(): _toggle_map())
+	_diamond(map_button, Vector2(tile_size, tile_size) * 0.5, _dp(15), COL_CREAM, false)
+
+	var shop_tile = _build_rail_tile(layer, Vector2(rail_x, rail_y + pitch), "SHOP", _open_inventory)
+	_circle(shop_tile, Vector2(tile_size, tile_size) * 0.5 - Vector2(_dp(8), _dp(8)), _dp(16), Color(0, 0, 0, 0), COL_CREAM, 2)
+	var badge := _glass_panel(shop_tile, Vector2(tile_size - _dp(11), -_dp(3)), Vector2(_dp(16), _dp(16)), _dp(8), 1.0, 0.0)
+	badge.add_theme_stylebox_override("panel", _solid_style(COL_ALERT, _dp(8)))
+	shop_badge_label = _add_label(badge, "0", Vector2(0, _dp(2)), Vector2(_dp(16), _dp(12)), int(_dp(9)), Color.WHITE)
+	shop_badge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	var farm_tile = _build_rail_tile(layer, Vector2(rail_x, rail_y + pitch * 2.0), "FARM", func(): _toggle_livestock_panel())
+	_solid_panel(farm_tile, Vector2(tile_size, tile_size) * 0.5 - Vector2(_dp(7), _dp(7)), Vector2(_dp(14), _dp(14)), _dp(4), Color(0, 0, 0, 0), COL_CREAM, 0).add_theme_stylebox_override("panel", _outline_style(_dp(4)))
+
+	# Zoom rocker - two small glass circles below the rail.
+	var zoom_size = _dp(32)
+	var zoom_y = rail_y + pitch * 3.0 + _dp(6)
+	var zoom_x = rail_x + (tile_size - zoom_size) * 0.5
+	var zoom_in := _glass_panel(layer, Vector2(zoom_x, zoom_y), Vector2(zoom_size, zoom_size), zoom_size * 0.5)
+	var zoom_in_btn := Button.new()
+	zoom_in_btn.flat = true
+	zoom_in_btn.size = Vector2(zoom_size, zoom_size)
+	zoom_in_btn.pressed.connect(func(): _adjust_camera_zoom(-CAM_ZOOM_STEP))
+	zoom_in.add_child(zoom_in_btn)
+	_add_label(zoom_in, "+", Vector2(0, zoom_size * 0.5 - _dp(10)), Vector2(zoom_size, _dp(20)), int(_dp(16)), COL_CREAM).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var zoom_out := _glass_panel(layer, Vector2(zoom_x, zoom_y + zoom_size + _dp(8)), Vector2(zoom_size, zoom_size), zoom_size * 0.5)
+	var zoom_out_btn := Button.new()
+	zoom_out_btn.flat = true
+	zoom_out_btn.size = Vector2(zoom_size, zoom_size)
+	zoom_out_btn.pressed.connect(func(): _adjust_camera_zoom(CAM_ZOOM_STEP))
+	zoom_out.add_child(zoom_out_btn)
+	_add_label(zoom_out, "-", Vector2(0, zoom_size * 0.5 - _dp(10)), Vector2(zoom_size, _dp(20)), int(_dp(16)), COL_CREAM).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+func _solid_style(color: Color, radius: float) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.set_corner_radius_all(int(radius))
+	return sb
+
+func _outline_style(radius: float) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0, 0, 0, 0)
+	sb.set_corner_radius_all(int(radius))
+	sb.set_border_width_all(2)
+	sb.border_color = COL_CREAM
+	return sb
+
+# Toast: a transient glass card confirming the last logged event. _log()
+# calls this so every existing _log() call site in the file surfaces here
+# with no other changes needed.
+func _build_hud_toast(layer: CanvasLayer) -> void:
+	var toast_w = _dp(280)
+	var toast_h = _dp(40)
+	var toast_x = (720.0 - toast_w) * 0.5
+	var toast_y = _screen_h_dp_px() - _dp(250) - toast_h
+	toast_panel = _glass_panel(layer, Vector2(toast_x, toast_y), Vector2(toast_w, toast_h), _dp(14), 0.82, 0.14)
+	toast_panel.visible = false
+	_circle(toast_panel, Vector2(_dp(14), toast_h * 0.5 - _dp(4)), _dp(8), COL_SEASON_FALL)
+	toast_label = _add_label(toast_panel, "", Vector2(_dp(30), toast_h * 0.5 - _dp(9)), Vector2(toast_w - _dp(40), _dp(18)), int(_dp(12.5)), COL_CREAM)
+	toast_timer = Timer.new()
+	toast_timer.one_shot = true
+	toast_timer.timeout.connect(func(): toast_panel.visible = false)
+	add_child(toast_timer)
+
+func _show_toast(msg: String, duration := 3.0) -> void:
+	if not toast_panel:
+		return
+	toast_label.text = msg
+	toast_panel.visible = true
+	toast_timer.start(duration)
+
+func _screen_h_dp_px() -> float:
+	return 1560.0
+
+# Empty 3-column grid positioned per spec - _refresh_tool_ui() populates it
+# with one glass card per unlocked tool (up to 5 once cure/fertilize
+# unlock, wrapping to a second row - the design spec only shows the 3
+# Act-1 tools, but the grid handles more the same way).
+func _build_tool_belt(layer: CanvasLayer) -> void:
+	# Bottom edge stays fixed at the spec's anchor regardless of row count;
+	# _refresh_tool_ui() grows the belt upward as more tools unlock (Act 2+
+	# adds Cure Spray and Fertilizer, wrapping past the spec's 3-tool row)
+	# so extra rows never collide with the controls below.
+	tool_belt_card_h = _dp(74)
+	tool_belt_side = _dp(16)
+	tool_belt_bottom_y = _screen_h_dp_px() - _dp(190)
+	tool_row = GridContainer.new()
+	tool_row.columns = 3
+	tool_row.position = Vector2(tool_belt_side, tool_belt_bottom_y - tool_belt_card_h)
+	tool_row.size = Vector2(720.0 - tool_belt_side * 2.0, tool_belt_card_h)
+	tool_row.add_theme_constant_override("h_separation", int(_dp(9)))
+	tool_row.add_theme_constant_override("v_separation", int(_dp(9)))
+	layer.add_child(tool_row)
+
+# Thumbstick (left) + Bag button and primary USE action button (right),
+# both inside natural thumb arcs at the bottom of the screen, plus the
+# home-indicator bar. Movement stays discrete (move_*_held booleans, same
+# as the old D-pad) - the stick is a drag surface that maps its angle to
+# up to two of those booleans (8-way), not a true analog input, since the
+# rest of the movement code only ever reads on/off directions.
+func _build_hud_controls(layer: CanvasLayer) -> void:
+	var bottom_y = _screen_h_dp_px() - _dp(34)
+	var side = _dp(20)
+
+	var stick_size = _dp(126)
+	thumbstick_base = _glass_panel(layer, Vector2(side, bottom_y - stick_size), Vector2(stick_size, stick_size), stick_size * 0.5, 0.35, 0.13)
+	thumbstick_base.mouse_filter = Control.MOUSE_FILTER_STOP
+	thumbstick_base.gui_input.connect(_on_thumbstick_input)
+	var knob_size = _dp(58)
+	thumbstick_knob = _solid_panel(thumbstick_base, (Vector2(stick_size, stick_size) - Vector2(knob_size, knob_size)) * 0.5, Vector2(knob_size, knob_size), knob_size * 0.5, Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.9))
+	thumbstick_knob.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var action_size = _dp(96)
+	var action_x = 720.0 - side - action_size
+	var action_y = bottom_y - action_size
+	action_button = _solid_panel(layer, Vector2(action_x, action_y), Vector2(action_size, action_size), action_size * 0.5, COL_AMBER_DEEP)
+	var action_btn := Button.new()
+	action_btn.flat = true
+	action_btn.size = Vector2(action_size, action_size)
+	action_btn.pressed.connect(func(): _do_action())
+	action_button.add_child(action_btn)
+	_add_label(action_button, "USE", Vector2(0, action_size * 0.5 - _dp(18)), Vector2(action_size, _dp(18)), int(_dp(15)), Color(0.125, 0.094, 0.039)).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	action_sublabel = _add_label(action_button, "Hoe", Vector2(0, action_size * 0.5 + _dp(2)), Vector2(action_size, _dp(14)), int(_dp(10.5)), Color(0.125, 0.094, 0.039, 0.7))
+	action_sublabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Pulsing ring - a slightly larger, borderless-fill glass circle behind
+	# the button, breathing via a looping Tween (Godot has no native CSS-
+	# keyframe equivalent, so this is the direct way to loop it).
+	var ring := _solid_panel(layer, Vector2(action_x, action_y) - Vector2(_dp(8), _dp(8)), Vector2(action_size + _dp(16), action_size + _dp(16)), (action_size + _dp(16)) * 0.5, Color(0, 0, 0, 0), COL_AMBER, 2)
+	layer.move_child(ring, layer.get_children().find(action_button))
+	var ring_tween := create_tween().set_loops()
+	ring_tween.tween_property(ring, "modulate:a", 0.15, 1.3).from(0.55)
+	ring_tween.tween_property(ring, "modulate:a", 0.55, 1.3)
+
+	var bag_size = _dp(56)
+	var bag_x = action_x - _dp(12) - bag_size
+	var bag_y = bottom_y - bag_size
+	bag_button = _glass_panel(layer, Vector2(bag_x, bag_y), Vector2(bag_size, bag_size), bag_size * 0.5, 0.62, 0.14)
+	var bag_btn := Button.new()
+	bag_btn.flat = true
+	bag_btn.size = Vector2(bag_size, bag_size)
+	bag_btn.pressed.connect(_open_inventory)
+	bag_button.add_child(bag_btn)
+	_solid_panel(bag_button, Vector2(bag_size, bag_size) * 0.5 - Vector2(_dp(9), _dp(7.5)), Vector2(_dp(18), _dp(15)), _dp(4), Color(0, 0, 0, 0), COL_CREAM, 0).add_theme_stylebox_override("panel", _outline_style(_dp(4)))
+	_add_label(layer, "BAG", Vector2(bag_x - _dp(10), bag_y + bag_size + _dp(4)), Vector2(bag_size + _dp(20), _dp(12)), int(_dp(8)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.45)).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	# Home indicator
+	var home_w = _dp(120)
+	_solid_panel(layer, Vector2((720.0 - home_w) * 0.5, _screen_h_dp_px() - _dp(9) - _dp(4)), Vector2(home_w, _dp(4)), _dp(2), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.3))
+
+func _on_thumbstick_input(event: InputEvent) -> void:
+	var stick_size = thumbstick_base.size
+	var center = stick_size * 0.5
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				thumbstick_dragging = true
+				_thumbstick_drag_to(event.position)
+			else:
+				thumbstick_dragging = false
+				_thumbstick_reset()
+	elif event is InputEventMouseMotion and thumbstick_dragging:
+		_thumbstick_drag_to(event.position)
+
+func _thumbstick_drag_to(local_pos: Vector2) -> void:
+	var stick_size = thumbstick_base.size
+	var center = stick_size * 0.5
+	var delta = local_pos - center
+	var max_radius = _dp(34)
+	if delta.length() > max_radius:
+		delta = delta.normalized() * max_radius
+	thumbstick_knob.position = center + delta - thumbstick_knob.size * 0.5
+	# 8-way octant from the drag angle - matches the old D-pad's discrete
+	# held-direction booleans so _handle_movement() needs no changes.
+	move_up_held = false
+	move_down_held = false
+	move_left_held = false
+	move_right_held = false
+	if delta.length() > _dp(14): # dead zone near center
+		var angle = delta.angle() # 0 = right, PI/2 = down (Godot's Y-down 2D space)
+		var deg = fmod(rad_to_deg(angle) + 360.0, 360.0)
+		move_right_held = deg <= 67.5 or deg > 292.5
+		if deg > 22.5 and deg <= 157.5:
+			move_down_held = true
+		if deg > 112.5 and deg <= 247.5:
+			move_left_held = true
+		if deg > 202.5 and deg <= 337.5:
+			move_up_held = true
+
+func _thumbstick_reset() -> void:
+	move_up_held = false
+	move_down_held = false
+	move_left_held = false
+	move_right_held = false
+	var stick_size = thumbstick_base.size
+	thumbstick_knob.position = (stick_size - thumbstick_knob.size) * 0.5
+
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 
 	_build_farm_view(layer)
 
-	# Top HUD
-	hud_cash = _add_label(layer, "$100", Vector2(16, 12), Vector2(140, 30), 24, Color(1, 0.85, 0.3))
-	hud_day = _add_label(layer, "Day 1", Vector2(160, 12), Vector2(110, 30), 22)
-	hud_dom = _add_label(layer, "0% owned", Vector2(280, 12), Vector2(160, 30), 18, Color(0.6, 0.85, 1))
-	hud_act = _add_label(layer, "Act 1", Vector2(450, 12), Vector2(260, 30), 18, Color(0.85, 0.7, 1))
-	hud_season = _add_label(layer, "", Vector2(16, 44), Vector2(680, 26), 16, Color(0.75, 0.85, 1))
-	hud_farm = _add_label(layer, "", Vector2(16, 70), Vector2(680, 24), 15, Color(0.7, 0.95, 0.75))
+	# HUD v2 - full-bleed world, floating glass chrome (see design_handoff_farm_hud/).
+	_build_hud_top(layer)
+	_build_hud_rail(layer)
+	_build_tool_belt(layer)
+	_build_hud_controls(layer)
+	_build_hud_toast(layer)
 
-	tool_label = _add_label(layer, "Tool: Hoe", Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 6), Vector2(640, 26), 20, Color(0.7, 0.9, 0.5))
-	log_label = _add_label(layer, log_text, Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 34), Vector2(640, 44), 16, Color(1, 0.8, 0.4))
-	log_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-
-	var tool_row_y = FARM_ORIGIN.y + ROWS * TILE + 86
-	tool_row = HBoxContainer.new()
-	tool_row.position = Vector2(FARM_ORIGIN.x, tool_row_y)
-	tool_row.add_theme_constant_override("separation", 8)
-	layer.add_child(tool_row)
-
-	var action_y = tool_row_y + 76
-	_add_button(layer, "Use Tool", Vector2(FARM_ORIGIN.x, action_y), Vector2(210, 72), func(): _do_action())
-	_add_button(layer, "Inventory", Vector2(FARM_ORIGIN.x + 222, action_y), Vector2(210, 72), _open_inventory)
-	map_button = _add_button(layer, "World Map", Vector2(FARM_ORIGIN.x + 444, action_y), Vector2(230, 72), func(): _toggle_map())
-	# A slim second row in the gap before the D-pad - opens the Livestock
-	# ranch panel (buy animals, buy feed, sell eggs/wool/milk/pork).
-	_add_button(layer, "Livestock", Vector2(FARM_ORIGIN.x, action_y + 80), Vector2(210, 36), func(): _toggle_livestock_panel())
-
-	# On-screen D-pad - sized generously for real touchscreens, using the
-	# extra vertical space the 19.5:9-ish canvas leaves below the farm UI.
-	var dpad_button := 96
-	var dpad_step := dpad_button + 10
-	var dpad_y = action_y + 120
-	var dpad_x = FARM_ORIGIN.x + 60
-	_add_touch_button(layer, "^", Vector2(dpad_x + dpad_step, dpad_y), Vector2(dpad_button, dpad_button), func(p): move_up_held = p)
-	_add_touch_button(layer, "v", Vector2(dpad_x + dpad_step, dpad_y + dpad_step * 2), Vector2(dpad_button, dpad_button), func(p): move_down_held = p)
-	_add_touch_button(layer, "<", Vector2(dpad_x, dpad_y + dpad_step), Vector2(dpad_button, dpad_button), func(p): move_left_held = p)
-	_add_touch_button(layer, ">", Vector2(dpad_x + dpad_step * 2, dpad_y + dpad_step), Vector2(dpad_button, dpad_button), func(p): move_right_held = p)
-
-	# Camera zoom - a small rocker to the right of the D-pad. Mouse wheel also
-	# works (see _unhandled_input) for desktop testing, but touch is the
-	# primary target so this is the real control.
-	var zoom_button := 64
-	var zoom_x = dpad_x + dpad_step * 3 + 40
-	_add_button(layer, "+", Vector2(zoom_x, dpad_y + dpad_step * 0.5), Vector2(zoom_button, zoom_button), func(): _adjust_camera_zoom(-CAM_ZOOM_STEP))
-	_add_button(layer, "-", Vector2(zoom_x, dpad_y + dpad_step * 0.5 + zoom_button + 10), Vector2(zoom_button, zoom_button), func(): _adjust_camera_zoom(CAM_ZOOM_STEP))
+	# Kept for _log()/_refresh_tool_ui() compatibility - not part of the new
+	# visible chrome (messages surface as toasts; the active tool is shown
+	# by the tool belt's glow + the action button's sub-label instead).
+	tool_label = Label.new()
+	tool_label.visible = false
+	layer.add_child(tool_label)
+	log_label = Label.new()
+	log_label.visible = false
+	layer.add_child(log_label)
 
 	_build_inventory_panel(layer)
 	_build_map_panel(layer)
@@ -2328,33 +2719,41 @@ func _toggle_map() -> void:
 		_refresh_map_panel()
 
 # ---------- UI refresh ----------
+const ACT_ROMAN := ["I", "II", "III", "IV"]
+
 func _refresh_all() -> void:
 	var owned_count = _owned_count()
-	hud_cash.text = "$%d" % cash
-	hud_day.text = "Day %d" % day
-	hud_dom.text = "%d%% owned" % int(round(100.0 * owned_count / regions.size()))
+	var owned_frac = float(owned_count) / float(regions.size())
+	hud_cash.text = "%d" % cash
+	hud_day.text = "DAY %d" % day
+	hud_season.text = "%s %d/%d" % [_season_name(), season_day + 1, SEASON_LENGTH]
+	forecast_today_label.text = "%s today" % WEATHER[current_weather]["name"]
+	forecast_tomorrow_label.text = WEATHER[forecast_weather]["name"]
+
+	act_roman_label.text = "ACT %s" % ACT_ROMAN[current_act]
 	hud_act.text = ACTS[current_act]["title"]
-	var event_suffix = ""
-	if not active_event.is_empty():
-		event_suffix = "  |  🔥 %s demand spike x%.1f (%dd left)" % [
-			_event_target_name(), active_event["multiplier"], active_event["days_left"],
-		]
-	hud_season.text = "%s (day %d/%d) - %s %s  |  Tomorrow: %s %s%s" % [
-		_season_name(), season_day + 1, SEASON_LENGTH,
-		WEATHER[current_weather]["emoji"], WEATHER[current_weather]["name"],
-		WEATHER[forecast_weather]["emoji"], WEATHER[forecast_weather]["name"],
-		event_suffix,
-	]
+	hud_dom.text = "%d%% owned" % int(round(100.0 * owned_frac))
+	act_progress_fill.size = Vector2(act_progress_track_w * clamp(owned_frac, 0.0, 1.0), act_progress_fill.size.y)
+
 	var terrain = _terrain_for_plot(active_plot_id)
-	var tier_idx = _farm_tier_index()
-	var tier_bonus_tag = ("  (+%d%% sell price)" % int(round(TIER_PRICE_BONUS_PER_LEVEL * tier_idx * 100))) if tier_idx > 0 else ""
-	var livestock_tag = ""
+	act_farmname_label.text = "%s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain]
+	var tier_text = _farm_tier_name().to_upper()
+	act_tier_label.text = tier_text
+	act_tier_badge.size.x = max(_dp(70), tier_text.length() * _dp(6.4) + _dp(14))
+
 	var livestock_total = _livestock_total()
 	if livestock_total > 0:
 		var feed_needed_per_day = _feed_needed_per_day()
 		var feed_warning = "  ⚠ low feed" if feed_stock < feed_needed_per_day else ""
-		livestock_tag = "  |  🐄 %d livestock, feed:%d%s" % [livestock_total, feed_stock, feed_warning]
-	hud_farm.text = "Farming: %s%s  |  Tier: %s%s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain, _farm_tier_name(), tier_bonus_tag, livestock_tag]
+		hud_farm.text = "🐄 %d livestock, feed:%d%s" % [livestock_total, feed_stock, feed_warning]
+	else:
+		hud_farm.text = ""
+
+	var badge_count = _shop_badge_count()
+	if shop_badge_label:
+		shop_badge_label.get_parent().visible = badge_count > 0
+		shop_badge_label.text = "9+" if badge_count > 9 else str(badge_count)
+
 	map_button.visible = _act()["continents"].size() > 0
 	_refresh_tool_ui()
 	_refresh_inventory_panel()
@@ -2363,22 +2762,78 @@ func _refresh_all() -> void:
 	if livestock_panel and livestock_panel.visible:
 		_refresh_livestock_panel()
 
+# Number of distinct sellable stock types currently in storage (produce,
+# processed goods, livestock goods) - shown as the SHOP rail tile's badge,
+# a genuinely useful "things you could go sell" count rather than the
+# design spec's static placeholder "2".
+func _shop_badge_count() -> int:
+	var count := 0
+	for key in CROP_KEYS:
+		if _produce_total(key) > 0:
+			count += 1
+	for key in PROCESSED_KEYS:
+		if processed_goods[key] > 0:
+			count += 1
+	for key in LIVESTOCK_PRODUCT_KEYS:
+		if livestock_goods[key] > 0:
+			count += 1
+	return count
+
 func _refresh_tool_ui() -> void:
 	tool_label.text = "Tool: %s %s" % [TOOLS[selected_tool]["emoji"], TOOLS[selected_tool]["name"]]
+	if action_sublabel:
+		action_sublabel.text = TOOLS[selected_tool]["name"]
 	for child in tool_row.get_children():
 		child.queue_free()
 	tool_buttons.clear()
+	var card_h = _dp(74)
+
+	var unlocked_count = TOOL_KEYS.filter(func(k): return _tool_unlocked(k)).size()
+	var rows = int(ceil(float(unlocked_count) / float(tool_row.columns)))
+	var belt_h = rows * card_h + max(0, rows - 1) * _dp(9)
+	tool_row.position.y = tool_belt_bottom_y - belt_h
+	tool_row.size.y = belt_h
+	if toast_panel:
+		toast_panel.position.y = tool_row.position.y - _dp(20) - toast_panel.size.y
+
 	for key in TOOL_KEYS:
 		if not _tool_unlocked(key):
 			continue
 		var t = TOOLS[key]
+		var card := Panel.new()
+		card.custom_minimum_size = Vector2(0, card_h)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.add_theme_stylebox_override("panel", _glass_style(0.62, _dp(18), 0.11))
 		var btn := Button.new()
-		btn.text = "%s %s" % [t["emoji"], t["name"]]
-		btn.custom_minimum_size = Vector2(170, 64)
+		btn.flat = true
+		btn.anchor_right = 1.0
+		btn.anchor_bottom = 1.0
 		btn.pressed.connect(func(): _select_tool(key))
-		btn.modulate = Color(1, 1, 0.6) if key == selected_tool else Color(1, 1, 1)
-		tool_row.add_child(btn)
-		tool_buttons[key] = btn
+		card.add_child(btn)
+		var glyph := _add_label(card, t["emoji"], Vector2(0, card_h * 0.5 - _dp(22)), Vector2.ZERO, int(_dp(20)), COL_CREAM)
+		glyph.size = Vector2(0, _dp(24))
+		glyph.anchor_right = 1.0
+		glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		var name_label := _add_label(card, t["name"], Vector2(0, card_h * 0.5 + _dp(4)), Vector2.ZERO, int(_dp(11.5)), COL_CREAM)
+		name_label.size = Vector2(0, _dp(16))
+		name_label.anchor_right = 1.0
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		if key == selected_tool:
+			var glow_sb := StyleBoxFlat.new()
+			glow_sb.bg_color = Color(0, 0, 0, 0)
+			glow_sb.set_corner_radius_all(int(_dp(18)))
+			glow_sb.set_border_width_all(2)
+			glow_sb.border_color = COL_AMBER
+			glow_sb.shadow_color = Color(COL_AMBER.r, COL_AMBER.g, COL_AMBER.b, 0.55)
+			glow_sb.shadow_size = int(_dp(10))
+			var glow := Panel.new()
+			glow.anchor_right = 1.0
+			glow.anchor_bottom = 1.0
+			glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			glow.add_theme_stylebox_override("panel", glow_sb)
+			card.add_child(glow)
+		tool_row.add_child(card)
+		tool_buttons[key] = card
 
 func _refresh_inventory_panel() -> void:
 	for child in seed_rows_container.get_children():
