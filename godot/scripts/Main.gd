@@ -1606,6 +1606,18 @@ func _livestock_sell_price(product_key: String) -> int:
 			return int(round(LIVESTOCK[key]["base_price"] * feed_cost_mult))
 	return 0
 
+func _livestock_total() -> int:
+	var total := 0
+	for key in LIVESTOCK_KEYS:
+		total += livestock.get(key, 0)
+	return total
+
+func _feed_needed_per_day() -> int:
+	var total := 0
+	for key in LIVESTOCK_KEYS:
+		total += livestock.get(key, 0) * LIVESTOCK[key]["feed_per_day"]
+	return total
+
 # Each owned animal eats its species' feed_per_day and, if fed, produces 1
 # unit of its good. Feed is consumed species-by-species so a shortage
 # leaves whichever species is processed later partly or fully unfed rather
@@ -2312,7 +2324,13 @@ func _refresh_all() -> void:
 	var terrain = _terrain_for_plot(active_plot_id)
 	var tier_idx = _farm_tier_index()
 	var tier_bonus_tag = ("  (+%d%% sell price)" % int(round(TIER_PRICE_BONUS_PER_LEVEL * tier_idx * 100))) if tier_idx > 0 else ""
-	hud_farm.text = "Farming: %s%s  |  Tier: %s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain, _farm_tier_name(), tier_bonus_tag]
+	var livestock_tag = ""
+	var livestock_total = _livestock_total()
+	if livestock_total > 0:
+		var feed_needed_per_day = _feed_needed_per_day()
+		var feed_warning = "  ⚠ low feed" if feed_stock < feed_needed_per_day else ""
+		livestock_tag = "  |  🐄 %d livestock, feed:%d%s" % [livestock_total, feed_stock, feed_warning]
+	hud_farm.text = "Farming: %s%s  |  Tier: %s%s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain, _farm_tier_name(), tier_bonus_tag, livestock_tag]
 	map_button.visible = _act()["continents"].size() > 0
 	_refresh_tool_ui()
 	_refresh_inventory_panel()
