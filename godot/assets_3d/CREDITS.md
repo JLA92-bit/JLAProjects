@@ -29,6 +29,12 @@ required, but it's credited here anyway.
   The wall pieces are each modeled to occupy one edge of a 1x1x1 cell, so
   the same piece is instantiated 4 times at 90-degree yaw increments to
   close a small box, with the gable roof capping it.
+- `food_kit/tomato.glb` — from Kenney's "Food Kit", same mirror as above,
+  replacing the melon model that previously stood in for tomato's
+  ready-to-harvest stage. Modeled at Food Kit's own (much smaller,
+  kitchen-table) scale, so it's scaled up 2.4x at instantiation time to
+  match the other ready-to-harvest crops (see `_update_tile_visual()` in
+  `scripts/Main.gd`).
 
 ## Procedural (not sourced)
 
@@ -42,7 +48,6 @@ required, but it's credited here anyway.
 
 ## Known gaps (follow-up work)
 
-- Tomato and Pumpkin have no dedicated staged-growth model in Nature Kit;
-  both use the generic "leafs" plant for their growing stages, with the
-  melon model as tomato's ready-to-harvest stand-in and the pumpkin model
-  as pumpkin's (see `_crop_mesh_key()` in `scripts/Main.gd`).
+- Tomato and Pumpkin still use the generic "leafs" plant for their
+  growing stages (Nature Kit has no staged-growth model for either) - only
+  their ready-to-harvest stage now has a real matching model.

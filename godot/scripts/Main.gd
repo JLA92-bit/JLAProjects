@@ -727,10 +727,12 @@ func _load_world_assets():
 	world_scenes["corn_c"] = load(NK + "crops_cornStageC.glb")
 	world_scenes["corn_d"] = load(NK + "crops_cornStageD.glb")
 	# Nature Kit has no tomato-specific staged model; a generic leafy plant
-	# stands in for the growing phase and a round fruit model for "ready".
+	# stands in for the growing phase. A real tomato model (Kenney's Food
+	# Kit) covers "ready" now instead of the melon that used to stand in
+	# for it - see CREDITS.md.
 	world_scenes["tomato_a"] = load(NK + "crops_leafsStageA.glb")
 	world_scenes["tomato_b"] = load(NK + "crops_leafsStageB.glb")
-	world_scenes["tomato_ready"] = load(NK + "crop_melon.glb")
+	world_scenes["tomato_ready"] = load("res://assets_3d/food_kit/tomato.glb")
 	world_scenes["pumpkin_a"] = load(NK + "crops_leafsStageA.glb")
 	world_scenes["pumpkin_b"] = load(NK + "crops_leafsStageB.glb")
 	world_scenes["pumpkin_ready"] = load(NK + "crop_pumpkin.glb")
@@ -1186,6 +1188,12 @@ func _update_tile_visual(r: int, c: int) -> void:
 	if tile["type"] == "planted":
 		var mesh_key = _crop_mesh_key(tile["crop"], tile.get("stage", 0))
 		var cnode = world_scenes[mesh_key].instantiate()
+		if mesh_key == "tomato_ready":
+			# Kenney's Food Kit is modeled at its own, much smaller scale than
+			# Nature Kit's crops (a real kitchen-table tomato vs. a garden
+			# plant) - scaled up here to read at the same size as the other
+			# ready-to-harvest crops on the same size tile.
+			cnode.scale = Vector3.ONE * 2.4
 		node.add_child(cnode)
 		slot["crop"] = cnode
 		if tile.get("infected", false):
