@@ -696,6 +696,20 @@ func _build_farmhouse_scene() -> PackedScene:
 	scene.pack(root)
 	return scene
 
+# Real CC0 animal models (Sirrobzeroone's Auroch/Mouflon, see CREDITS.md) are
+# modeled at a Minetest-mob scale wildly larger than this game's WORLD_TILE=1.0
+# convention, so each needs its own scale-down factor to read as an
+# appropriately-sized farm animal next to the fence/crops.
+func _build_real_animal_scene(path: String, model_scale: float) -> PackedScene:
+	var root := Node3D.new()
+	var inst = load(path).instantiate()
+	inst.scale = Vector3.ONE * model_scale
+	root.add_child(inst)
+	_set_owner_recursive(root, root)
+	var scene := PackedScene.new()
+	scene.pack(root)
+	return scene
+
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
 	# Kenney's ground_grass.glb is a flat solid vertex color (no texture at
@@ -760,8 +774,11 @@ func _load_world_assets():
 	player_skin_material.albedo_texture = load("res://assets_3d/character/skin_man.png")
 	world_scenes["chicken"] = _build_animal_scene("chicken")
 	world_scenes["pig"] = _build_animal_scene("pig")
-	world_scenes["sheep"] = _build_animal_scene("sheep")
-	world_scenes["cow"] = _build_animal_scene("cow")
+	# Real CC0 models (see CREDITS.md) replace the procedural sheep/cow -
+	# scale factors picked so each reads at a believable size next to the
+	# 1x1 fence/crop tiles (see _build_real_animal_scene above).
+	world_scenes["sheep"] = _build_real_animal_scene("res://assets_3d/animal_models/sheep.glb", 0.055)
+	world_scenes["cow"] = _build_real_animal_scene("res://assets_3d/animal_models/cow.glb", 0.075)
 	world_scenes["farmhouse"] = _build_farmhouse_scene()
 
 func _init_fresh_state():

@@ -29,6 +29,47 @@ multi-piece assemblies (see the farmhouse).
 - `food_kit/` — 1 of 200 available pieces (tomato).
 - `textures/` — a real grass photo texture and Kacie's portrait (not from
   Kenney; see CREDITS.md for those two specifically).
+- `animal_models/` — real cow and sheep models converted from `.blend`
+  source via `bpy` (see the new section below and CREDITS.md).
+
+## Blender `.blend` sources — a whole new asset class, via `bpy`
+
+`pip install bpy` (Blender 5.x as a plain Python module, no GUI install or
+network access to blender.org needed beyond PyPI) unlocks any GitHub repo
+that ships raw `.blend` files instead of pre-exported glTF/FBX — those were
+previously unusable here. This matters because a lot of CC0 model work
+(especially older/hobbyist packs) is only ever committed as `.blend`.
+
+Conversion pattern (see the cow/sheep conversion for the working version):
+1. `bpy.ops.wm.open_mainfile(filepath=...)` the `.blend`.
+2. Check `bpy.data.materials` / node trees — CC0 `.blend` files quite often
+   have geometry and a texture PNG sitting right next to each other in the
+   repo, but with the two never actually wired together in the material
+   (this was true for both the cow and sheep source files here). Fix by
+   creating a new material, adding a `ShaderNodeTexImage` node,
+   `bpy.data.images.load(png_path)`, and linking it to the Principled
+   BSDF's Base Color input, then assigning it to the mesh.
+3. `obj.dimensions` to sanity-check scale before exporting — these
+   Minetest-authored models were ~10-20x this project's tile scale.
+3. `bpy.ops.export_scene.gltf(filepath=..., export_format='GLB')` — GLB
+   embeds the texture in the one file, no separate `.png` to track.
+4. Sanity-check the result by rendering it in a throwaway Godot project
+   (a `Node3D` with a `WorldEnvironment`, one `DirectionalLight3D`, the
+   loaded model, and a `Camera3D` backed off far enough for the model's
+   actual scale) before touching the real project - headless via
+   `--write-movie ... --quit-after 5`, same pattern as verifying any other
+   change in this repo.
+5. Only then copy the `.glb` into `assets_3d/`, run the standard `.import`-
+   generation editor pass, and wire it into `_load_world_assets()`.
+
+Not every `.blend` source is texture-complete - the same repo's chicken
+model had geometry but zero real material data, and a manual color guess
+didn't look convincing enough to use (see CREDITS.md's "Procedural"
+section). Worth checking materials before investing conversion effort.
+
+**Known good source**: `sirrobzeroone/Animal_Models` (CC0, made for
+Minetest) — has Auroch (cow ancestor, used), Mouflon (sheep ancestor,
+used), and Red Junglefowl (chicken ancestor, untextured, not used).
 
 ## Kenney "Nature Kit" 2.1 — `kenney_natureKit_2.1/Models/GLTF format/`
 329 models total. Already a rich decoration set beyond what's copied in:

@@ -40,15 +40,37 @@ required, but it's credited here anyway.
   match the other ready-to-harvest crops (see `_update_tile_visual()` in
   `scripts/Main.gd`).
 
+- `animal_models/cow.glb`, `animal_models/sheep.glb` — real, textured 3D
+  models by Sirrobzeroone (CC0, https://creativecommons.org/publicdomain/zero/1.0/),
+  sourced from the `sirrobzeroone/Animal_Models` GitHub repo (the Auroch
+  "cow ancestor" and Mouflon "sheep ancestor" models, made for the
+  Minetest game engine but explicitly released for use in any
+  software/project). The repo ships `.blend` source files rather than a
+  pre-exported glTF, so these were converted headlessly with `bpy`
+  (Blender's pip-installable Python module — `pip install bpy`, no GUI
+  Blender needed) by opening the `.blend`, wiring the matching texture PNG
+  into the material's Base Color via a new `ShaderNodeTexImage` node
+  (the source materials had no image hookup at all), and exporting to
+  `.glb`. Both are modeled at Minetest-mob scale (tens of Blender units
+  across), much larger than this project's `WORLD_TILE = 1.0` convention,
+  so `_build_real_animal_scene()` in `scripts/Main.gd` wraps each in a
+  scaled root node (cow 0.075x, sheep 0.055x) tuned to read as a
+  believable size next to the fence/crops.
+
 ## Procedural (not sourced)
 
-- Chicken, pig, sheep, and cow scenery models (`_build_animal_scene()` in
-  `scripts/Main.gd`) are built from primitive meshes (spheres/boxes/
-  cylinders) at runtime, not a sourced asset pack. The usual CC0 low-poly
-  farm-animal packs (itch.io, poly.pizza) aren't reachable from this
-  sandbox's network, and no GitHub mirror of one turned up either. Good
+- Chicken and pig scenery models (`_build_animal_scene()` in
+  `scripts/Main.gd`) are still built from primitive meshes (spheres/boxes/
+  cylinders) at runtime. The same `sirrobzeroone/Animal_Models` source has
+  a Red Junglefowl (chicken ancestor) `.blend` too, but unlike the cow and
+  sheep it has no texture data at all in the source file (default gray
+  materials only, geometry-only) - a manual per-material color guess was
+  tried and didn't read as a convincing chicken, so it was dropped in
+  favor of keeping the procedural version. No pig ancestor model exists in
+  that source at all. The usual CC0 low-poly farm-animal packs (itch.io,
+  poly.pizza) aren't reachable from this sandbox's network either. Good
   enough to read clearly as ambient scenery at the farm's camera distance;
-  swap for real models if one becomes reachable later.
+  swap for real models if a textured source becomes available later.
 
 ## Known gaps (follow-up work)
 
