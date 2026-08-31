@@ -1383,7 +1383,9 @@ func _day_tick() -> void:
 
 	_update_world_supply()
 	_update_crop_prices()
-	_tick_livestock()
+	var unfed = _tick_livestock()
+	if unfed > 0:
+		_log("%d of your livestock went unfed today and produced nothing - buy more feed from the Livestock panel." % unfed)
 	_apply_storage_upkeep()
 	_advance_market_event()
 
@@ -1607,8 +1609,11 @@ func _livestock_sell_price(product_key: String) -> int:
 # Each owned animal eats its species' feed_per_day and, if fed, produces 1
 # unit of its good. Feed is consumed species-by-species so a shortage
 # leaves whichever species is processed later partly or fully unfed rather
-# than failing all of them at once.
-func _tick_livestock() -> void:
+# than failing all of them at once. Returns the total count left unfed, so
+# the caller can warn the player instead of production just silently
+# stopping with no explanation.
+func _tick_livestock() -> int:
+	var unfed_total := 0
 	for key in LIVESTOCK_KEYS:
 		var count: int = livestock.get(key, 0)
 		if count <= 0:
@@ -1616,9 +1621,11 @@ func _tick_livestock() -> void:
 		var per_day: int = LIVESTOCK[key]["feed_per_day"]
 		var fed_count = min(count, feed_stock / per_day)
 		feed_stock -= fed_count * per_day
+		unfed_total += count - fed_count
 		if fed_count > 0:
 			var product = LIVESTOCK[key]["product"]
 			livestock_goods[product] = livestock_goods.get(product, 0) + fed_count
+	return unfed_total
 
 func _total_stored_units() -> int:
 	var total := 0
