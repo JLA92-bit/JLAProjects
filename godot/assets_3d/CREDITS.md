@@ -51,26 +51,36 @@ required, but it's credited here anyway.
   Blender needed) by opening the `.blend`, wiring the matching texture PNG
   into the material's Base Color via a new `ShaderNodeTexImage` node
   (the source materials had no image hookup at all), and exporting to
-  `.glb`. Both are modeled at Minetest-mob scale (tens of Blender units
-  across), much larger than this project's `WORLD_TILE = 1.0` convention,
-  so `_build_real_animal_scene()` in `scripts/Main.gd` wraps each in a
-  scaled root node (cow 0.075x, sheep 0.055x) tuned to read as a
-  believable size next to the fence/crops.
+  `.glb`. Modeled at Minetest-mob scale (tens of Blender units across),
+  much larger than this project's `WORLD_TILE = 1.0` convention, so
+  `_build_real_animal_scene()` in `scripts/Main.gd` wraps each in a scaled
+  root node tuned to read as a believable size next to the fence/crops.
+- `animal_models/chicken.glb` — real, textured model and texture by
+  JK Murray (CC0), `animal_models/pig.glb` — real, textured "Pumba" wild
+  boar model by Krupnov Pavel / TenPlus1 (MIT License, Copyright (c) 2014
+  Krupnov Pavel and 2016 TenPlus1 — see the full text at
+  `mobs_animal`'s `license.txt`; MIT requires the copyright/permission
+  notice be kept, which this entry does). Both sourced from
+  `minetest-mirrors/mobs_animal` (a GitHub mirror of the Minetest
+  "Mobs Redo: Animals" mod, `codeberg.org/tenplus1/mobs_animal`), shipped
+  as `.b3d` (an older Irrlicht-engine model format) rather than glTF.
+  Converted headlessly using the `io_scene_b3d` Blender import addon
+  (GreenXenith/joric, GPL-2.0 — a conversion *tool*, not redistributed
+  with this repo; using a GPL-licensed tool to convert separately-licensed
+  assets doesn't relicense the output, same as opening a CC0 image in GIMP)
+  loaded directly into `bpy` without a full addon install. The pig's
+  texture had to be manually wired to the material afterward, same pattern
+  as the cow/sheep; the chicken model already referenced a texture by name,
+  but that particular filename (`mobs_chicken_white.png`) turned out to be
+  a blank 16x16 placeholder (a recolor-tint base, not real art) - swapped
+  for the actual painted `mobs_chicken.png` (128x128) after import.
 
 ## Procedural (not sourced)
 
-- Chicken and pig scenery models (`_build_animal_scene()` in
-  `scripts/Main.gd`) are still built from primitive meshes (spheres/boxes/
-  cylinders) at runtime. The same `sirrobzeroone/Animal_Models` source has
-  a Red Junglefowl (chicken ancestor) `.blend` too, but unlike the cow and
-  sheep it has no texture data at all in the source file (default gray
-  materials only, geometry-only) - a manual per-material color guess was
-  tried and didn't read as a convincing chicken, so it was dropped in
-  favor of keeping the procedural version. No pig ancestor model exists in
-  that source at all. The usual CC0 low-poly farm-animal packs (itch.io,
-  poly.pizza) aren't reachable from this sandbox's network either. Good
-  enough to read clearly as ambient scenery at the farm's camera distance;
-  swap for real models if a textured source becomes available later.
+None of the four farm animals remain procedural as of this pass (was:
+chicken and pig, built from primitive meshes via a now-removed
+`_build_animal_scene()`). Kept here as a pointer in case a future source
+turns out to be a worse fit than expected and one needs reverting.
 
 ## Known gaps (follow-up work)
 

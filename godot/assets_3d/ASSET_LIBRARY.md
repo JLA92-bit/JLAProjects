@@ -62,14 +62,30 @@ Conversion pattern (see the cow/sheep conversion for the working version):
 5. Only then copy the `.glb` into `assets_3d/`, run the standard `.import`-
    generation editor pass, and wire it into `_load_world_assets()`.
 
-Not every `.blend` source is texture-complete - the same repo's chicken
-model had geometry but zero real material data, and a manual color guess
-didn't look convincing enough to use (see CREDITS.md's "Procedural"
-section). Worth checking materials before investing conversion effort.
+Not every `.blend` source is texture-complete - the `Animal_Models` repo's
+own Red Junglefowl (chicken) `.blend` had geometry but zero real material
+data, and a manual color guess didn't look convincing enough to use. A
+*different* source (see below) turned out to have a real, textured chicken
+after all - worth checking more than one source for the same animal before
+settling for procedural.
 
-**Known good source**: `sirrobzeroone/Animal_Models` (CC0, made for
-Minetest) — has Auroch (cow ancestor, used), Mouflon (sheep ancestor,
-used), and Red Junglefowl (chicken ancestor, untextured, not used).
+**Known good sources**:
+- `sirrobzeroone/Animal_Models` (CC0, made for Minetest) — Auroch (cow
+  ancestor, used) and Mouflon (sheep ancestor, used). `.blend` format.
+- `minetest-mirrors/mobs_animal` (mirror of the "Mobs Redo: Animals"
+  Minetest mod, mixed CC0/MIT/CC-BY-SA per-model — see its `license.txt`
+  in full, reproduced in `CREDITS.md`) — real textured chicken (CC0) and
+  "Pumba" wild boar (MIT), both used; also has rat, bunny, kitten, panda,
+  penguin, bee models if this game ever wants more animal variety. Ships
+  `.b3d` (Irrlicht engine format) rather than `.blend`/glTF - needs the
+  `io_scene_b3d` Blender addon (GreenXenith/joric on GitHub, GPL-2.0)
+  loaded into `bpy` (not installed as a real addon, just its Python module
+  imported directly with `bpy`/`mathutils`/etc. patched into its namespace
+  since it assumes Blender's addon-relative-import context) before the
+  same open→wire-texture→export pipeline works. A `.b3d` file's texture
+  reference can point at a placeholder/tint-only image rather than the
+  real painted texture (this happened with the chicken) - check the
+  referenced PNG's actual pixel content isn't blank before trusting it.
 
 ## Kenney "Nature Kit" 2.1 — `kenney_natureKit_2.1/Models/GLTF format/`
 329 models total. Already a rich decoration set beyond what's copied in:
