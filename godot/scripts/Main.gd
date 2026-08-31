@@ -381,6 +381,8 @@ var world_root: Node3D
 var tile_nodes := [] # 2D array of {"node":Node3D, "ground":Node3D, "ground_key":String, "crop":Node3D}
 var player_node: Node3D
 var player_skin_material: StandardMaterial3D
+var sfx_player: AudioStreamPlayer
+var sfx := {} # key -> AudioStream
 
 var hud_cash: Label
 var hud_day: Label
@@ -437,6 +439,7 @@ var map_continent_headings := {} # continent name -> Label, for jump buttons
 func _ready():
 	randomize()
 	is_new_game = not FileAccess.file_exists(SAVE_PATH)
+	_load_audio()
 	_load_world_assets()
 	_init_fresh_state()
 	_load_game()
@@ -530,6 +533,28 @@ func _build_real_animal_scene(path: String, model_scale: float) -> PackedScene:
 	var scene := PackedScene.new()
 	scene.pack(root)
 	return scene
+
+# CC0 sound effects from Kenney's Interface Sounds / Impact Sounds packs
+# (see assets_audio/LICENSE.txt) - short, punchy feedback for tool use and
+# harvesting rather than anything looping/ambient, to keep this a light
+# first pass rather than a full audio overhaul.
+func _load_audio() -> void:
+	const AUD := "res://assets_audio/"
+	sfx["till"] = load(AUD + "till.ogg")
+	sfx["water"] = load(AUD + "water.ogg")
+	sfx["plant"] = load(AUD + "plant.ogg")
+	sfx["harvest"] = load(AUD + "harvest.ogg")
+	sfx["success"] = load(AUD + "success.ogg")
+	sfx["error"] = load(AUD + "error.ogg")
+	sfx["click"] = load(AUD + "click.ogg")
+	sfx_player = AudioStreamPlayer.new()
+	add_child(sfx_player)
+
+func _play_sfx(key: String) -> void:
+	if not sfx.has(key):
+		return
+	sfx_player.stream = sfx[key]
+	sfx_player.play()
 
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
@@ -884,9 +909,11 @@ func _facing_tile() -> Vector2i:
 func _select_tool(key: String) -> void:
 	if not _tool_unlocked(key):
 		_log("The %s isn't unlocked yet." % TOOLS[key]["name"])
+		_play_sfx("error")
 		return
 	selected_tool = key
 	_refresh_tool_ui()
+	_play_sfx("click")
 
 func _select_crop(key: String) -> void:
 	selected_crop = key
@@ -906,11 +933,13 @@ func _do_action() -> void:
 	if tile["type"] == "planted" and tile.get("stage", 0) >= 4:
 		if tile.get("infected", false):
 			_log("That crop is blighted - harvest yields nothing. Cure it or till it under.")
+			_play_sfx("error")
 			tile["type"] = "grass"
 		else:
 			var sq: float = tile.get("soil_quality", 100.0)
 			if sq < SOIL_EXHAUSTED_THRESHOLD and randf() < SOIL_EXHAUSTED_FAIL_CHANCE:
 				_log("The exhausted soil ruined this %s harvest - fertilize or rotate crops here." % CROPS[tile["crop"]]["name"])
+				_play_sfx("error")
 				tile["type"] = "soil"
 			else:
 				var watered_enough = tile.get("times_watered", 0) >= CROPS[tile["crop"]]["grow_days"]
@@ -919,11 +948,13 @@ func _do_action() -> void:
 				var cap = _storage_cap()
 				if _produce_total(tile["crop"]) + amount > cap:
 					_log("Storage is full for %s (%d/%d) - sell some or upgrade your silo." % [CROPS[tile["crop"]]["name"], _produce_total(tile["crop"]), cap])
+					_play_sfx("error")
 					return
 				var quality = _harvest_quality(tile, sq, watered_enough)
 				produce[tile["crop"]][quality] += amount
 				lifetime_harvested += amount
 				_log("Harvested %dx %s (%s quality)%s." % [amount, CROPS[tile["crop"]]["name"], QUALITY_LABELS[quality], " - well-tended bonus!" if well_tended else ""])
+				_play_sfx("harvest")
 				tile["type"] = "soil"
 			var same_crop = tile.get("last_crop", "") == tile["crop"]
 			tile["soil_quality"] = max(0.0, sq - (SOIL_DEGRADE_SAME_CROP if same_crop else SOIL_DEGRADE_ROTATED))
@@ -937,17 +968,22 @@ func _do_action() -> void:
 			if tile["type"] == "grass":
 				tile["type"] = "soil"
 				_log("Tilled soil with the hoe.")
+				_play_sfx("till")
 			else:
 				_log("The hoe only works on grass.")
+				_play_sfx("error")
 		"seed":
 			if tile["type"] != "soil":
 				_log("Seeds need tilled soil - till it with the hoe first.")
+				_play_sfx("error")
 				return
 			if not CROPS[selected_crop]["seasons"].has(_season_name()) and not owned_upgrades.get("greenhouse", false):
 				_log("%s can't be planted in %s." % [CROPS[selected_crop]["name"], _season_name()])
+				_play_sfx("error")
 				return
 			if seeds[selected_crop] <= 0:
 				_log("No %s seeds left! Buy more." % CROPS[selected_crop]["name"])
+				_play_sfx("error")
 				return
 			seeds[selected_crop] -= 1
 			tile["type"] = "planted"
@@ -960,17 +996,21 @@ func _do_action() -> void:
 			tile["dry_days"] = 0
 			tile["damaged"] = false
 			_log("Planted %s." % CROPS[selected_crop]["name"])
+			_play_sfx("plant")
 		"water":
 			if not owned_upgrades.get("watering_can_2", false):
 				if tile["type"] != "planted":
 					_log("Nothing planted here to water.")
+					_play_sfx("error")
 					return
 				if tile.get("watered", false):
 					_log("Already watered today. It's growing...")
+					_play_sfx("error")
 					return
 				tile["watered"] = true
 				tile["times_watered"] = tile.get("times_watered", 0) + 1
 				_log("Watered the crop.")
+				_play_sfx("water")
 			else:
 				var watered_count := 0
 				for dy in range(-1, 2):
@@ -987,30 +1027,38 @@ func _do_action() -> void:
 							_update_tile_visual(ny, nx)
 				if watered_count > 0:
 					_log("Watered %d crop(s) with the reinforced can." % watered_count)
+					_play_sfx("water")
 				else:
 					_log("Nothing nearby needs watering.")
+					_play_sfx("error")
 		"cure":
 			if tile["type"] == "planted" and tile.get("infected", false):
 				if cash < CURE_COST:
 					_log("Need $%d to cure this blight." % CURE_COST)
+					_play_sfx("error")
 					return
 				cash -= CURE_COST
 				tile["infected"] = false
 				tile["infected_days"] = 0
 				_log("Cured the blight for $%d." % CURE_COST)
+				_play_sfx("success")
 			else:
 				_log("Nothing to cure here.")
+				_play_sfx("error")
 				return
 		"fertilize":
 			if tile["type"] == "grass":
 				_log("Nothing to fertilize here - till it first.")
+				_play_sfx("error")
 				return
 			if fertilizer <= 0:
 				_log("No fertilizer left! Buy more.")
+				_play_sfx("error")
 				return
 			fertilizer -= 1
 			tile["soil_quality"] = min(100.0, tile.get("soil_quality", 100.0) + SOIL_FERTILIZE_BOOST)
 			_log("Fertilized the soil (now %d%%)." % int(round(tile["soil_quality"])))
+			_play_sfx("success")
 	_update_tile_visual(f.y, f.x)
 	_refresh_all()
 
@@ -1986,6 +2034,7 @@ func _refresh_inventory_panel() -> void:
 			cash += earnings
 			lifetime_earned += earnings
 			_log("Sold %d %s for $%d." % [amount, crop["name"], earnings])
+			_play_sfx("success")
 			_check_act_progress()
 			_refresh_all()
 		)
@@ -2050,6 +2099,7 @@ func _refresh_inventory_panel() -> void:
 				lifetime_earned += earnings
 				processed_goods[product] = 0
 				_log("Sold %d %s for $%d." % [amount, product.capitalize(), earnings])
+				_play_sfx("success")
 				_refresh_all()
 			)
 			row2.add_child(sell_btn2)

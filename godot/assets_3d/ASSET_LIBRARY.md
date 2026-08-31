@@ -186,19 +186,29 @@ decoration that only appears during the Winter season_idx.
 cd kenney_mirror && git sparse-checkout add "kenney_holidaypack"
 ```
 
-## Audio — not yet used at all (this game currently has no sound)
-- `kenney_interfacesounds/` — 100 short UI sound effects (clicks, taps,
-  confirms). Would fit tool-use/menu-open feedback.
-- `kenney_impactsounds/` — 130 short impact/hit sounds. Would fit
-  harvesting, tilling, or watering feedback.
+## Audio — 7 short one-shots now in use, everything else still available
+`assets_audio/` (see its own `CREDITS.md`) now has 7 sound effects for
+tool use/harvest/sell feedback via a single shared `AudioStreamPlayer`
+(`_play_sfx()` in `scripts/Main.gd`) - the game's first sound. Both source
+packs have plenty more still unused:
+- `kenney_interfacesounds/` — 100 short UI sound effects total, 4 pulled
+  in (drop/confirmation/error/click - see `assets_audio/CREDITS.md`).
+  Remaining categories (`back`, `bong`, `close`, `glass`, `glitch`,
+  `maximize`, `minimize`, `open`, `pluck`, `question`, `scratch`,
+  `scroll`, `select`, `switch`, `tick`, `toggle`) could round out menu-
+  open/close feedback if the UI grows more panels.
+- `kenney_impactsounds/` — 130 short impact/hit sounds total, 2 pulled in
+  (mining/soft-medium for till/water). Remaining categories include
+  footsteps (carpet/concrete/grass/snow/wood - could tie to player
+  movement) and more impact material types (bell, glass, metal, plank,
+  plate, punch, tin, wood) if specific actions want a more distinct sound.
 - `kenney_musicjingles/` — short musical stings (an "8-Bit jingles"
-  subfolder of NES-style clips among others). Would fit an Act-cleared
-  fanfare, playing right as the title/transition card in
-  `_show_act_transition()` appears.
+  subfolder of NES-style clips among others), not touched at all. Would
+  fit an Act-cleared fanfare, playing right as the title/transition card
+  in `_show_act_transition()` appears - a bigger step than a one-shot SFX
+  since it's a longer clip likely worth fading rather than just `.play()`.
 
-Wiring any of these in is a bigger step than the visual assets above -
-needs an `AudioStreamPlayer` node, format is `.ogg` (Godot handles these
-natively), and would be worth a dedicated pass rather than a quick pull.
+No ambient/looping background music has been added at all yet.
 
 ```bash
 cd kenney_mirror && git sparse-checkout add "kenney_interfacesounds" "kenney_impactsounds" "kenney_musicjingles"
