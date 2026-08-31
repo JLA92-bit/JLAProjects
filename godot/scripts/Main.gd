@@ -13,7 +13,23 @@ const COLS := 16
 const ROWS := 11
 const DAY_LENGTH := 25.0
 const PLAYER_SPEED := 220.0
-const FARM_ORIGIN := Vector2(40, 110)
+
+# ---------- HUD v2 (glass HUD over a full-bleed 3D viewport) ----------
+# Design spec was authored at 392x860 dp (a reference Android portrait
+# screen); this game's actual canvas is 720x1560 - UI_SCALE converts the
+# spec's dp measurements to this canvas's pixels 1:1 in true physical size
+# (720/392 and 1560/860 are both ~1.82-1.84, close enough to treat as one
+# scale factor). _dp() below is the intended way to use it.
+const UI_SCALE := 1.82
+const COL_CREAM := Color(0.949, 0.929, 0.890)      # #F2EDE3 - primary HUD text/glyphs
+const COL_GLASS_BG := Color(0.0549, 0.0784, 0.0667) # base RGB for every glass chip/card (alpha varies per element)
+const COL_AMBER := Color(0.949, 0.761, 0.302)       # ~oklch(0.85 0.14 85) - selection/action/focus
+const COL_AMBER_DEEP := Color(0.816, 0.514, 0.204)  # ~oklch(0.72 0.16 62) - action gradient's dark end
+const COL_SEASON_FALL := Color(0.890, 0.604, 0.361) # ~oklch(0.8 0.13 55) - season text, toast dot
+const COL_BERRY := Color(0.831, 0.451, 0.659)       # ~oklch(0.75 0.13 350) - act label
+const COL_LEAF := Color(0.475, 0.831, 0.541)        # ~oklch(0.84 0.14 145) - seeds glyph
+const COL_WATER := Color(0.561, 0.776, 0.910)       # ~oklch(0.85 0.09 220) - water glyph, frost
+const COL_ALERT := Color(0.910, 0.384, 0.235)       # ~oklch(0.72 0.17 28) - badges
 
 # ---------- 3D farm view ----------
 # The farm is rendered as a real 3D scene (Kenney "Nature Kit" models, CC0)
@@ -148,6 +164,24 @@ const PROCESSING := {
 	"pumpkin": {"product": "pumpkin_pie", "product_name": "Pumpkin Pie", "input_amount": 3, "price": 275},
 }
 const PROCESSED_KEYS := ["flour", "cornmeal", "sauce", "pumpkin_pie"]
+
+# ---------- Livestock (feed -> produce -> sell, the drought->feed->meat chain) ----------
+# Feed is bought with cash rather than a dedicated wheat/corn recipe (those
+# crops already have their own flour/cornmeal processing recipe, and this
+# keeps "buy feed" a single action instead of a second competing use for
+# the same harvest) - its price is derived from live wheat/corn prices in
+# _feed_price_per_unit(), so a grain shortage still raises feed cost exactly
+# like the real crop would have.
+const LIVESTOCK := {
+	"chicken": {"name": "Chicken", "cost": 30, "feed_per_day": 1, "product": "eggs", "product_name": "Eggs", "base_price": 8},
+	"sheep": {"name": "Sheep", "cost": 70, "feed_per_day": 2, "product": "wool", "product_name": "Wool", "base_price": 20},
+	"cow": {"name": "Cow", "cost": 150, "feed_per_day": 4, "product": "milk", "product_name": "Milk", "base_price": 18},
+	"pig": {"name": "Pig", "cost": 90, "feed_per_day": 3, "product": "pork", "product_name": "Pork", "base_price": 35},
+}
+const LIVESTOCK_KEYS := ["chicken", "sheep", "cow", "pig"]
+const LIVESTOCK_PRODUCT_KEYS := ["eggs", "wool", "milk", "pork"]
+const FEED_BATCH_SIZE := 10
+const FEED_COST_FACTOR := 0.5 # feed $/unit = avg(wheat, corn effective price) * this
 
 # ---------- World map (real continents, real countries) ----------
 # Each "region" is a real country, grouped under its real continent. This
@@ -337,6 +371,37 @@ const TIER_PRICE_BONUS_PER_LEVEL := 0.03 # +3% sell price per tier above Basic
 # point in the game, not just the first one.
 const CONTINENT_MASTERY_BONUS_PER_CONTINENT := 0.02 # +2% sell price per fully-owned continent
 
+# ---------- Dynamic economy ----------
+# Replaces the old pure-random daily price drift with real causes:
+#   WEATHER -> world_supply_index (a per-crop scarcity/surplus aggregate,
+#     nudged by the same weather rules _advance_tiles already applies to
+#     the player's own tiles) -> prices[key] eases toward base/index, so a
+#     drought that hurts a thirsty crop's growth also raises its price
+#     market-wide, not just on the player's own farm.
+#   PLAYER SUPPLY -> oversupply_pressure (rises when the player sells,
+#     decays daily) -> a price penalty, so flooding the market with one
+#     crop actually softens its own price for a while.
+#   REGIONAL DEMAND -> owned region count feeds the same sell-price bonus
+#     multiplier the farm-tier/continent-mastery bonuses already use, so
+#     territory expansion is also economic demand growth, not just a
+#     separate passive-income minigame.
+# All three combine multiplicatively in _effective_price().
+const REGIONAL_DEMAND_PER_REGION := 0.001 # +0.1% sell price per owned region (198 max -> ~+20% at full ownership)
+const OVERSUPPLY_PER_UNIT := 0.02 # price-pressure added per unit sold
+const OVERSUPPLY_DECAY := 0.85 # daily multiplicative decay of that pressure
+const OVERSUPPLY_MIN_MULT := 0.6 # price floor from oversupply (never crashes below 60% of the driven base)
+const WORLD_SUPPLY_STEP := 0.06 # daily nudge to world_supply_index from a weather shock
+const WORLD_SUPPLY_RECOVER := 0.05 # fraction of the gap back to the 1.0 baseline closed each day
+const WORLD_SUPPLY_MIN := 0.6
+const WORLD_SUPPLY_MAX := 1.4
+const PRICE_EASE := 0.35 # how much of the gap to the driven target price prices[key] closes per day - eases as a visible trend rather than snapping
+# Storage upkeep: hoarding past a small free buffer costs a little cash
+# each day, so waiting out a low-price dip is a real tradeoff rather than
+# a strictly-dominant strategy. Counts raw produce + processed goods +
+# livestock goods together as one pool.
+const STORAGE_FREE_THRESHOLD := 40
+const STORAGE_UPKEEP_PER_UNIT := 0.1
+
 # ---------- Game state ----------
 var cash := 100
 var day := 1
@@ -351,6 +416,12 @@ var produce := {
 }
 var processed_goods := {"flour": 0, "cornmeal": 0, "sauce": 0, "pumpkin_pie": 0}
 var prices := {"wheat": 10, "corn": 22, "tomato": 45, "pumpkin": 70}
+var price_trend := {"wheat": 0, "corn": 0, "tomato": 0, "pumpkin": 0} # -1/0/1, set each day tick for the UI's trend arrow
+var oversupply_pressure := {"wheat": 0.0, "corn": 0.0, "tomato": 0.0, "pumpkin": 0.0}
+var world_supply_index := {"wheat": 1.0, "corn": 1.0, "tomato": 1.0, "pumpkin": 1.0}
+var livestock := {"chicken": 0, "sheep": 0, "cow": 0, "pig": 0}
+var feed_stock := 0
+var livestock_goods := {"eggs": 0, "wool": 0, "milk": 0, "pork": 0}
 var selected_crop := "wheat"
 var selected_tool := "hoe"
 var current_act := 0 # index into ACTS
@@ -381,21 +452,54 @@ var world_root: Node3D
 var tile_nodes := [] # 2D array of {"node":Node3D, "ground":Node3D, "ground_key":String, "crop":Node3D}
 var player_node: Node3D
 var player_skin_material: StandardMaterial3D
+var tile_highlight: MeshInstance3D
+var farm_camera: Camera3D
+var cam_base_size: float
+var cam_zoom := 1.0
+const CAM_ZOOM_MIN := 0.55
+const CAM_ZOOM_MAX := 1.7
+const CAM_ZOOM_STEP := 0.15
+var sfx_player: AudioStreamPlayer
+var sfx := {} # key -> AudioStream
+var footstep_player: AudioStreamPlayer # separate from sfx_player so walking never cuts off a tool-use/harvest sound
+var footstep_timer := 0.0
+const FOOTSTEP_INTERVAL := 0.32
 
-var hud_cash: Label
-var hud_day: Label
-var hud_dom: Label
-var hud_act: Label
-var hud_season: Label
-var hud_farm: Label
-var tool_label: Label
-var log_label: Label
-var tool_row: HBoxContainer
+var hud_cash: Label            # coin pill value
+var hud_day: Label             # day pill's "DAY N" mono label
+var hud_dom: Label             # act card's "N% owned" label
+var hud_act: Label             # act card title ("First Harvest")
+var hud_season: Label          # day pill's season text ("Fall 6/7")
+var hud_farm: Label            # small livestock/feed status line under the act card
+var tool_label: Label          # kept for _refresh_tool_ui() compatibility; not shown (no on-screen equivalent in HUD v2)
+var log_label: Label           # kept for _log() compatibility; not shown (messages now surface as toasts)
+var tool_row: GridContainer
 var tool_buttons := {}
+var tool_belt_bottom_y: float
+var tool_belt_side: float
+var tool_belt_card_h: float
+var act_roman_label: Label     # "ACT I"
+var act_progress_fill: Panel   # width-driven progress bar fill
+var act_progress_track_w: float
+var act_farmname_label: Label
+var act_tier_label: Label
+var act_tier_badge: Panel
+var forecast_today_label: Label
+var forecast_tomorrow_label: Label
+var shop_badge_label: Label
+var toast_panel: Panel
+var toast_label: Label
+var toast_timer: Timer
+var action_button: Control
+var action_sublabel: Label
+var bag_button: Control
+var thumbstick_base: Control
+var thumbstick_knob: Control
+var thumbstick_dragging := false
 var act_banner: Panel
 var act_banner_title: Label
 var act_banner_body: Label
-var map_button: Button
+var map_button: Control
 var update_banner: Panel
 var update_banner_label: Label
 var current_build_commit := ""
@@ -433,10 +537,15 @@ var map_scroll_content: VBoxContainer
 var map_scroll: ScrollContainer
 var map_continent_headings := {} # continent name -> Label, for jump buttons
 
+var livestock_panel: Panel
+var feed_label: Label
+var livestock_rows_container: VBoxContainer
+
 # ---------- Lifecycle ----------
 func _ready():
 	randomize()
 	is_new_game = not FileAccess.file_exists(SAVE_PATH)
+	_load_audio()
 	_load_world_assets()
 	_init_fresh_state()
 	_load_game()
@@ -479,6 +588,85 @@ func _build_textured_ground_scene(texture_path: String, tint: Color = Color.WHIT
 	scene.pack(mesh_instance)
 	return scene
 
+func _set_owner_recursive(node: Node, root: Node) -> void:
+	for child in node.get_children():
+		child.owner = root
+		_set_owner_recursive(child, root)
+
+# A small cottage assembled from real Kenney "Fantasy Town Kit" pieces (CC0,
+# see CREDITS.md) rather than another procedural stand-in - these wood wall
+# models are each authored to occupy one edge of a 1x1x1 cell (a thin slab
+# spanning the full width of one side), so instantiating the same cell's
+# four wall pieces at yaw 0/90/180/270 around a shared origin closes them
+# into a simple box, with the gable roof piece sized to cap that same cell.
+func _build_farmhouse_scene() -> PackedScene:
+	const FT := "res://assets_3d/fantasy_town_kit/"
+	var root := Node3D.new()
+	var walls = [
+		{"path": "wallWoodDoor.glb", "yaw": 0.0}, # front, the only side with an entrance
+		{"path": "wallWood.glb", "yaw": PI / 2.0},
+		{"path": "wallWood.glb", "yaw": PI},
+		{"path": "wallWood.glb", "yaw": -PI / 2.0},
+	]
+	for w in walls:
+		var inst = load(FT + w["path"]).instantiate()
+		inst.rotation.y = w["yaw"]
+		root.add_child(inst)
+
+	var roof_inst = load(FT + "roofGable.glb").instantiate()
+	roof_inst.position = Vector3(0, 1.0, 0)
+	root.add_child(roof_inst)
+
+	var chimney_inst = load(FT + "chimney.glb").instantiate()
+	chimney_inst.position = Vector3(0.2, 1.0, -0.2)
+	root.add_child(chimney_inst)
+
+	_set_owner_recursive(root, root)
+	var scene := PackedScene.new()
+	scene.pack(root)
+	return scene
+
+# Real CC0 animal models (Sirrobzeroone's Auroch/Mouflon, see CREDITS.md) are
+# modeled at a Minetest-mob scale wildly larger than this game's WORLD_TILE=1.0
+# convention, so each needs its own scale-down factor to read as an
+# appropriately-sized farm animal next to the fence/crops.
+func _build_real_animal_scene(path: String, model_scale: float) -> PackedScene:
+	var root := Node3D.new()
+	var inst = load(path).instantiate()
+	inst.scale = Vector3.ONE * model_scale
+	root.add_child(inst)
+	_set_owner_recursive(root, root)
+	var scene := PackedScene.new()
+	scene.pack(root)
+	return scene
+
+# CC0 sound effects from Kenney's Interface Sounds / Impact Sounds packs
+# (see assets_audio/LICENSE.txt) - short, punchy feedback for tool use and
+# harvesting rather than anything looping/ambient, to keep this a light
+# first pass rather than a full audio overhaul.
+func _load_audio() -> void:
+	const AUD := "res://assets_audio/"
+	sfx["till"] = load(AUD + "till.ogg")
+	sfx["water"] = load(AUD + "water.ogg")
+	sfx["plant"] = load(AUD + "plant.ogg")
+	sfx["harvest"] = load(AUD + "harvest.ogg")
+	sfx["success"] = load(AUD + "success.ogg")
+	sfx["error"] = load(AUD + "error.ogg")
+	sfx["click"] = load(AUD + "click.ogg")
+	sfx["act_complete"] = load(AUD + "act_complete.ogg")
+	sfx["footstep"] = load(AUD + "footstep.ogg")
+	sfx_player = AudioStreamPlayer.new()
+	add_child(sfx_player)
+	footstep_player = AudioStreamPlayer.new()
+	footstep_player.volume_db = -6.0 # footsteps repeat constantly while walking - quieter so they sit as texture, not a nag
+	add_child(footstep_player)
+
+func _play_sfx(key: String) -> void:
+	if not sfx.has(key):
+		return
+	sfx_player.stream = sfx[key]
+	sfx_player.play()
+
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
 	# Kenney's ground_grass.glb is a flat solid vertex color (no texture at
@@ -510,10 +698,12 @@ func _load_world_assets():
 	world_scenes["corn_c"] = load(NK + "crops_cornStageC.glb")
 	world_scenes["corn_d"] = load(NK + "crops_cornStageD.glb")
 	# Nature Kit has no tomato-specific staged model; a generic leafy plant
-	# stands in for the growing phase and a round fruit model for "ready".
+	# stands in for the growing phase. A real tomato model (Kenney's Food
+	# Kit) covers "ready" now instead of the melon that used to stand in
+	# for it - see CREDITS.md.
 	world_scenes["tomato_a"] = load(NK + "crops_leafsStageA.glb")
 	world_scenes["tomato_b"] = load(NK + "crops_leafsStageB.glb")
-	world_scenes["tomato_ready"] = load(NK + "crop_melon.glb")
+	world_scenes["tomato_ready"] = load("res://assets_3d/food_kit/tomato.glb")
 	world_scenes["pumpkin_a"] = load(NK + "crops_leafsStageA.glb")
 	world_scenes["pumpkin_b"] = load(NK + "crops_leafsStageB.glb")
 	world_scenes["pumpkin_ready"] = load(NK + "crop_pumpkin.glb")
@@ -521,9 +711,33 @@ func _load_world_assets():
 	world_scenes["fence_corner"] = load(NK + "fence_corner.glb")
 	world_scenes["tree"] = load(NK + "tree_default.glb")
 	world_scenes["pine"] = load(NK + "tree_pineRoundA.glb")
+	# A pull of extra Nature Kit scenery for backdrop variety beyond the
+	# handful of pieces the farm grid itself needs - see
+	# assets_3d/ASSET_LIBRARY.md for the much larger set still available in
+	# the same upstream pack if more variety is ever wanted later.
+	world_scenes["rock_large_a"] = load(NK + "rock_largeA.glb")
+	world_scenes["rock_large_c"] = load(NK + "rock_largeC.glb")
+	world_scenes["rock_small_b"] = load(NK + "rock_smallB.glb")
+	world_scenes["flower_red"] = load(NK + "flower_redA.glb")
+	world_scenes["flower_yellow"] = load(NK + "flower_yellowB.glb")
+	world_scenes["flower_purple"] = load(NK + "flower_purpleC.glb")
+	world_scenes["mushroom_red"] = load(NK + "mushroom_red.glb")
+	world_scenes["mushroom_tan"] = load(NK + "mushroom_tan.glb")
+	world_scenes["stump"] = load(NK + "stump_round.glb")
+	world_scenes["sign"] = load(NK + "sign.glb")
+	world_scenes["bush"] = load(NK + "plant_bush.glb")
 	world_scenes["player"] = load("res://assets_3d/character/basicCharacter.gltf")
 	player_skin_material = StandardMaterial3D.new()
 	player_skin_material.albedo_texture = load("res://assets_3d/character/skin_man.png")
+	# Real CC0/MIT models (see CREDITS.md) replace all four procedural
+	# primitive-mesh animals - scale factors picked so each reads at a
+	# believable size next to the 1x1 fence/crop tiles (see
+	# _build_real_animal_scene above).
+	world_scenes["chicken"] = _build_real_animal_scene("res://assets_3d/animal_models/chicken.glb", 0.07)
+	world_scenes["pig"] = _build_real_animal_scene("res://assets_3d/animal_models/pig.glb", 0.053)
+	world_scenes["sheep"] = _build_real_animal_scene("res://assets_3d/animal_models/sheep.glb", 0.055)
+	world_scenes["cow"] = _build_real_animal_scene("res://assets_3d/animal_models/cow.glb", 0.075)
+	world_scenes["farmhouse"] = _build_farmhouse_scene()
 
 func _init_fresh_state():
 	plots = {"home": _make_empty_grid()}
@@ -582,14 +796,18 @@ func _switch_active_plot(plot_id: String) -> void:
 
 # ---------- Farm grid rendering (3D) ----------
 func _build_farm_view(layer: CanvasLayer) -> void:
+	# Full-bleed per the HUD v2 design: the 3D render fills the entire
+	# 720x1560 canvas edge to edge, with every HUD element floating over it
+	# on its own CanvasLayer children rather than the world being boxed into
+	# a letterboxed sub-region.
 	var container := SubViewportContainer.new()
-	container.position = FARM_ORIGIN
-	container.size = Vector2(COLS * TILE, ROWS * TILE)
+	container.position = Vector2.ZERO
+	container.size = Vector2(720, 1560)
 	container.stretch = true
 	layer.add_child(container)
 
 	farm_viewport = SubViewport.new()
-	farm_viewport.size = Vector2i(COLS * TILE, ROWS * TILE)
+	farm_viewport.size = Vector2i(720, 1560)
 	farm_viewport.transparent_bg = false
 	farm_viewport.own_world_3d = true
 	container.add_child(farm_viewport)
@@ -614,7 +832,14 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 
 	var cam := Camera3D.new()
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-	cam.size = COLS * WORLD_TILE * 1.7
+	# KEEP_WIDTH pins the horizontal extent to cam.size (below) regardless of
+	# viewport aspect - needed now that the viewport is a tall 720x1560 full-
+	# bleed rect rather than the old ~1:1 letterboxed box, so the same COLS-
+	# wide framing holds and the extra height just reveals more world above/
+	# below instead of squishing or over-zooming the scene.
+	cam.keep_aspect = Camera3D.KEEP_WIDTH
+	cam_base_size = COLS * WORLD_TILE * 1.7
+	cam.size = cam_base_size * cam_zoom
 	var center := Vector3((COLS - 1) * WORLD_TILE * 0.5, 0, (ROWS - 1) * WORLD_TILE * 0.5)
 	# The camera offset's height (the "7") has to grow with cam.size, not stay
 	# fixed: for this fixed viewing angle, an orthogonal camera's bottom-row
@@ -624,11 +849,16 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 	# reach the ground plane at all and the sky shows through no matter how
 	# much backdrop is added. Scaling the whole offset with COLS keeps the
 	# same angle while keeping the start point comfortably above the ground.
-	var cam_offset := Vector3(8, 7, 8) * (COLS / 10.0) * 1.3
+	var cam_offset := Vector3(8, 22, 8) * (COLS / 10.0) * 1.3
 	cam.position = center + cam_offset
 	world_root.add_child(cam)
 	cam.look_at(center, Vector3.UP)
 	cam.current = true
+	farm_camera = cam
+
+func _adjust_camera_zoom(step: float) -> void:
+	cam_zoom = clamp(cam_zoom + step, CAM_ZOOM_MIN, CAM_ZOOM_MAX)
+	farm_camera.size = cam_base_size * cam_zoom
 
 func _build_farm_grid():
 	tile_nodes.clear()
@@ -651,6 +881,23 @@ func _build_scenery():
 	# Scaled off COLS (tuned as 20 tiles at the original COLS=10) so a bigger
 	# playable grid - which also zooms the camera out further, see cam.size
 	# in _build_farm_view - still gets enough backdrop to hide the sky.
+	# A single huge flat plane beneath everything as a horizon fallback - the
+	# full-bleed HUD v2 viewport reveals a much taller vertical slice of the
+	# world than before, wide enough that the finite tiled backdrop's edge
+	# could show sky past its corners at some zoom levels; this guarantees
+	# grass-colored ground to the horizon in every direction without having
+	# to further balloon the backdrop tile count (already ~6000 tiles).
+	var horizon_plane := MeshInstance3D.new()
+	var horizon_mesh := PlaneMesh.new()
+	horizon_mesh.size = Vector2(500, 500)
+	horizon_plane.mesh = horizon_mesh
+	var horizon_mat := StandardMaterial3D.new()
+	horizon_mat.albedo_color = Color(0.55, 0.68, 0.42)
+	horizon_mat.roughness = 0.95
+	horizon_plane.material_override = horizon_mat
+	horizon_plane.position = Vector3((COLS - 1) * WORLD_TILE * 0.5, -0.03, (ROWS - 1) * WORLD_TILE * 0.5)
+	world_root.add_child(horizon_plane)
+
 	var BACKDROP_MARGIN := int(COLS * 2.0)
 	for tz in range(-BACKDROP_MARGIN, ROWS + BACKDROP_MARGIN):
 		for tx in range(-BACKDROP_MARGIN, COLS + BACKDROP_MARGIN):
@@ -670,6 +917,48 @@ func _build_scenery():
 		var s = world_scenes[d["key"]].instantiate()
 		s.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
 		world_root.add_child(s)
+
+	# The farmhouse - a landmark sitting in the backdrop behind the top
+	# fence, not on the playable grid itself.
+	var farmhouse: Node3D = world_scenes["farmhouse"].instantiate()
+	farmhouse.position = Vector3((COLS - 1) * 0.5 * WORLD_TILE, 0, -3.0 * WORLD_TILE)
+	world_root.add_child(farmhouse)
+
+	# A few farm animals wandering just outside the fence, purely for
+	# ambience - not interactive, not on the playable grid.
+	var animal_deco = [
+		{"key": "chicken", "tx": 2.3, "tz": -1.6},
+		{"key": "chicken", "tx": 3.1, "tz": -1.4},
+		{"key": "pig", "tx": COLS - 2, "tz": ROWS + 0.5},
+		{"key": "sheep", "tx": -1.7, "tz": ROWS * 0.35},
+		{"key": "cow", "tx": COLS + 1.6, "tz": ROWS * 0.6},
+	]
+	for d in animal_deco:
+		var a = world_scenes[d["key"]].instantiate()
+		a.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
+		a.rotation.y = randf() * TAU
+		world_root.add_child(a)
+
+	# Extra backdrop variety - flowers by the farmhouse, mushrooms and a
+	# stump in the treeline, rocks and a bush scattered further out.
+	var extra_deco = [
+		{"key": "sign", "tx": (COLS - 1) * 0.5, "tz": -2.2},
+		{"key": "flower_red", "tx": COLS * 0.3, "tz": -2.4},
+		{"key": "flower_yellow", "tx": COLS * 0.3 + 0.6, "tz": -2.6},
+		{"key": "flower_purple", "tx": COLS * 0.7, "tz": -2.3},
+		{"key": "mushroom_red", "tx": -2.2, "tz": ROWS * 0.3},
+		{"key": "mushroom_tan", "tx": -2.5, "tz": ROWS * 0.45},
+		{"key": "rock_large_a", "tx": COLS + 2.0, "tz": 2.0},
+		{"key": "rock_large_c", "tx": COLS + 2.6, "tz": 6.0},
+		{"key": "rock_small_b", "tx": -2.6, "tz": ROWS - 1.5},
+		{"key": "stump", "tx": COLS * 0.15, "tz": ROWS + 1.6},
+		{"key": "bush", "tx": COLS * 0.85, "tz": ROWS + 1.7},
+	]
+	for d in extra_deco:
+		var e = world_scenes[d["key"]].instantiate()
+		e.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
+		e.rotation.y = randf() * TAU
+		world_root.add_child(e)
 
 	for c in range(-1, COLS + 1):
 		var f = world_scenes["fence"].instantiate()
@@ -694,6 +983,23 @@ func _build_player():
 	player_node.scale = Vector3.ONE * PLAYER_SCALE
 	_apply_player_skin(player_node)
 	world_root.add_child(player_node)
+	_build_tile_highlight()
+
+# A bright, semi-transparent quad marking the tile a tool use (or harvest)
+# will actually land on - sized slightly smaller than a full tile so the
+# grid line still shows as a border around it.
+func _build_tile_highlight() -> void:
+	tile_highlight = MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(WORLD_TILE * 0.92, WORLD_TILE * 0.92)
+	tile_highlight.mesh = plane
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.95, 0.15, 0.7)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	tile_highlight.material_override = mat
+	world_root.add_child(tile_highlight)
 
 func _apply_player_skin(node: Node) -> void:
 	if node is MeshInstance3D:
@@ -709,6 +1015,7 @@ func _process(delta: float) -> void:
 		day_progress = 0.0
 		_day_tick()
 	_update_player_visual()
+	_update_tile_highlight()
 
 func _handle_movement(delta: float) -> void:
 	var dir := Vector2.ZERO
@@ -729,6 +1036,13 @@ func _handle_movement(delta: float) -> void:
 		player_pos += dir * PLAYER_SPEED * delta
 		player_pos.x = clamp(player_pos.x, 0, (COLS - 1) * TILE)
 		player_pos.y = clamp(player_pos.y, 0, (ROWS - 1) * TILE)
+		footstep_timer -= delta
+		if footstep_timer <= 0.0:
+			footstep_timer = FOOTSTEP_INTERVAL
+			footstep_player.stream = sfx["footstep"]
+			footstep_player.play()
+	else:
+		footstep_timer = 0.0 # next step plays immediately on the next move, not after a stale leftover cooldown
 
 func _update_player_visual() -> void:
 	var world_x = (player_pos.x / TILE) * WORLD_TILE
@@ -749,6 +1063,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			KEY_3: _select_tool("seed")
 			KEY_4: _select_tool("cure")
 			KEY_5: _select_tool("fertilize")
+			KEY_EQUAL, KEY_KP_ADD: _adjust_camera_zoom(-CAM_ZOOM_STEP)
+			KEY_MINUS, KEY_KP_SUBTRACT: _adjust_camera_zoom(CAM_ZOOM_STEP)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_adjust_camera_zoom(-CAM_ZOOM_STEP * 0.5)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_adjust_camera_zoom(CAM_ZOOM_STEP * 0.5)
 
 func _facing_tile() -> Vector2i:
 	var tx := int(round(player_pos.x / TILE))
@@ -760,13 +1083,26 @@ func _facing_tile() -> Vector2i:
 		"right": tx += 1
 	return Vector2i(tx, ty)
 
+# Shows the player where a tool will land before they commit to using it -
+# updated every frame alongside the player's own position/facing so it
+# never lags a step behind while moving.
+func _update_tile_highlight() -> void:
+	var f := _facing_tile()
+	if f.x < 0 or f.y < 0 or f.x >= COLS or f.y >= ROWS:
+		tile_highlight.visible = false
+		return
+	tile_highlight.visible = true
+	tile_highlight.position = Vector3(f.x * WORLD_TILE, 0.02, f.y * WORLD_TILE)
+
 # ---------- Tools & actions ----------
 func _select_tool(key: String) -> void:
 	if not _tool_unlocked(key):
 		_log("The %s isn't unlocked yet." % TOOLS[key]["name"])
+		_play_sfx("error")
 		return
 	selected_tool = key
 	_refresh_tool_ui()
+	_play_sfx("click")
 
 func _select_crop(key: String) -> void:
 	selected_crop = key
@@ -776,6 +1112,7 @@ func _log(msg: String) -> void:
 	log_text = msg
 	if log_label:
 		log_label.text = msg
+	_show_toast(msg)
 
 func _do_action() -> void:
 	var f := _facing_tile()
@@ -786,11 +1123,13 @@ func _do_action() -> void:
 	if tile["type"] == "planted" and tile.get("stage", 0) >= 4:
 		if tile.get("infected", false):
 			_log("That crop is blighted - harvest yields nothing. Cure it or till it under.")
+			_play_sfx("error")
 			tile["type"] = "grass"
 		else:
 			var sq: float = tile.get("soil_quality", 100.0)
 			if sq < SOIL_EXHAUSTED_THRESHOLD and randf() < SOIL_EXHAUSTED_FAIL_CHANCE:
 				_log("The exhausted soil ruined this %s harvest - fertilize or rotate crops here." % CROPS[tile["crop"]]["name"])
+				_play_sfx("error")
 				tile["type"] = "soil"
 			else:
 				var watered_enough = tile.get("times_watered", 0) >= CROPS[tile["crop"]]["grow_days"]
@@ -799,11 +1138,13 @@ func _do_action() -> void:
 				var cap = _storage_cap()
 				if _produce_total(tile["crop"]) + amount > cap:
 					_log("Storage is full for %s (%d/%d) - sell some or upgrade your silo." % [CROPS[tile["crop"]]["name"], _produce_total(tile["crop"]), cap])
+					_play_sfx("error")
 					return
 				var quality = _harvest_quality(tile, sq, watered_enough)
 				produce[tile["crop"]][quality] += amount
 				lifetime_harvested += amount
 				_log("Harvested %dx %s (%s quality)%s." % [amount, CROPS[tile["crop"]]["name"], QUALITY_LABELS[quality], " - well-tended bonus!" if well_tended else ""])
+				_play_sfx("harvest")
 				tile["type"] = "soil"
 			var same_crop = tile.get("last_crop", "") == tile["crop"]
 			tile["soil_quality"] = max(0.0, sq - (SOIL_DEGRADE_SAME_CROP if same_crop else SOIL_DEGRADE_ROTATED))
@@ -817,17 +1158,22 @@ func _do_action() -> void:
 			if tile["type"] == "grass":
 				tile["type"] = "soil"
 				_log("Tilled soil with the hoe.")
+				_play_sfx("till")
 			else:
 				_log("The hoe only works on grass.")
+				_play_sfx("error")
 		"seed":
 			if tile["type"] != "soil":
 				_log("Seeds need tilled soil - till it with the hoe first.")
+				_play_sfx("error")
 				return
 			if not CROPS[selected_crop]["seasons"].has(_season_name()) and not owned_upgrades.get("greenhouse", false):
 				_log("%s can't be planted in %s." % [CROPS[selected_crop]["name"], _season_name()])
+				_play_sfx("error")
 				return
 			if seeds[selected_crop] <= 0:
 				_log("No %s seeds left! Buy more." % CROPS[selected_crop]["name"])
+				_play_sfx("error")
 				return
 			seeds[selected_crop] -= 1
 			tile["type"] = "planted"
@@ -840,17 +1186,21 @@ func _do_action() -> void:
 			tile["dry_days"] = 0
 			tile["damaged"] = false
 			_log("Planted %s." % CROPS[selected_crop]["name"])
+			_play_sfx("plant")
 		"water":
 			if not owned_upgrades.get("watering_can_2", false):
 				if tile["type"] != "planted":
 					_log("Nothing planted here to water.")
+					_play_sfx("error")
 					return
 				if tile.get("watered", false):
 					_log("Already watered today. It's growing...")
+					_play_sfx("error")
 					return
 				tile["watered"] = true
 				tile["times_watered"] = tile.get("times_watered", 0) + 1
 				_log("Watered the crop.")
+				_play_sfx("water")
 			else:
 				var watered_count := 0
 				for dy in range(-1, 2):
@@ -867,30 +1217,38 @@ func _do_action() -> void:
 							_update_tile_visual(ny, nx)
 				if watered_count > 0:
 					_log("Watered %d crop(s) with the reinforced can." % watered_count)
+					_play_sfx("water")
 				else:
 					_log("Nothing nearby needs watering.")
+					_play_sfx("error")
 		"cure":
 			if tile["type"] == "planted" and tile.get("infected", false):
 				if cash < CURE_COST:
 					_log("Need $%d to cure this blight." % CURE_COST)
+					_play_sfx("error")
 					return
 				cash -= CURE_COST
 				tile["infected"] = false
 				tile["infected_days"] = 0
 				_log("Cured the blight for $%d." % CURE_COST)
+				_play_sfx("success")
 			else:
 				_log("Nothing to cure here.")
+				_play_sfx("error")
 				return
 		"fertilize":
 			if tile["type"] == "grass":
 				_log("Nothing to fertilize here - till it first.")
+				_play_sfx("error")
 				return
 			if fertilizer <= 0:
 				_log("No fertilizer left! Buy more.")
+				_play_sfx("error")
 				return
 			fertilizer -= 1
 			tile["soil_quality"] = min(100.0, tile.get("soil_quality", 100.0) + SOIL_FERTILIZE_BOOST)
 			_log("Fertilized the soil (now %d%%)." % int(round(tile["soil_quality"])))
+			_play_sfx("success")
 	_update_tile_visual(f.y, f.x)
 	_refresh_all()
 
@@ -943,6 +1301,12 @@ func _update_tile_visual(r: int, c: int) -> void:
 	if tile["type"] == "planted":
 		var mesh_key = _crop_mesh_key(tile["crop"], tile.get("stage", 0))
 		var cnode = world_scenes[mesh_key].instantiate()
+		if mesh_key == "tomato_ready":
+			# Kenney's Food Kit is modeled at its own, much smaller scale than
+			# Nature Kit's crops (a real kitchen-table tomato vs. a garden
+			# plant) - scaled up here to read at the same size as the other
+			# ready-to-harvest crops on the same size tile.
+			cnode.scale = Vector3.ONE * 2.4
 		node.add_child(cnode)
 		slot["crop"] = cnode
 		if tile.get("infected", false):
@@ -1082,12 +1446,12 @@ func _day_tick() -> void:
 	elif frost_damaged > 0:
 		_log("Frost nipped %d crop(s), setting their growth back." % frost_damaged)
 
-	for key in CROP_KEYS:
-		var base = CROPS[key]["base_price"]
-		var drift = (randf() - 0.5) * base * 0.3
-		var np = clamp(prices[key] + drift, base * 0.4, base * 1.8)
-		prices[key] = int(round(np))
-
+	_update_world_supply()
+	_update_crop_prices()
+	var unfed = _tick_livestock()
+	if unfed > 0:
+		_log("%d of your livestock went unfed today and produced nothing - buy more feed from the Livestock panel." % unfed)
+	_apply_storage_upkeep()
 	_advance_market_event()
 
 	var pressure = total_infected
@@ -1212,29 +1576,193 @@ func _upgrade_locked_reason(key: String) -> String:
 		return "unlocks in Act 3"
 	return ""
 
-# ---------- Market events ----------
+# ---------- Dynamic economy ----------
+# Weather shock to one crop's aggregate world supply - the same trait
+# checks _advance_tiles() already runs per-tile against the player's own
+# crops, applied here as one abstracted market-wide number per crop
+# instead of simulating individual NPC farms.
+func _update_world_supply() -> void:
+	for key in CROP_KEYS:
+		var crop_info = CROPS[key]
+		var idx = world_supply_index.get(key, 1.0)
+		match current_weather:
+			"drought":
+				idx -= WORLD_SUPPLY_STEP * (1.5 if crop_info.get("thirsty", false) else 0.5)
+			"frost":
+				if not crop_info.get("frost_hardy", false):
+					idx -= WORLD_SUPPLY_STEP
+			"heatwave":
+				if crop_info.get("heat_sensitive", false):
+					idx -= WORLD_SUPPLY_STEP
+			"storm":
+				idx -= WORLD_SUPPLY_STEP * 0.4
+			"rainy":
+				idx += WORLD_SUPPLY_STEP * 0.5
+			"sunny":
+				idx += WORLD_SUPPLY_STEP * 0.3
+		idx += (1.0 - idx) * WORLD_SUPPLY_RECOVER # a run of good weather fully heals a past shock over time
+		world_supply_index[key] = clamp(idx, WORLD_SUPPLY_MIN, WORLD_SUPPLY_MAX)
+
+# Eases prices[key] toward base/world_supply_index (scarcity raises it,
+# surplus lowers it) instead of the old pure random walk, and decays
+# oversupply_pressure - call once per day, after _update_world_supply().
+func _update_crop_prices() -> void:
+	for key in CROP_KEYS:
+		var base = CROPS[key]["base_price"]
+		var target = base / world_supply_index.get(key, 1.0)
+		var eased = lerp(float(prices[key]), clamp(target, base * 0.5, base * 2.0), PRICE_EASE)
+		var rounded = int(round(eased))
+		price_trend[key] = sign(rounded - prices[key])
+		prices[key] = rounded
+		oversupply_pressure[key] = max(0.0, oversupply_pressure.get(key, 0.0) * OVERSUPPLY_DECAY - 0.01)
+
+# One line explaining the dominant reason behind a crop's current price,
+# so the causes above stay visible to the player instead of just moving a
+# number - checked in priority order from most to least specific.
+func _market_reason(key: String) -> String:
+	if active_event.get("kind", "crop") == "crop" and active_event.get("crop", "") == key:
+		return "Demand spike in effect!"
+	var idx = world_supply_index.get(key, 1.0)
+	if idx <= 0.8:
+		return "Weather has hurt %s supply - prices are up." % CROPS[key]["name"].to_lower()
+	if oversupply_pressure.get(key, 0.0) >= 0.25:
+		return "You've been flooding the market with %s." % CROPS[key]["name"].to_lower()
+	if idx >= 1.2:
+		return "Good weather has kept %s plentiful - prices are down." % CROPS[key]["name"].to_lower()
+	return "Prices are steady."
+
+func _trend_arrow(key: String) -> String:
+	var t = price_trend.get(key, 0)
+	return "▲" if t > 0 else ("▼" if t < 0 else "→")
+
 func _effective_price(key: String) -> int:
 	var bonus_mult = 1.0 + TIER_PRICE_BONUS_PER_LEVEL * _farm_tier_index()
 	bonus_mult += CONTINENT_MASTERY_BONUS_PER_CONTINENT * _fully_owned_continent_count()
-	var base = prices[key] * bonus_mult
-	if active_event.get("crop", "") == key:
+	bonus_mult += REGIONAL_DEMAND_PER_REGION * _owned_count()
+	var oversupply_mult = clamp(1.0 - oversupply_pressure.get(key, 0.0), OVERSUPPLY_MIN_MULT, 1.0)
+	var base = prices[key] * bonus_mult * oversupply_mult
+	if active_event.get("kind", "crop") == "crop" and active_event.get("crop", "") == key:
 		return int(round(base * active_event["multiplier"]))
 	return int(round(base))
+
+# A processed good's price rides the same supply/demand/weather drivers as
+# its source crop, scaled by the same ratio _effective_price() moved that
+# crop's own price - so a wheat shortage raises flour's price too, without
+# needing a second tracked-price system just for processed goods.
+func _effective_processed_price(source_crop_key: String) -> int:
+	var recipe = PROCESSING[source_crop_key]
+	var ratio = float(_effective_price(source_crop_key)) / float(CROPS[source_crop_key]["base_price"])
+	return int(round(recipe["price"] * ratio))
+
+# ---------- Livestock (feed -> produce -> sell) ----------
+func _feed_price_per_unit() -> int:
+	return max(1, int(round((_effective_price("wheat") + _effective_price("corn")) * 0.5 * FEED_COST_FACTOR)))
+
+# Cost-plus pricing: a livestock good's sell price rises with how expensive
+# feed currently is relative to its own long-run baseline - the direct
+# "higher feed costs -> higher livestock production costs -> higher meat
+# prices" chain from the design brief, without needing a second supply/
+# demand tracker just for animal goods.
+func _livestock_sell_price(product_key: String) -> int:
+	var baseline_feed = (CROPS["wheat"]["base_price"] + CROPS["corn"]["base_price"]) * 0.5 * FEED_COST_FACTOR
+	var feed_cost_mult = clamp(_feed_price_per_unit() / max(1.0, baseline_feed), 0.7, 1.8)
+	var event_mult = 1.0
+	if active_event.get("kind", "crop") == "livestock" and active_event.get("crop", "") == product_key:
+		event_mult = active_event["multiplier"]
+	for key in LIVESTOCK_KEYS:
+		if LIVESTOCK[key]["product"] == product_key:
+			return int(round(LIVESTOCK[key]["base_price"] * feed_cost_mult * event_mult))
+	return 0
+
+func _livestock_total() -> int:
+	var total := 0
+	for key in LIVESTOCK_KEYS:
+		total += livestock.get(key, 0)
+	return total
+
+func _feed_needed_per_day() -> int:
+	var total := 0
+	for key in LIVESTOCK_KEYS:
+		total += livestock.get(key, 0) * LIVESTOCK[key]["feed_per_day"]
+	return total
+
+# Each owned animal eats its species' feed_per_day and, if fed, produces 1
+# unit of its good. Feed is consumed species-by-species so a shortage
+# leaves whichever species is processed later partly or fully unfed rather
+# than failing all of them at once. Returns the total count left unfed, so
+# the caller can warn the player instead of production just silently
+# stopping with no explanation.
+func _tick_livestock() -> int:
+	var unfed_total := 0
+	for key in LIVESTOCK_KEYS:
+		var count: int = livestock.get(key, 0)
+		if count <= 0:
+			continue
+		var per_day: int = LIVESTOCK[key]["feed_per_day"]
+		var fed_count = min(count, feed_stock / per_day)
+		feed_stock -= fed_count * per_day
+		unfed_total += count - fed_count
+		if fed_count > 0:
+			var product = LIVESTOCK[key]["product"]
+			livestock_goods[product] = livestock_goods.get(product, 0) + fed_count
+	return unfed_total
+
+func _total_stored_units() -> int:
+	var total := 0
+	for key in CROP_KEYS:
+		total += _produce_total(key)
+	for key in PROCESSED_KEYS:
+		total += processed_goods[key]
+	for key in LIVESTOCK_PRODUCT_KEYS:
+		total += livestock_goods[key]
+	return total
+
+func _apply_storage_upkeep() -> void:
+	var stored = _total_stored_units()
+	if stored <= STORAGE_FREE_THRESHOLD:
+		return
+	var upkeep = int(ceil((stored - STORAGE_FREE_THRESHOLD) * STORAGE_UPKEEP_PER_UNIT))
+	if upkeep <= 0:
+		return
+	cash = max(0, cash - upkeep)
+	_log("Storage upkeep cost $%d for %d units stored above the free threshold - sell some or process it." % [upkeep, stored - STORAGE_FREE_THRESHOLD])
+
+# ---------- Market events ----------
+
+# Display name for whatever active_event currently targets - a crop
+# (CROPS dict) or, since demand spikes also cover livestock goods, a
+# livestock product (LIVESTOCK dict, keyed by its own "product" field).
+func _event_target_name() -> String:
+	if active_event.get("kind", "crop") == "livestock":
+		for key in LIVESTOCK_KEYS:
+			if LIVESTOCK[key]["product"] == active_event["crop"]:
+				return LIVESTOCK[key]["product_name"]
+		return active_event["crop"].capitalize()
+	return CROPS[active_event["crop"]]["name"]
 
 func _advance_market_event() -> void:
 	if active_event.is_empty():
 		if current_act >= 1 and randf() < EVENT_CHANCE:
 			var unlocked_crops = CROP_KEYS.filter(func(k): return _crop_unlocked(k))
+			# Livestock goods join the same event pool, weighted lighter (1 slot
+			# vs. each unlocked crop's own) so a demand spike doesn't become
+			# "usually eggs" once several crops unlock - reuses the exact same
+			# event mechanic instead of a separate livestock-only system.
+			var pool := []
+			for k in unlocked_crops:
+				pool.append({"key": k, "kind": "crop"})
 			if unlocked_crops.size() > 0:
-				var key = unlocked_crops[randi() % unlocked_crops.size()]
+				pool.append({"key": LIVESTOCK_PRODUCT_KEYS[randi() % LIVESTOCK_PRODUCT_KEYS.size()], "kind": "livestock"})
+			if pool.size() > 0:
+				var pick = pool[randi() % pool.size()]
 				var mult = EVENT_MIN_MULT + randf() * (EVENT_MAX_MULT - EVENT_MIN_MULT)
 				var days = EVENT_MIN_DAYS + (randi() % (EVENT_MAX_DAYS - EVENT_MIN_DAYS + 1))
-				active_event = {"crop": key, "multiplier": mult, "days_left": days}
-				_log("Demand spike! %s is selling for %.1fx price for the next %d day(s)." % [CROPS[key]["name"], mult, days])
+				active_event = {"crop": pick["key"], "kind": pick["kind"], "multiplier": mult, "days_left": days}
+				_log("Demand spike! %s is selling for %.1fx price for the next %d day(s)." % [_event_target_name(), mult, days])
 	else:
 		active_event["days_left"] -= 1
 		if active_event["days_left"] <= 0:
-			_log("The demand spike for %s has ended." % CROPS[active_event["crop"]]["name"])
+			_log("The demand spike for %s has ended." % _event_target_name())
 			active_event = {}
 
 func _maintenance_cost(reg: Dictionary) -> int:
@@ -1325,6 +1853,7 @@ func _check_act_progress() -> void:
 		if not victory_shown and _owned_count() >= regions.size():
 			victory_shown = true
 			_show_victory_banner()
+			_play_sfx("act_complete")
 		return
 	var advanced = false
 	match current_act:
@@ -1346,6 +1875,7 @@ func _check_act_progress() -> void:
 		if not _crop_unlocked(selected_crop):
 			selected_crop = _act()["crops"][0]
 		_show_act_transition(current_act)
+		_play_sfx("act_complete")
 		_refresh_all()
 
 func _show_act_banner(idx: int) -> void:
@@ -1392,48 +1922,386 @@ func _add_button(parent: Node, text: String, pos: Vector2, size: Vector2, cb: Ca
 	parent.add_child(b)
 	return b
 
+# ---------- HUD v2 helpers ----------
+func _dp(v: float) -> float:
+	return v * UI_SCALE
+
+# Screen width/height expressed in the same dp space the design spec uses,
+# so positions below can be transcribed straight from the spec's numbers.
+func _screen_w_dp() -> float:
+	return 720.0 / UI_SCALE
+func _screen_h_dp() -> float:
+	return 1560.0 / UI_SCALE
+
+func _glass_style(bg_alpha: float, radius: float, border_alpha: float = 0.12) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(COL_GLASS_BG.r, COL_GLASS_BG.g, COL_GLASS_BG.b, bg_alpha)
+	sb.set_corner_radius_all(int(radius))
+	sb.set_border_width_all(1)
+	sb.border_color = Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, border_alpha)
+	sb.shadow_color = Color(0, 0, 0, 0.5)
+	sb.shadow_size = int(_dp(8))
+	return sb
+
+func _glass_panel(parent: Node, pos: Vector2, size: Vector2, radius: float, bg_alpha := 0.62, border_alpha := 0.12) -> Panel:
+	var p := Panel.new()
+	p.position = pos
+	p.size = size
+	p.add_theme_stylebox_override("panel", _glass_style(bg_alpha, radius, border_alpha))
+	parent.add_child(p)
+	return p
+
+func _solid_panel(parent: Node, pos: Vector2, size: Vector2, radius: float, color: Color, border_color := Color(0, 0, 0, 0), border_w := 0) -> Panel:
+	var p := Panel.new()
+	p.position = pos
+	p.size = size
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.set_corner_radius_all(int(radius))
+	if border_w > 0:
+		sb.set_border_width_all(border_w)
+		sb.border_color = border_color
+	p.add_theme_stylebox_override("panel", sb)
+	parent.add_child(p)
+	return p
+
+# A square Panel rotated 45deg reads as a diamond - used for the map rail
+# icon and the forecast chip's "frost" marker, matching the design spec's
+# own primitive-shape iconography (no image assets).
+func _diamond(parent: Node, center: Vector2, size: float, border_color: Color, filled: bool) -> Panel:
+	var p: Panel
+	if filled:
+		p = _solid_panel(parent, Vector2.ZERO, Vector2(size, size), size * 0.15, border_color)
+	else:
+		p = _solid_panel(parent, Vector2.ZERO, Vector2(size, size), size * 0.15, Color(0, 0, 0, 0), border_color, 2)
+	p.pivot_offset = Vector2(size, size) * 0.5
+	p.rotation = PI / 4.0
+	p.position = center - Vector2(size, size) * 0.5
+	return p
+
+func _circle(parent: Node, pos: Vector2, size: float, color: Color, border_color := Color(0, 0, 0, 0), border_w := 0) -> Panel:
+	return _solid_panel(parent, pos, Vector2(size, size), size * 0.5, color, border_color, border_w)
+
+# Coin pill, day/season pill, menu button, forecast chip, act card - the
+# always-visible top status stack, floating over the full-bleed 3D view.
+func _build_hud_top(layer: CanvasLayer) -> void:
+	var side = _dp(16)
+	var top_y = _dp(34)
+	var row1_h = _dp(36)
+
+	# A. Coin pill
+	var coin_w = _dp(80)
+	var coin_pill := _glass_panel(layer, Vector2(side, top_y), Vector2(coin_w, row1_h), row1_h * 0.5)
+	var coin_dot_sb := StyleBoxFlat.new()
+	coin_dot_sb.bg_color = Color(0.918, 0.706, 0.263) # midpoint of the spec's gold gradient
+	coin_dot_sb.set_corner_radius_all(int(_dp(10)))
+	coin_dot_sb.set_border_width_all(1)
+	coin_dot_sb.border_color = Color(1, 1, 1, 0.25)
+	var coin_dot := Panel.new()
+	coin_dot.position = Vector2(_dp(9), row1_h * 0.5 - _dp(10))
+	coin_dot.size = Vector2(_dp(20), _dp(20))
+	coin_dot.add_theme_stylebox_override("panel", coin_dot_sb)
+	coin_pill.add_child(coin_dot)
+	hud_cash = _add_label(coin_pill, "100", Vector2(_dp(33), row1_h * 0.5 - _dp(11)), Vector2(_dp(45), _dp(22)), int(_dp(15)), COL_CREAM)
+
+	# B. Day/season pill
+	var day_x = side + coin_w + _dp(9)
+	var day_w = _dp(155)
+	var day_pill := _glass_panel(layer, Vector2(day_x, top_y), Vector2(day_w, row1_h), row1_h * 0.5)
+	hud_day = _add_label(day_pill, "DAY 1", Vector2(_dp(14), row1_h * 0.5 - _dp(9)), Vector2(_dp(70), _dp(18)), int(_dp(12)), COL_CREAM)
+	_solid_panel(day_pill, Vector2(_dp(88), row1_h * 0.5 - _dp(6)), Vector2(1, _dp(12)), 0, Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.18))
+	hud_season = _add_label(day_pill, "Spring 1/7", Vector2(_dp(96), row1_h * 0.5 - _dp(9)), Vector2(_dp(60), _dp(18)), int(_dp(12)), COL_SEASON_FALL)
+
+	# C. Menu button - purely decorative in the design spec (no bound
+	# behavior in the prototype either; a future settings menu would live
+	# here).
+	var menu_size = _dp(38)
+	var menu_btn := _glass_panel(layer, Vector2(720.0 - side - menu_size, top_y), Vector2(menu_size, menu_size), menu_size * 0.5)
+	for i in range(3):
+		_circle(menu_btn, Vector2(menu_size * 0.5 - _dp(1.5), _dp(11) + i * _dp(6)), _dp(3), COL_CREAM)
+
+	# D. Forecast chip
+	var forecast_y = top_y + row1_h + _dp(9)
+	var forecast_w = _dp(180)
+	var forecast_h = _dp(27)
+	var forecast_chip := _glass_panel(layer, Vector2(side, forecast_y), Vector2(forecast_w, forecast_h), 999, 0.5, 0.09)
+	_diamond(forecast_chip, Vector2(_dp(17), forecast_h * 0.5), _dp(9), COL_WATER, true)
+	forecast_today_label = _add_label(forecast_chip, "Sunny today", Vector2(_dp(26), forecast_h * 0.5 - _dp(8)), Vector2(_dp(90), _dp(16)), int(_dp(11.5)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.9))
+	_add_label(forecast_chip, "→", Vector2(_dp(118), forecast_h * 0.5 - _dp(8)), Vector2(_dp(12), _dp(16)), int(_dp(11)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.35))
+	_circle(forecast_chip, Vector2(_dp(134), forecast_h * 0.5 - _dp(4.5)), _dp(9), COL_AMBER)
+	forecast_tomorrow_label = _add_label(forecast_chip, "Sunny", Vector2(_dp(147), forecast_h * 0.5 - _dp(8)), Vector2(_dp(60), _dp(16)), int(_dp(11.5)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.6))
+
+	# E. Act card
+	var act_y = forecast_y + forecast_h + _dp(9)
+	var act_w = 720.0 - side * 2.0
+	var act_h = _dp(78)
+	var act_card := _glass_panel(layer, Vector2(side, act_y), Vector2(act_w, act_h), _dp(16), 0.5, 0.09)
+	var pad = _dp(13)
+	act_roman_label = _add_label(act_card, "ACT I", Vector2(pad, _dp(11)), Vector2(_dp(50), _dp(14)), int(_dp(9.5)), COL_BERRY)
+	hud_act = _add_label(act_card, "First Harvest", Vector2(pad + _dp(46), _dp(9)), Vector2(_dp(160), _dp(18)), int(_dp(12.5)), COL_CREAM)
+	hud_dom = _add_label(act_card, "0% owned", Vector2(act_w - pad - _dp(90), _dp(11)), Vector2(_dp(90), _dp(14)), int(_dp(10.5)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.5))
+	hud_dom.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+	var bar_y = _dp(35)
+	act_progress_track_w = act_w - pad * 2.0
+	var bar_track := _solid_panel(act_card, Vector2(pad, bar_y), Vector2(act_progress_track_w, _dp(4)), _dp(2), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.12))
+	act_progress_fill = _solid_panel(bar_track, Vector2.ZERO, Vector2(0, _dp(4)), _dp(2), COL_BERRY)
+
+	var row2_y = bar_y + _dp(12)
+	act_farmname_label = _add_label(act_card, "Home Farm", Vector2(pad, row2_y), Vector2(_dp(115), _dp(16)), int(_dp(11)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.75))
+	act_tier_badge = _glass_panel(act_card, Vector2(pad + _dp(120), row2_y - _dp(1)), Vector2(_dp(70), _dp(18)), _dp(6), 0.09, 0.0)
+	act_tier_label = _add_label(act_tier_badge, "BASIC", Vector2(_dp(7), _dp(3)), Vector2(_dp(200), _dp(12)), int(_dp(9)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.6))
+
+	hud_farm = _add_label(act_card, "", Vector2(pad, row2_y + _dp(20)), Vector2(act_w - pad * 2.0, _dp(16)), int(_dp(10)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.6))
+
+# One 44x44 glass tile + micro label underneath, used by the right rail -
+# returns the tile Control so callers can toggle .visible.
+func _build_rail_tile(layer: CanvasLayer, pos: Vector2, label_text: String, cb: Callable) -> Control:
+	var tile_size = _dp(44)
+	var tile := _glass_panel(layer, pos, Vector2(tile_size, tile_size), _dp(15), 0.6)
+	var btn := Button.new()
+	btn.flat = true
+	btn.size = Vector2(tile_size, tile_size)
+	btn.pressed.connect(cb)
+	tile.add_child(btn)
+	# Parented to the tile (not the layer) so hiding the tile - e.g. the MAP
+	# tile before the World Map unlocks - hides its label too, instead of
+	# leaving the micro-label floating with no icon above it.
+	var label := _add_label(tile, label_text, Vector2(-_dp(18), tile_size + _dp(4)), Vector2(tile_size + _dp(36), _dp(12)), int(_dp(8)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.45))
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	return tile
+
+# Right rail: MAP / SHOP / FARM (livestock) - three quick-access tiles,
+# plus a small camera zoom rocker tucked underneath (not part of the
+# design spec, which has no zoom control, but this game already has one
+# and it needs a home somewhere out of the primary thumb zone).
+func _build_hud_rail(layer: CanvasLayer) -> void:
+	var tile_size = _dp(44)
+	var rail_x = 720.0 - _dp(14) - tile_size
+	var rail_y = _dp(264)
+	var pitch = tile_size + _dp(10) + _dp(16)
+
+	map_button = _build_rail_tile(layer, Vector2(rail_x, rail_y), "MAP", func(): _toggle_map())
+	_diamond(map_button, Vector2(tile_size, tile_size) * 0.5, _dp(15), COL_CREAM, false)
+
+	var shop_tile = _build_rail_tile(layer, Vector2(rail_x, rail_y + pitch), "SHOP", _open_inventory)
+	_circle(shop_tile, Vector2(tile_size, tile_size) * 0.5 - Vector2(_dp(8), _dp(8)), _dp(16), Color(0, 0, 0, 0), COL_CREAM, 2)
+	var badge := _glass_panel(shop_tile, Vector2(tile_size - _dp(11), -_dp(3)), Vector2(_dp(16), _dp(16)), _dp(8), 1.0, 0.0)
+	badge.add_theme_stylebox_override("panel", _solid_style(COL_ALERT, _dp(8)))
+	shop_badge_label = _add_label(badge, "0", Vector2(0, _dp(2)), Vector2(_dp(16), _dp(12)), int(_dp(9)), Color.WHITE)
+	shop_badge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	var farm_tile = _build_rail_tile(layer, Vector2(rail_x, rail_y + pitch * 2.0), "FARM", func(): _toggle_livestock_panel())
+	_solid_panel(farm_tile, Vector2(tile_size, tile_size) * 0.5 - Vector2(_dp(7), _dp(7)), Vector2(_dp(14), _dp(14)), _dp(4), Color(0, 0, 0, 0), COL_CREAM, 0).add_theme_stylebox_override("panel", _outline_style(_dp(4)))
+
+	# Zoom rocker - two small glass circles below the rail.
+	var zoom_size = _dp(32)
+	var zoom_y = rail_y + pitch * 3.0 + _dp(6)
+	var zoom_x = rail_x + (tile_size - zoom_size) * 0.5
+	var zoom_in := _glass_panel(layer, Vector2(zoom_x, zoom_y), Vector2(zoom_size, zoom_size), zoom_size * 0.5)
+	var zoom_in_btn := Button.new()
+	zoom_in_btn.flat = true
+	zoom_in_btn.size = Vector2(zoom_size, zoom_size)
+	zoom_in_btn.pressed.connect(func(): _adjust_camera_zoom(-CAM_ZOOM_STEP))
+	zoom_in.add_child(zoom_in_btn)
+	_add_label(zoom_in, "+", Vector2(0, zoom_size * 0.5 - _dp(10)), Vector2(zoom_size, _dp(20)), int(_dp(16)), COL_CREAM).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var zoom_out := _glass_panel(layer, Vector2(zoom_x, zoom_y + zoom_size + _dp(8)), Vector2(zoom_size, zoom_size), zoom_size * 0.5)
+	var zoom_out_btn := Button.new()
+	zoom_out_btn.flat = true
+	zoom_out_btn.size = Vector2(zoom_size, zoom_size)
+	zoom_out_btn.pressed.connect(func(): _adjust_camera_zoom(CAM_ZOOM_STEP))
+	zoom_out.add_child(zoom_out_btn)
+	_add_label(zoom_out, "-", Vector2(0, zoom_size * 0.5 - _dp(10)), Vector2(zoom_size, _dp(20)), int(_dp(16)), COL_CREAM).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+func _solid_style(color: Color, radius: float) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.set_corner_radius_all(int(radius))
+	return sb
+
+func _outline_style(radius: float) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0, 0, 0, 0)
+	sb.set_corner_radius_all(int(radius))
+	sb.set_border_width_all(2)
+	sb.border_color = COL_CREAM
+	return sb
+
+# Toast: a transient glass card confirming the last logged event. _log()
+# calls this so every existing _log() call site in the file surfaces here
+# with no other changes needed.
+func _build_hud_toast(layer: CanvasLayer) -> void:
+	var toast_w = _dp(280)
+	var toast_h = _dp(40)
+	var toast_x = (720.0 - toast_w) * 0.5
+	var toast_y = _screen_h_dp_px() - _dp(250) - toast_h
+	toast_panel = _glass_panel(layer, Vector2(toast_x, toast_y), Vector2(toast_w, toast_h), _dp(14), 0.82, 0.14)
+	toast_panel.visible = false
+	_circle(toast_panel, Vector2(_dp(14), toast_h * 0.5 - _dp(4)), _dp(8), COL_SEASON_FALL)
+	toast_label = _add_label(toast_panel, "", Vector2(_dp(30), toast_h * 0.5 - _dp(9)), Vector2(toast_w - _dp(40), _dp(18)), int(_dp(12.5)), COL_CREAM)
+	toast_timer = Timer.new()
+	toast_timer.one_shot = true
+	toast_timer.timeout.connect(func(): toast_panel.visible = false)
+	add_child(toast_timer)
+
+func _show_toast(msg: String, duration := 3.0) -> void:
+	if not toast_panel:
+		return
+	toast_label.text = msg
+	toast_panel.visible = true
+	toast_timer.start(duration)
+
+func _screen_h_dp_px() -> float:
+	return 1560.0
+
+# Empty 3-column grid positioned per spec - _refresh_tool_ui() populates it
+# with one glass card per unlocked tool (up to 5 once cure/fertilize
+# unlock, wrapping to a second row - the design spec only shows the 3
+# Act-1 tools, but the grid handles more the same way).
+func _build_tool_belt(layer: CanvasLayer) -> void:
+	# Bottom edge stays fixed at the spec's anchor regardless of row count;
+	# _refresh_tool_ui() grows the belt upward as more tools unlock (Act 2+
+	# adds Cure Spray and Fertilizer, wrapping past the spec's 3-tool row)
+	# so extra rows never collide with the controls below.
+	tool_belt_card_h = _dp(74)
+	tool_belt_side = _dp(16)
+	tool_belt_bottom_y = _screen_h_dp_px() - _dp(190)
+	tool_row = GridContainer.new()
+	tool_row.columns = 3
+	tool_row.position = Vector2(tool_belt_side, tool_belt_bottom_y - tool_belt_card_h)
+	tool_row.size = Vector2(720.0 - tool_belt_side * 2.0, tool_belt_card_h)
+	tool_row.add_theme_constant_override("h_separation", int(_dp(9)))
+	tool_row.add_theme_constant_override("v_separation", int(_dp(9)))
+	layer.add_child(tool_row)
+
+# Thumbstick (left) + Bag button and primary USE action button (right),
+# both inside natural thumb arcs at the bottom of the screen, plus the
+# home-indicator bar. Movement stays discrete (move_*_held booleans, same
+# as the old D-pad) - the stick is a drag surface that maps its angle to
+# up to two of those booleans (8-way), not a true analog input, since the
+# rest of the movement code only ever reads on/off directions.
+func _build_hud_controls(layer: CanvasLayer) -> void:
+	var bottom_y = _screen_h_dp_px() - _dp(34)
+	var side = _dp(20)
+
+	var stick_size = _dp(126)
+	thumbstick_base = _glass_panel(layer, Vector2(side, bottom_y - stick_size), Vector2(stick_size, stick_size), stick_size * 0.5, 0.35, 0.13)
+	thumbstick_base.mouse_filter = Control.MOUSE_FILTER_STOP
+	thumbstick_base.gui_input.connect(_on_thumbstick_input)
+	var knob_size = _dp(58)
+	thumbstick_knob = _solid_panel(thumbstick_base, (Vector2(stick_size, stick_size) - Vector2(knob_size, knob_size)) * 0.5, Vector2(knob_size, knob_size), knob_size * 0.5, Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.9))
+	thumbstick_knob.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var action_size = _dp(96)
+	var action_x = 720.0 - side - action_size
+	var action_y = bottom_y - action_size
+	action_button = _solid_panel(layer, Vector2(action_x, action_y), Vector2(action_size, action_size), action_size * 0.5, COL_AMBER_DEEP)
+	var action_btn := Button.new()
+	action_btn.flat = true
+	action_btn.size = Vector2(action_size, action_size)
+	action_btn.pressed.connect(func(): _do_action())
+	action_button.add_child(action_btn)
+	_add_label(action_button, "USE", Vector2(0, action_size * 0.5 - _dp(18)), Vector2(action_size, _dp(18)), int(_dp(15)), Color(0.125, 0.094, 0.039)).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	action_sublabel = _add_label(action_button, "Hoe", Vector2(0, action_size * 0.5 + _dp(2)), Vector2(action_size, _dp(14)), int(_dp(10.5)), Color(0.125, 0.094, 0.039, 0.7))
+	action_sublabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Pulsing ring - a slightly larger, borderless-fill glass circle behind
+	# the button, breathing via a looping Tween (Godot has no native CSS-
+	# keyframe equivalent, so this is the direct way to loop it).
+	var ring := _solid_panel(layer, Vector2(action_x, action_y) - Vector2(_dp(8), _dp(8)), Vector2(action_size + _dp(16), action_size + _dp(16)), (action_size + _dp(16)) * 0.5, Color(0, 0, 0, 0), COL_AMBER, 2)
+	layer.move_child(ring, layer.get_children().find(action_button))
+	var ring_tween := create_tween().set_loops()
+	ring_tween.tween_property(ring, "modulate:a", 0.15, 1.3).from(0.55)
+	ring_tween.tween_property(ring, "modulate:a", 0.55, 1.3)
+
+	var bag_size = _dp(56)
+	var bag_x = action_x - _dp(12) - bag_size
+	var bag_y = bottom_y - bag_size
+	bag_button = _glass_panel(layer, Vector2(bag_x, bag_y), Vector2(bag_size, bag_size), bag_size * 0.5, 0.62, 0.14)
+	var bag_btn := Button.new()
+	bag_btn.flat = true
+	bag_btn.size = Vector2(bag_size, bag_size)
+	bag_btn.pressed.connect(_open_inventory)
+	bag_button.add_child(bag_btn)
+	_solid_panel(bag_button, Vector2(bag_size, bag_size) * 0.5 - Vector2(_dp(9), _dp(7.5)), Vector2(_dp(18), _dp(15)), _dp(4), Color(0, 0, 0, 0), COL_CREAM, 0).add_theme_stylebox_override("panel", _outline_style(_dp(4)))
+	_add_label(layer, "BAG", Vector2(bag_x - _dp(10), bag_y + bag_size + _dp(4)), Vector2(bag_size + _dp(20), _dp(12)), int(_dp(8)), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.45)).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	# Home indicator
+	var home_w = _dp(120)
+	_solid_panel(layer, Vector2((720.0 - home_w) * 0.5, _screen_h_dp_px() - _dp(9) - _dp(4)), Vector2(home_w, _dp(4)), _dp(2), Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.3))
+
+func _on_thumbstick_input(event: InputEvent) -> void:
+	var stick_size = thumbstick_base.size
+	var center = stick_size * 0.5
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				thumbstick_dragging = true
+				_thumbstick_drag_to(event.position)
+			else:
+				thumbstick_dragging = false
+				_thumbstick_reset()
+	elif event is InputEventMouseMotion and thumbstick_dragging:
+		_thumbstick_drag_to(event.position)
+
+func _thumbstick_drag_to(local_pos: Vector2) -> void:
+	var stick_size = thumbstick_base.size
+	var center = stick_size * 0.5
+	var delta = local_pos - center
+	var max_radius = _dp(34)
+	if delta.length() > max_radius:
+		delta = delta.normalized() * max_radius
+	thumbstick_knob.position = center + delta - thumbstick_knob.size * 0.5
+	# 8-way octant from the drag angle - matches the old D-pad's discrete
+	# held-direction booleans so _handle_movement() needs no changes.
+	move_up_held = false
+	move_down_held = false
+	move_left_held = false
+	move_right_held = false
+	if delta.length() > _dp(14): # dead zone near center
+		var angle = delta.angle() # 0 = right, PI/2 = down (Godot's Y-down 2D space)
+		var deg = fmod(rad_to_deg(angle) + 360.0, 360.0)
+		move_right_held = deg <= 67.5 or deg > 292.5
+		if deg > 22.5 and deg <= 157.5:
+			move_down_held = true
+		if deg > 112.5 and deg <= 247.5:
+			move_left_held = true
+		if deg > 202.5 and deg <= 337.5:
+			move_up_held = true
+
+func _thumbstick_reset() -> void:
+	move_up_held = false
+	move_down_held = false
+	move_left_held = false
+	move_right_held = false
+	var stick_size = thumbstick_base.size
+	thumbstick_knob.position = (stick_size - thumbstick_knob.size) * 0.5
+
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 
 	_build_farm_view(layer)
 
-	# Top HUD
-	hud_cash = _add_label(layer, "$100", Vector2(16, 12), Vector2(140, 30), 24, Color(1, 0.85, 0.3))
-	hud_day = _add_label(layer, "Day 1", Vector2(160, 12), Vector2(110, 30), 22)
-	hud_dom = _add_label(layer, "0% owned", Vector2(280, 12), Vector2(160, 30), 18, Color(0.6, 0.85, 1))
-	hud_act = _add_label(layer, "Act 1", Vector2(450, 12), Vector2(260, 30), 18, Color(0.85, 0.7, 1))
-	hud_season = _add_label(layer, "", Vector2(16, 44), Vector2(680, 26), 16, Color(0.75, 0.85, 1))
-	hud_farm = _add_label(layer, "", Vector2(16, 70), Vector2(680, 24), 15, Color(0.7, 0.95, 0.75))
+	# HUD v2 - full-bleed world, floating glass chrome (see design_handoff_farm_hud/).
+	_build_hud_top(layer)
+	_build_hud_rail(layer)
+	_build_tool_belt(layer)
+	_build_hud_controls(layer)
+	_build_hud_toast(layer)
 
-	tool_label = _add_label(layer, "Tool: Hoe", Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 6), Vector2(640, 26), 20, Color(0.7, 0.9, 0.5))
-	log_label = _add_label(layer, log_text, Vector2(FARM_ORIGIN.x, FARM_ORIGIN.y + ROWS * TILE + 34), Vector2(640, 44), 16, Color(1, 0.8, 0.4))
-	log_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-
-	var tool_row_y = FARM_ORIGIN.y + ROWS * TILE + 86
-	tool_row = HBoxContainer.new()
-	tool_row.position = Vector2(FARM_ORIGIN.x, tool_row_y)
-	tool_row.add_theme_constant_override("separation", 8)
-	layer.add_child(tool_row)
-
-	var action_y = tool_row_y + 76
-	_add_button(layer, "Use Tool", Vector2(FARM_ORIGIN.x, action_y), Vector2(210, 72), func(): _do_action())
-	_add_button(layer, "Inventory", Vector2(FARM_ORIGIN.x + 222, action_y), Vector2(210, 72), _open_inventory)
-	map_button = _add_button(layer, "World Map", Vector2(FARM_ORIGIN.x + 444, action_y), Vector2(230, 72), func(): _toggle_map())
-
-	# On-screen D-pad - sized generously for real touchscreens, using the
-	# extra vertical space the 19.5:9-ish canvas leaves below the farm UI.
-	var dpad_button := 96
-	var dpad_step := dpad_button + 10
-	var dpad_y = action_y + 120
-	var dpad_x = FARM_ORIGIN.x + 60
-	_add_touch_button(layer, "^", Vector2(dpad_x + dpad_step, dpad_y), Vector2(dpad_button, dpad_button), func(p): move_up_held = p)
-	_add_touch_button(layer, "v", Vector2(dpad_x + dpad_step, dpad_y + dpad_step * 2), Vector2(dpad_button, dpad_button), func(p): move_down_held = p)
-	_add_touch_button(layer, "<", Vector2(dpad_x, dpad_y + dpad_step), Vector2(dpad_button, dpad_button), func(p): move_left_held = p)
-	_add_touch_button(layer, ">", Vector2(dpad_x + dpad_step * 2, dpad_y + dpad_step), Vector2(dpad_button, dpad_button), func(p): move_right_held = p)
+	# Kept for _log()/_refresh_tool_ui() compatibility - not part of the new
+	# visible chrome (messages surface as toasts; the active tool is shown
+	# by the tool belt's glow + the action button's sub-label instead).
+	tool_label = Label.new()
+	tool_label.visible = false
+	layer.add_child(tool_label)
+	log_label = Label.new()
+	log_label.visible = false
+	layer.add_child(log_label)
 
 	_build_inventory_panel(layer)
 	_build_map_panel(layer)
+	_build_livestock_panel(layer)
 	_build_act_banner(layer)
 	_build_update_banner(layer)
 	_build_intro_ui(layer)
@@ -1635,10 +2503,16 @@ func _build_inventory_panel(layer: CanvasLayer) -> void:
 	inventory_panel.add_child(seed_rows_container)
 
 	_add_label(inventory_panel, "Market", Vector2(20, 240), Vector2(400, 30), 24)
+	# Scrollable, same pattern as Upgrades below - each row now carries a
+	# trend arrow and a market-reason line on top of the existing quality
+	# breakdown, which no longer reliably fits 4 crops in a fixed-height box.
+	var market_scroll := ScrollContainer.new()
+	market_scroll.position = Vector2(20, 280)
+	market_scroll.size = Vector2(640, 220)
+	inventory_panel.add_child(market_scroll)
 	market_rows_container = VBoxContainer.new()
-	market_rows_container.position = Vector2(20, 280)
-	market_rows_container.size = Vector2(640, 220)
-	inventory_panel.add_child(market_rows_container)
+	market_rows_container.custom_minimum_size = Vector2(620, 0)
+	market_scroll.add_child(market_rows_container)
 
 	_add_label(inventory_panel, "Outbreak Status", Vector2(20, 520), Vector2(400, 30), 24)
 	blight_label = _add_label(inventory_panel, "No active blight.", Vector2(20, 560), Vector2(640, 60), 18)
@@ -1726,6 +2600,108 @@ func _build_map_panel(layer: CanvasLayer) -> void:
 	map_scroll_content.custom_minimum_size = Vector2(620, 0)
 	map_scroll.add_child(map_scroll_content)
 
+func _build_livestock_panel(layer: CanvasLayer) -> void:
+	livestock_panel = Panel.new()
+	livestock_panel.position = Vector2(20, 40)
+	livestock_panel.size = Vector2(680, 1480)
+	livestock_panel.visible = false
+	layer.add_child(livestock_panel)
+
+	_add_button(livestock_panel, "Close", Vector2(600, 10), Vector2(60, 40), func(): livestock_panel.visible = false)
+	_add_label(livestock_panel, "Livestock Ranch", Vector2(20, 10), Vector2(400, 30), 24)
+	_add_label(livestock_panel, "Feed comes from wheat/corn - its price rises and falls with theirs, so a grain shortage means pricier feed and pricier eggs/wool/milk/pork too.", Vector2(20, 50), Vector2(640, 50), 14, Color(0.7, 0.75, 0.7))
+
+	var feed_row := HBoxContainer.new()
+	feed_row.position = Vector2(20, 110)
+	livestock_panel.add_child(feed_row)
+	feed_label = Label.new()
+	feed_label.custom_minimum_size = Vector2(420, 0)
+	feed_row.add_child(feed_label)
+	var buy_feed_btn := Button.new()
+	buy_feed_btn.text = "Buy %d Feed" % FEED_BATCH_SIZE
+	buy_feed_btn.pressed.connect(func():
+		var cost = _feed_price_per_unit() * FEED_BATCH_SIZE
+		if cash >= cost:
+			cash -= cost
+			feed_stock += FEED_BATCH_SIZE
+			_log("Bought %d feed for $%d." % [FEED_BATCH_SIZE, cost])
+			_play_sfx("success")
+			_refresh_livestock_panel()
+		else:
+			_log("Need $%d for %d feed." % [cost, FEED_BATCH_SIZE])
+			_play_sfx("error")
+	)
+	feed_row.add_child(buy_feed_btn)
+
+	var livestock_scroll := ScrollContainer.new()
+	livestock_scroll.position = Vector2(20, 160)
+	livestock_scroll.size = Vector2(640, 1300)
+	livestock_panel.add_child(livestock_scroll)
+	livestock_rows_container = VBoxContainer.new()
+	livestock_rows_container.custom_minimum_size = Vector2(620, 0)
+	livestock_scroll.add_child(livestock_rows_container)
+
+func _toggle_livestock_panel() -> void:
+	livestock_panel.visible = not livestock_panel.visible
+	if livestock_panel.visible:
+		_refresh_livestock_panel()
+
+func _refresh_livestock_panel() -> void:
+	feed_label.text = "Feed in storage: %d  (buy price: $%d/unit)" % [feed_stock, _feed_price_per_unit()]
+
+	for child in livestock_rows_container.get_children():
+		child.queue_free()
+
+	for key in LIVESTOCK_KEYS:
+		var animal = LIVESTOCK[key]
+		var row := VBoxContainer.new()
+		var top_row := HBoxContainer.new()
+		var label := Label.new()
+		label.text = "%s  owned:%d  eats %d feed/day  buy $%d" % [animal["name"], livestock.get(key, 0), animal["feed_per_day"], animal["cost"]]
+		label.custom_minimum_size = Vector2(420, 0)
+		top_row.add_child(label)
+		var buy_btn := Button.new()
+		buy_btn.text = "Buy"
+		buy_btn.pressed.connect(func():
+			if cash >= animal["cost"]:
+				cash -= animal["cost"]
+				livestock[key] = livestock.get(key, 0) + 1
+				_log("Bought a %s." % animal["name"])
+				_play_sfx("success")
+				_refresh_all()
+			else:
+				_log("Need $%d for a %s." % [animal["cost"], animal["name"]])
+				_play_sfx("error")
+		)
+		top_row.add_child(buy_btn)
+		row.add_child(top_row)
+
+		var product = animal["product"]
+		var amount = livestock_goods.get(product, 0)
+		var sell_row := HBoxContainer.new()
+		var sell_label := Label.new()
+		var price = _livestock_sell_price(product)
+		var livestock_spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if (active_event.get("kind", "crop") == "livestock" and active_event.get("crop", "") == product) else ""
+		sell_label.text = "  %s: %d in storage ($%d ea)%s" % [animal["product_name"], amount, price, livestock_spike_tag]
+		sell_label.custom_minimum_size = Vector2(420, 0)
+		sell_label.add_theme_font_size_override("font_size", 15)
+		sell_row.add_child(sell_label)
+		var sell_btn := Button.new()
+		sell_btn.text = "Sell all"
+		sell_btn.disabled = amount == 0
+		sell_btn.pressed.connect(func():
+			var earnings = amount * price
+			cash += earnings
+			lifetime_earned += earnings
+			livestock_goods[product] = 0
+			_log("Sold %d %s for $%d." % [amount, animal["product_name"], earnings])
+			_play_sfx("success")
+			_refresh_all()
+		)
+		sell_row.add_child(sell_btn)
+		row.add_child(sell_row)
+		livestock_rows_container.add_child(row)
+
 func _open_inventory() -> void:
 	inventory_panel.visible = true
 	_refresh_inventory_panel()
@@ -1743,49 +2719,121 @@ func _toggle_map() -> void:
 		_refresh_map_panel()
 
 # ---------- UI refresh ----------
+const ACT_ROMAN := ["I", "II", "III", "IV"]
+
 func _refresh_all() -> void:
 	var owned_count = _owned_count()
-	hud_cash.text = "$%d" % cash
-	hud_day.text = "Day %d" % day
-	hud_dom.text = "%d%% owned" % int(round(100.0 * owned_count / regions.size()))
+	var owned_frac = float(owned_count) / float(regions.size())
+	hud_cash.text = "%d" % cash
+	hud_day.text = "DAY %d" % day
+	hud_season.text = "%s %d/%d" % [_season_name(), season_day + 1, SEASON_LENGTH]
+	forecast_today_label.text = "%s today" % WEATHER[current_weather]["name"]
+	forecast_tomorrow_label.text = WEATHER[forecast_weather]["name"]
+
+	act_roman_label.text = "ACT %s" % ACT_ROMAN[current_act]
 	hud_act.text = ACTS[current_act]["title"]
-	var event_suffix = ""
-	if not active_event.is_empty():
-		event_suffix = "  |  🔥 %s demand spike x%.1f (%dd left)" % [
-			CROPS[active_event["crop"]]["name"], active_event["multiplier"], active_event["days_left"],
-		]
-	hud_season.text = "%s (day %d/%d) - %s %s  |  Tomorrow: %s %s%s" % [
-		_season_name(), season_day + 1, SEASON_LENGTH,
-		WEATHER[current_weather]["emoji"], WEATHER[current_weather]["name"],
-		WEATHER[forecast_weather]["emoji"], WEATHER[forecast_weather]["name"],
-		event_suffix,
-	]
+	hud_dom.text = "%d%% owned" % int(round(100.0 * owned_frac))
+	act_progress_fill.size = Vector2(act_progress_track_w * clamp(owned_frac, 0.0, 1.0), act_progress_fill.size.y)
+
 	var terrain = _terrain_for_plot(active_plot_id)
-	var tier_idx = _farm_tier_index()
-	var tier_bonus_tag = ("  (+%d%% sell price)" % int(round(TIER_PRICE_BONUS_PER_LEVEL * tier_idx * 100))) if tier_idx > 0 else ""
-	hud_farm.text = "Farming: %s%s  |  Tier: %s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain, _farm_tier_name(), tier_bonus_tag]
+	act_farmname_label.text = "%s%s" % [_plot_display_name(active_plot_id), "" if active_plot_id == "home" else " (%s)" % terrain]
+	var tier_text = _farm_tier_name().to_upper()
+	act_tier_label.text = tier_text
+	act_tier_badge.size.x = max(_dp(70), tier_text.length() * _dp(6.4) + _dp(14))
+
+	var livestock_total = _livestock_total()
+	if livestock_total > 0:
+		var feed_needed_per_day = _feed_needed_per_day()
+		var feed_warning = "  ⚠ low feed" if feed_stock < feed_needed_per_day else ""
+		hud_farm.text = "🐄 %d livestock, feed:%d%s" % [livestock_total, feed_stock, feed_warning]
+	else:
+		hud_farm.text = ""
+
+	var badge_count = _shop_badge_count()
+	if shop_badge_label:
+		shop_badge_label.get_parent().visible = badge_count > 0
+		shop_badge_label.text = "9+" if badge_count > 9 else str(badge_count)
+
 	map_button.visible = _act()["continents"].size() > 0
 	_refresh_tool_ui()
 	_refresh_inventory_panel()
 	if map_panel and map_panel.visible:
 		_refresh_map_panel()
+	if livestock_panel and livestock_panel.visible:
+		_refresh_livestock_panel()
+
+# Number of distinct sellable stock types currently in storage (produce,
+# processed goods, livestock goods) - shown as the SHOP rail tile's badge,
+# a genuinely useful "things you could go sell" count rather than the
+# design spec's static placeholder "2".
+func _shop_badge_count() -> int:
+	var count := 0
+	for key in CROP_KEYS:
+		if _produce_total(key) > 0:
+			count += 1
+	for key in PROCESSED_KEYS:
+		if processed_goods[key] > 0:
+			count += 1
+	for key in LIVESTOCK_PRODUCT_KEYS:
+		if livestock_goods[key] > 0:
+			count += 1
+	return count
 
 func _refresh_tool_ui() -> void:
 	tool_label.text = "Tool: %s %s" % [TOOLS[selected_tool]["emoji"], TOOLS[selected_tool]["name"]]
+	if action_sublabel:
+		action_sublabel.text = TOOLS[selected_tool]["name"]
 	for child in tool_row.get_children():
 		child.queue_free()
 	tool_buttons.clear()
+	var card_h = _dp(74)
+
+	var unlocked_count = TOOL_KEYS.filter(func(k): return _tool_unlocked(k)).size()
+	var rows = int(ceil(float(unlocked_count) / float(tool_row.columns)))
+	var belt_h = rows * card_h + max(0, rows - 1) * _dp(9)
+	tool_row.position.y = tool_belt_bottom_y - belt_h
+	tool_row.size.y = belt_h
+	if toast_panel:
+		toast_panel.position.y = tool_row.position.y - _dp(20) - toast_panel.size.y
+
 	for key in TOOL_KEYS:
 		if not _tool_unlocked(key):
 			continue
 		var t = TOOLS[key]
+		var card := Panel.new()
+		card.custom_minimum_size = Vector2(0, card_h)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.add_theme_stylebox_override("panel", _glass_style(0.62, _dp(18), 0.11))
 		var btn := Button.new()
-		btn.text = "%s %s" % [t["emoji"], t["name"]]
-		btn.custom_minimum_size = Vector2(170, 64)
+		btn.flat = true
+		btn.anchor_right = 1.0
+		btn.anchor_bottom = 1.0
 		btn.pressed.connect(func(): _select_tool(key))
-		btn.modulate = Color(1, 1, 0.6) if key == selected_tool else Color(1, 1, 1)
-		tool_row.add_child(btn)
-		tool_buttons[key] = btn
+		card.add_child(btn)
+		var glyph := _add_label(card, t["emoji"], Vector2(0, card_h * 0.5 - _dp(22)), Vector2.ZERO, int(_dp(20)), COL_CREAM)
+		glyph.size = Vector2(0, _dp(24))
+		glyph.anchor_right = 1.0
+		glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		var name_label := _add_label(card, t["name"], Vector2(0, card_h * 0.5 + _dp(4)), Vector2.ZERO, int(_dp(11.5)), COL_CREAM)
+		name_label.size = Vector2(0, _dp(16))
+		name_label.anchor_right = 1.0
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		if key == selected_tool:
+			var glow_sb := StyleBoxFlat.new()
+			glow_sb.bg_color = Color(0, 0, 0, 0)
+			glow_sb.set_corner_radius_all(int(_dp(18)))
+			glow_sb.set_border_width_all(2)
+			glow_sb.border_color = COL_AMBER
+			glow_sb.shadow_color = Color(COL_AMBER.r, COL_AMBER.g, COL_AMBER.b, 0.55)
+			glow_sb.shadow_size = int(_dp(10))
+			var glow := Panel.new()
+			glow.anchor_right = 1.0
+			glow.anchor_bottom = 1.0
+			glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			glow.add_theme_stylebox_override("panel", glow_sb)
+			card.add_child(glow)
+		tool_row.add_child(card)
+		tool_buttons[key] = card
 
 func _refresh_inventory_panel() -> void:
 	for child in seed_rows_container.get_children():
@@ -1838,9 +2886,9 @@ func _refresh_inventory_panel() -> void:
 		var top_row := HBoxContainer.new()
 		var label := Label.new()
 		var eff_price = _effective_price(key)
-		var spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if active_event.get("crop", "") == key else ""
+		var spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if (active_event.get("kind", "crop") == "crop" and active_event.get("crop", "") == key) else ""
 		var total = _produce_total(key)
-		label.text = "%s  seeds:%d  produce:%d/%d  $%d base%s" % [crop["name"], seeds[key], total, storage_cap, eff_price, spike_tag]
+		label.text = "%s  seeds:%d  produce:%d/%d  $%d base %s" % [crop["name"], seeds[key], total, storage_cap, eff_price, _trend_arrow(key)] + spike_tag
 		label.custom_minimum_size = Vector2(420, 0)
 		top_row.add_child(label)
 		var sell_btn := Button.new()
@@ -1859,12 +2907,19 @@ func _refresh_inventory_panel() -> void:
 				produce[key][q] = 0
 			cash += earnings
 			lifetime_earned += earnings
+			oversupply_pressure[key] = min(2.0, oversupply_pressure.get(key, 0.0) + amount * OVERSUPPLY_PER_UNIT)
 			_log("Sold %d %s for $%d." % [amount, crop["name"], earnings])
+			_play_sfx("success")
 			_check_act_progress()
 			_refresh_all()
 		)
 		top_row.add_child(sell_btn)
 		row.add_child(top_row)
+		var reason_label := Label.new()
+		reason_label.text = "  " + _market_reason(key)
+		reason_label.add_theme_font_size_override("font_size", 13)
+		reason_label.add_theme_color_override("font_color", Color(0.65, 0.7, 0.8))
+		row.add_child(reason_label)
 		var quality_parts := []
 		for q in QUALITY_KEYS:
 			if produce[key][q] > 0:
@@ -1893,7 +2948,7 @@ func _refresh_inventory_panel() -> void:
 			var batches = _process_batches_available(key)
 			var row := HBoxContainer.new()
 			var label := Label.new()
-			label.text = "%d %s -> 1 %s (sells $%d)" % [recipe["input_amount"], CROPS[key]["name"], recipe["product_name"], recipe["price"]]
+			label.text = "%d %s -> 1 %s (sells $%d)" % [recipe["input_amount"], CROPS[key]["name"], recipe["product_name"], _effective_processed_price(key)]
 			label.custom_minimum_size = Vector2(420, 0)
 			row.add_child(label)
 			var process_btn := Button.new()
@@ -1906,11 +2961,12 @@ func _refresh_inventory_panel() -> void:
 			var amount = processed_goods[product]
 			if amount <= 0:
 				continue
-			var price = 0
+			var source_key = ""
 			for key in CROP_KEYS:
 				if PROCESSING[key]["product"] == product:
-					price = PROCESSING[key]["price"]
+					source_key = key
 					break
+			var price = _effective_processed_price(source_key)
 			var row2 := HBoxContainer.new()
 			var label2 := Label.new()
 			label2.text = "In storage: %s x%d ($%d ea)" % [product.capitalize(), amount, price]
@@ -1923,7 +2979,12 @@ func _refresh_inventory_panel() -> void:
 				cash += earnings
 				lifetime_earned += earnings
 				processed_goods[product] = 0
+				# Processed goods still come from the source crop's supply, just
+				# at half weight since converting it already took the raw units
+				# out of the produce market.
+				oversupply_pressure[source_key] = min(2.0, oversupply_pressure.get(source_key, 0.0) + amount * OVERSUPPLY_PER_UNIT * 0.5)
 				_log("Sold %d %s for $%d." % [amount, product.capitalize(), earnings])
+				_play_sfx("success")
 				_refresh_all()
 			)
 			row2.add_child(sell_btn2)
@@ -2163,6 +3224,8 @@ func _save_game() -> void:
 		"owned_upgrades": owned_upgrades, "active_event": active_event,
 		"player_x": player_pos.x, "player_y": player_pos.y,
 		"farm_name": farm_name,
+		"oversupply_pressure": oversupply_pressure, "world_supply_index": world_supply_index,
+		"livestock": livestock, "feed_stock": feed_stock, "livestock_goods": livestock_goods,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -2207,6 +3270,22 @@ func _load_game() -> void:
 	for key in CROP_KEYS:
 		if not prices.has(key):
 			prices[key] = CROPS[key]["base_price"]
+	oversupply_pressure = parsed.get("oversupply_pressure", oversupply_pressure)
+	world_supply_index = parsed.get("world_supply_index", world_supply_index)
+	for key in CROP_KEYS:
+		if not oversupply_pressure.has(key):
+			oversupply_pressure[key] = 0.0
+		if not world_supply_index.has(key):
+			world_supply_index[key] = 1.0
+	livestock = parsed.get("livestock", livestock)
+	for key in LIVESTOCK_KEYS:
+		if not livestock.has(key):
+			livestock[key] = 0
+	feed_stock = int(parsed.get("feed_stock", feed_stock))
+	livestock_goods = parsed.get("livestock_goods", livestock_goods)
+	for key in LIVESTOCK_PRODUCT_KEYS:
+		if not livestock_goods.has(key):
+			livestock_goods[key] = 0
 	selected_crop = parsed.get("selected_crop", selected_crop)
 	selected_tool = parsed.get("selected_tool", selected_tool)
 	current_act = clampi(int(parsed.get("current_act", current_act)), 0, ACTS.size() - 1)
@@ -2224,8 +3303,13 @@ func _load_game() -> void:
 		forecast_weather = "sunny"
 	owned_upgrades = parsed.get("owned_upgrades", owned_upgrades)
 	active_event = parsed.get("active_event", active_event)
-	if not (active_event.is_empty() or (active_event.has("crop") and CROPS.has(active_event["crop"]))):
-		active_event = {}
+	if not active_event.is_empty():
+		var event_valid = active_event.has("crop")
+		if event_valid:
+			event_valid = (active_event.get("kind", "crop") == "livestock" and LIVESTOCK_PRODUCT_KEYS.has(active_event["crop"])) \
+				or (active_event.get("kind", "crop") == "crop" and CROPS.has(active_event["crop"]))
+		if not event_valid:
+			active_event = {}
 	if parsed.has("regions"):
 		var loaded_regions = parsed["regions"]
 		# `regions` here still holds the freshly initialized real-world roster
@@ -2293,6 +3377,11 @@ func _reset_game() -> void:
 	}
 	processed_goods = {"flour": 0, "cornmeal": 0, "sauce": 0, "pumpkin_pie": 0}
 	prices = {"wheat": 10, "corn": 22, "tomato": 45, "pumpkin": 70}
+	oversupply_pressure = {"wheat": 0.0, "corn": 0.0, "tomato": 0.0, "pumpkin": 0.0}
+	world_supply_index = {"wheat": 1.0, "corn": 1.0, "tomato": 1.0, "pumpkin": 1.0}
+	livestock = {"chicken": 0, "sheep": 0, "cow": 0, "pig": 0}
+	feed_stock = 0
+	livestock_goods = {"eggs": 0, "wool": 0, "milk": 0, "pork": 0}
 	selected_crop = "wheat"
 	selected_tool = "hoe"
 	current_act = 0
@@ -2308,6 +3397,7 @@ func _reset_game() -> void:
 	_refresh_all()
 	inventory_panel.visible = false
 	map_panel.visible = false
+	livestock_panel.visible = false
 	_log("Game reset.")
 	# Route back through the same naming screen + Kacie intro a truly new
 	# game gets, rather than the old plain Act 1 banner - a manual reset
