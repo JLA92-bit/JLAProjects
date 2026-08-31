@@ -860,6 +860,16 @@ func _adjust_camera_zoom(step: float) -> void:
 	cam_zoom = clamp(cam_zoom + step, CAM_ZOOM_MIN, CAM_ZOOM_MAX)
 	farm_camera.size = cam_base_size * cam_zoom
 
+# One tap on the rail's ZOOM tile steps in; once it can't step in any
+# further, the next tap wraps back out to the max (least zoomed-in) level
+# instead of just sitting stuck at the limit.
+func _cycle_camera_zoom() -> void:
+	if cam_zoom - CAM_ZOOM_STEP < CAM_ZOOM_MIN - 0.001:
+		cam_zoom = CAM_ZOOM_MAX
+	else:
+		cam_zoom = max(CAM_ZOOM_MIN, cam_zoom - CAM_ZOOM_STEP)
+	farm_camera.size = cam_base_size * cam_zoom
+
 func _build_farm_grid():
 	tile_nodes.clear()
 	for r in range(ROWS):
@@ -1984,6 +1994,45 @@ func _circle(parent: Node, pos: Vector2, size: float, color: Color, border_color
 
 # Coin pill, day/season pill, menu button, forecast chip, act card - the
 # always-visible top status stack, floating over the full-bleed 3D view.
+# Two gradient scrims over the render surface (top for the status stack,
+# bottom for the tool belt/controls) so cream HUD text stays legible over
+# a bright noon field - added first so every other HUD element draws on
+# top of them.
+func _build_hud_scrims(layer: CanvasLayer) -> void:
+	var top_scrim := ColorRect.new()
+	top_scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_scrim.size = Vector2(720, _dp(230))
+	var top_grad := Gradient.new()
+	top_grad.set_color(0, Color(0.031, 0.047, 0.039, 0.72))
+	top_grad.set_color(1, Color(0.031, 0.047, 0.039, 0.0))
+	var top_tex := GradientTexture2D.new()
+	top_tex.gradient = top_grad
+	top_tex.fill_from = Vector2(0, 0)
+	top_tex.fill_to = Vector2(0, 1)
+	var top_rect := TextureRect.new()
+	top_rect.texture = top_tex
+	top_rect.size = top_scrim.size
+	top_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	top_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(top_rect)
+
+	var bottom_h = _dp(420)
+	var bottom_grad := Gradient.new()
+	bottom_grad.set_color(0, Color(0.031, 0.047, 0.039, 0.0))
+	bottom_grad.add_point(0.28, Color(0.031, 0.047, 0.039, 0.0))
+	bottom_grad.set_color(1, Color(0.031, 0.047, 0.039, 0.86))
+	var bottom_tex := GradientTexture2D.new()
+	bottom_tex.gradient = bottom_grad
+	bottom_tex.fill_from = Vector2(0, 0)
+	bottom_tex.fill_to = Vector2(0, 1)
+	var bottom_rect := TextureRect.new()
+	bottom_rect.texture = bottom_tex
+	bottom_rect.position = Vector2(0, 1560.0 - bottom_h)
+	bottom_rect.size = Vector2(720, bottom_h)
+	bottom_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	bottom_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(bottom_rect)
+
 func _build_hud_top(layer: CanvasLayer) -> void:
 	var side = _dp(16)
 	var top_y = _dp(34)
@@ -2094,24 +2143,13 @@ func _build_hud_rail(layer: CanvasLayer) -> void:
 	var farm_tile = _build_rail_tile(layer, Vector2(rail_x, rail_y + pitch * 2.0), "FARM", func(): _toggle_livestock_panel())
 	_solid_panel(farm_tile, Vector2(tile_size, tile_size) * 0.5 - Vector2(_dp(7), _dp(7)), Vector2(_dp(14), _dp(14)), _dp(4), Color(0, 0, 0, 0), COL_CREAM, 0).add_theme_stylebox_override("panel", _outline_style(_dp(4)))
 
-	# Zoom rocker - two small glass circles below the rail.
-	var zoom_size = _dp(32)
-	var zoom_y = rail_y + pitch * 3.0 + _dp(6)
-	var zoom_x = rail_x + (tile_size - zoom_size) * 0.5
-	var zoom_in := _glass_panel(layer, Vector2(zoom_x, zoom_y), Vector2(zoom_size, zoom_size), zoom_size * 0.5)
-	var zoom_in_btn := Button.new()
-	zoom_in_btn.flat = true
-	zoom_in_btn.size = Vector2(zoom_size, zoom_size)
-	zoom_in_btn.pressed.connect(func(): _adjust_camera_zoom(-CAM_ZOOM_STEP))
-	zoom_in.add_child(zoom_in_btn)
-	_add_label(zoom_in, "+", Vector2(0, zoom_size * 0.5 - _dp(10)), Vector2(zoom_size, _dp(20)), int(_dp(16)), COL_CREAM).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var zoom_out := _glass_panel(layer, Vector2(zoom_x, zoom_y + zoom_size + _dp(8)), Vector2(zoom_size, zoom_size), zoom_size * 0.5)
-	var zoom_out_btn := Button.new()
-	zoom_out_btn.flat = true
-	zoom_out_btn.size = Vector2(zoom_size, zoom_size)
-	zoom_out_btn.pressed.connect(func(): _adjust_camera_zoom(CAM_ZOOM_STEP))
-	zoom_out.add_child(zoom_out_btn)
-	_add_label(zoom_out, "-", Vector2(0, zoom_size * 0.5 - _dp(10)), Vector2(zoom_size, _dp(20)), int(_dp(16)), COL_CREAM).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Camera zoom - not part of the design spec (which has no zoom control),
+	# but this game already has one; per design feedback it joins the rail
+	# as a fourth same-sized tile rather than ad-hoc floating +/- circles.
+	# One tap cycles zoom in a step, wrapping back out once it hits the max.
+	var zoom_tile = _build_rail_tile(layer, Vector2(rail_x, rail_y + pitch * 3.0), "ZOOM", func(): _cycle_camera_zoom())
+	_circle(zoom_tile, Vector2(tile_size, tile_size) * 0.5 - Vector2(_dp(6), _dp(6)), _dp(12), Color(0, 0, 0, 0), COL_CREAM, 2)
+	_solid_panel(zoom_tile, Vector2(tile_size * 0.5 + _dp(4), tile_size * 0.5 + _dp(4)), Vector2(_dp(7), 2), 0, COL_CREAM)
 
 func _solid_style(color: Color, radius: float) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
@@ -2283,6 +2321,7 @@ func _build_ui() -> void:
 	_build_farm_view(layer)
 
 	# HUD v2 - full-bleed world, floating glass chrome (see design_handoff_farm_hud/).
+	_build_hud_scrims(layer)
 	_build_hud_top(layer)
 	_build_hud_rail(layer)
 	_build_tool_belt(layer)
@@ -2453,17 +2492,34 @@ func _advance_intro_dialog() -> void:
 		return
 	_show_intro_dialog_page()
 
+# Restyled to match the glass HUD - a dim backdrop behind a rounded card,
+# same visual language as every other floating surface, instead of the
+# old flat unstyled box (a jarring "2015 dialog" moment on a player's
+# very first launch, since this doubles as the Act 1 welcome screen).
 func _build_act_banner(layer: CanvasLayer) -> void:
 	act_banner = Panel.new()
-	act_banner.position = Vector2(40, 300)
-	act_banner.size = Vector2(640, 500)
+	act_banner.position = Vector2.ZERO
+	act_banner.size = Vector2(720, 1560)
 	act_banner.visible = false
+	act_banner.add_theme_stylebox_override("panel", _solid_style(Color(0.031, 0.047, 0.039, 0.7), 0))
 	layer.add_child(act_banner)
 
-	act_banner_title = _add_label(act_banner, "", Vector2(24, 24), Vector2(590, 40), 26, Color(1, 0.85, 0.3))
-	act_banner_body = _add_label(act_banner, "", Vector2(24, 80), Vector2(590, 340), 18)
+	var card_w = 640.0
+	var card_x = (720.0 - card_w) * 0.5
+	var card := _glass_panel(act_banner, Vector2(card_x, 300), Vector2(card_w, 500), _dp(22), 0.7, 0.13)
+	act_banner_title = _add_label(card, "", Vector2(24, 24), Vector2(card_w - 48, 40), 26, COL_CREAM)
+	act_banner_body = _add_label(card, "", Vector2(24, 80), Vector2(card_w - 48, 340), 18, Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.75))
 	act_banner_body.autowrap_mode = TextServer.AUTOWRAP_WORD
-	_add_button(act_banner, "Continue", Vector2(24, 430), Vector2(200, 56), func(): act_banner.visible = false)
+
+	var continue_btn := _solid_panel(card, Vector2(24, 430), Vector2(card_w - 48, 56), _dp(15), COL_AMBER_DEEP)
+	var continue_click := Button.new()
+	continue_click.flat = true
+	continue_click.size = continue_btn.size
+	continue_click.pressed.connect(func(): act_banner.visible = false)
+	continue_btn.add_child(continue_click)
+	var continue_label := _add_label(continue_btn, "Continue", Vector2.ZERO, continue_btn.size, 20, Color(0.125, 0.094, 0.039))
+	continue_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	continue_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 func _build_update_banner(layer: CanvasLayer) -> void:
 	update_banner = Panel.new()
