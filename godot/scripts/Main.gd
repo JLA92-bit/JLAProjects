@@ -381,6 +381,13 @@ var world_root: Node3D
 var tile_nodes := [] # 2D array of {"node":Node3D, "ground":Node3D, "ground_key":String, "crop":Node3D}
 var player_node: Node3D
 var player_skin_material: StandardMaterial3D
+var tile_highlight: MeshInstance3D
+var farm_camera: Camera3D
+var cam_base_size: float
+var cam_zoom := 1.0
+const CAM_ZOOM_MIN := 0.55
+const CAM_ZOOM_MAX := 1.7
+const CAM_ZOOM_STEP := 0.15
 var sfx_player: AudioStreamPlayer
 var sfx := {} # key -> AudioStream
 var footstep_player: AudioStreamPlayer # separate from sfx_player so walking never cuts off a tool-use/harvest sound
@@ -725,7 +732,8 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 
 	var cam := Camera3D.new()
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-	cam.size = COLS * WORLD_TILE * 1.7
+	cam_base_size = COLS * WORLD_TILE * 1.7
+	cam.size = cam_base_size * cam_zoom
 	var center := Vector3((COLS - 1) * WORLD_TILE * 0.5, 0, (ROWS - 1) * WORLD_TILE * 0.5)
 	# The camera offset's height (the "7") has to grow with cam.size, not stay
 	# fixed: for this fixed viewing angle, an orthogonal camera's bottom-row
@@ -740,6 +748,11 @@ func _build_farm_view(layer: CanvasLayer) -> void:
 	world_root.add_child(cam)
 	cam.look_at(center, Vector3.UP)
 	cam.current = true
+	farm_camera = cam
+
+func _adjust_camera_zoom(step: float) -> void:
+	cam_zoom = clamp(cam_zoom + step, CAM_ZOOM_MIN, CAM_ZOOM_MAX)
+	farm_camera.size = cam_base_size * cam_zoom
 
 func _build_farm_grid():
 	tile_nodes.clear()
@@ -847,6 +860,23 @@ func _build_player():
 	player_node.scale = Vector3.ONE * PLAYER_SCALE
 	_apply_player_skin(player_node)
 	world_root.add_child(player_node)
+	_build_tile_highlight()
+
+# A bright, semi-transparent quad marking the tile a tool use (or harvest)
+# will actually land on - sized slightly smaller than a full tile so the
+# grid line still shows as a border around it.
+func _build_tile_highlight() -> void:
+	tile_highlight = MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(WORLD_TILE * 0.92, WORLD_TILE * 0.92)
+	tile_highlight.mesh = plane
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.95, 0.15, 0.7)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	tile_highlight.material_override = mat
+	world_root.add_child(tile_highlight)
 
 func _apply_player_skin(node: Node) -> void:
 	if node is MeshInstance3D:
@@ -862,6 +892,7 @@ func _process(delta: float) -> void:
 		day_progress = 0.0
 		_day_tick()
 	_update_player_visual()
+	_update_tile_highlight()
 
 func _handle_movement(delta: float) -> void:
 	var dir := Vector2.ZERO
@@ -909,6 +940,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			KEY_3: _select_tool("seed")
 			KEY_4: _select_tool("cure")
 			KEY_5: _select_tool("fertilize")
+			KEY_EQUAL, KEY_KP_ADD: _adjust_camera_zoom(-CAM_ZOOM_STEP)
+			KEY_MINUS, KEY_KP_SUBTRACT: _adjust_camera_zoom(CAM_ZOOM_STEP)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_adjust_camera_zoom(-CAM_ZOOM_STEP * 0.5)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_adjust_camera_zoom(CAM_ZOOM_STEP * 0.5)
 
 func _facing_tile() -> Vector2i:
 	var tx := int(round(player_pos.x / TILE))
@@ -919,6 +959,17 @@ func _facing_tile() -> Vector2i:
 		"left": tx -= 1
 		"right": tx += 1
 	return Vector2i(tx, ty)
+
+# Shows the player where a tool will land before they commit to using it -
+# updated every frame alongside the player's own position/facing so it
+# never lags a step behind while moving.
+func _update_tile_highlight() -> void:
+	var f := _facing_tile()
+	if f.x < 0 or f.y < 0 or f.x >= COLS or f.y >= ROWS:
+		tile_highlight.visible = false
+		return
+	tile_highlight.visible = true
+	tile_highlight.position = Vector3(f.x * WORLD_TILE, 0.02, f.y * WORLD_TILE)
 
 # ---------- Tools & actions ----------
 func _select_tool(key: String) -> void:
@@ -1622,6 +1673,14 @@ func _build_ui() -> void:
 	_add_touch_button(layer, "v", Vector2(dpad_x + dpad_step, dpad_y + dpad_step * 2), Vector2(dpad_button, dpad_button), func(p): move_down_held = p)
 	_add_touch_button(layer, "<", Vector2(dpad_x, dpad_y + dpad_step), Vector2(dpad_button, dpad_button), func(p): move_left_held = p)
 	_add_touch_button(layer, ">", Vector2(dpad_x + dpad_step * 2, dpad_y + dpad_step), Vector2(dpad_button, dpad_button), func(p): move_right_held = p)
+
+	# Camera zoom - a small rocker to the right of the D-pad. Mouse wheel also
+	# works (see _unhandled_input) for desktop testing, but touch is the
+	# primary target so this is the real control.
+	var zoom_button := 64
+	var zoom_x = dpad_x + dpad_step * 3 + 40
+	_add_button(layer, "+", Vector2(zoom_x, dpad_y + dpad_step * 0.5), Vector2(zoom_button, zoom_button), func(): _adjust_camera_zoom(-CAM_ZOOM_STEP))
+	_add_button(layer, "-", Vector2(zoom_x, dpad_y + dpad_step * 0.5 + zoom_button + 10), Vector2(zoom_button, zoom_button), func(): _adjust_camera_zoom(CAM_ZOOM_STEP))
 
 	_build_inventory_panel(layer)
 	_build_map_panel(layer)
