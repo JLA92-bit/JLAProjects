@@ -547,6 +547,7 @@ func _load_audio() -> void:
 	sfx["success"] = load(AUD + "success.ogg")
 	sfx["error"] = load(AUD + "error.ogg")
 	sfx["click"] = load(AUD + "click.ogg")
+	sfx["act_complete"] = load(AUD + "act_complete.ogg")
 	sfx_player = AudioStreamPlayer.new()
 	add_child(sfx_player)
 
@@ -1499,6 +1500,7 @@ func _check_act_progress() -> void:
 		if not victory_shown and _owned_count() >= regions.size():
 			victory_shown = true
 			_show_victory_banner()
+			_play_sfx("act_complete")
 		return
 	var advanced = false
 	match current_act:
@@ -1520,6 +1522,7 @@ func _check_act_progress() -> void:
 		if not _crop_unlocked(selected_crop):
 			selected_crop = _act()["crops"][0]
 		_show_act_transition(current_act)
+		_play_sfx("act_complete")
 		_refresh_all()
 
 func _show_act_banner(idx: int) -> void:
