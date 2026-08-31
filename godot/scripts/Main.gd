@@ -1555,7 +1555,7 @@ func _update_crop_prices() -> void:
 # so the causes above stay visible to the player instead of just moving a
 # number - checked in priority order from most to least specific.
 func _market_reason(key: String) -> String:
-	if active_event.get("crop", "") == key:
+	if active_event.get("kind", "crop") == "crop" and active_event.get("crop", "") == key:
 		return "Demand spike in effect!"
 	var idx = world_supply_index.get(key, 1.0)
 	if idx <= 0.8:
@@ -1576,7 +1576,7 @@ func _effective_price(key: String) -> int:
 	bonus_mult += REGIONAL_DEMAND_PER_REGION * _owned_count()
 	var oversupply_mult = clamp(1.0 - oversupply_pressure.get(key, 0.0), OVERSUPPLY_MIN_MULT, 1.0)
 	var base = prices[key] * bonus_mult * oversupply_mult
-	if active_event.get("crop", "") == key:
+	if active_event.get("kind", "crop") == "crop" and active_event.get("crop", "") == key:
 		return int(round(base * active_event["multiplier"]))
 	return int(round(base))
 
@@ -1601,9 +1601,12 @@ func _feed_price_per_unit() -> int:
 func _livestock_sell_price(product_key: String) -> int:
 	var baseline_feed = (CROPS["wheat"]["base_price"] + CROPS["corn"]["base_price"]) * 0.5 * FEED_COST_FACTOR
 	var feed_cost_mult = clamp(_feed_price_per_unit() / max(1.0, baseline_feed), 0.7, 1.8)
+	var event_mult = 1.0
+	if active_event.get("kind", "crop") == "livestock" and active_event.get("crop", "") == product_key:
+		event_mult = active_event["multiplier"]
 	for key in LIVESTOCK_KEYS:
 		if LIVESTOCK[key]["product"] == product_key:
-			return int(round(LIVESTOCK[key]["base_price"] * feed_cost_mult))
+			return int(round(LIVESTOCK[key]["base_price"] * feed_cost_mult * event_mult))
 	return 0
 
 func _livestock_total() -> int:
@@ -1661,20 +1664,40 @@ func _apply_storage_upkeep() -> void:
 
 # ---------- Market events ----------
 
+# Display name for whatever active_event currently targets - a crop
+# (CROPS dict) or, since demand spikes also cover livestock goods, a
+# livestock product (LIVESTOCK dict, keyed by its own "product" field).
+func _event_target_name() -> String:
+	if active_event.get("kind", "crop") == "livestock":
+		for key in LIVESTOCK_KEYS:
+			if LIVESTOCK[key]["product"] == active_event["crop"]:
+				return LIVESTOCK[key]["product_name"]
+		return active_event["crop"].capitalize()
+	return CROPS[active_event["crop"]]["name"]
+
 func _advance_market_event() -> void:
 	if active_event.is_empty():
 		if current_act >= 1 and randf() < EVENT_CHANCE:
 			var unlocked_crops = CROP_KEYS.filter(func(k): return _crop_unlocked(k))
+			# Livestock goods join the same event pool, weighted lighter (1 slot
+			# vs. each unlocked crop's own) so a demand spike doesn't become
+			# "usually eggs" once several crops unlock - reuses the exact same
+			# event mechanic instead of a separate livestock-only system.
+			var pool := []
+			for k in unlocked_crops:
+				pool.append({"key": k, "kind": "crop"})
 			if unlocked_crops.size() > 0:
-				var key = unlocked_crops[randi() % unlocked_crops.size()]
+				pool.append({"key": LIVESTOCK_PRODUCT_KEYS[randi() % LIVESTOCK_PRODUCT_KEYS.size()], "kind": "livestock"})
+			if pool.size() > 0:
+				var pick = pool[randi() % pool.size()]
 				var mult = EVENT_MIN_MULT + randf() * (EVENT_MAX_MULT - EVENT_MIN_MULT)
 				var days = EVENT_MIN_DAYS + (randi() % (EVENT_MAX_DAYS - EVENT_MIN_DAYS + 1))
-				active_event = {"crop": key, "multiplier": mult, "days_left": days}
-				_log("Demand spike! %s is selling for %.1fx price for the next %d day(s)." % [CROPS[key]["name"], mult, days])
+				active_event = {"crop": pick["key"], "kind": pick["kind"], "multiplier": mult, "days_left": days}
+				_log("Demand spike! %s is selling for %.1fx price for the next %d day(s)." % [_event_target_name(), mult, days])
 	else:
 		active_event["days_left"] -= 1
 		if active_event["days_left"] <= 0:
-			_log("The demand spike for %s has ended." % CROPS[active_event["crop"]]["name"])
+			_log("The demand spike for %s has ended." % _event_target_name())
 			active_event = {}
 
 func _maintenance_cost(reg: Dictionary) -> int:
@@ -2267,7 +2290,8 @@ func _refresh_livestock_panel() -> void:
 		var sell_row := HBoxContainer.new()
 		var sell_label := Label.new()
 		var price = _livestock_sell_price(product)
-		sell_label.text = "  %s: %d in storage ($%d ea)" % [animal["product_name"], amount, price]
+		var livestock_spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if (active_event.get("kind", "crop") == "livestock" and active_event.get("crop", "") == product) else ""
+		sell_label.text = "  %s: %d in storage ($%d ea)%s" % [animal["product_name"], amount, price, livestock_spike_tag]
 		sell_label.custom_minimum_size = Vector2(420, 0)
 		sell_label.add_theme_font_size_override("font_size", 15)
 		sell_row.add_child(sell_label)
@@ -2313,7 +2337,7 @@ func _refresh_all() -> void:
 	var event_suffix = ""
 	if not active_event.is_empty():
 		event_suffix = "  |  🔥 %s demand spike x%.1f (%dd left)" % [
-			CROPS[active_event["crop"]]["name"], active_event["multiplier"], active_event["days_left"],
+			_event_target_name(), active_event["multiplier"], active_event["days_left"],
 		]
 	hud_season.text = "%s (day %d/%d) - %s %s  |  Tomorrow: %s %s%s" % [
 		_season_name(), season_day + 1, SEASON_LENGTH,
@@ -2407,7 +2431,7 @@ func _refresh_inventory_panel() -> void:
 		var top_row := HBoxContainer.new()
 		var label := Label.new()
 		var eff_price = _effective_price(key)
-		var spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if active_event.get("crop", "") == key else ""
+		var spike_tag = ("  🔥 x%.1f (%dd)" % [active_event["multiplier"], active_event["days_left"]]) if (active_event.get("kind", "crop") == "crop" and active_event.get("crop", "") == key) else ""
 		var total = _produce_total(key)
 		label.text = "%s  seeds:%d  produce:%d/%d  $%d base %s" % [crop["name"], seeds[key], total, storage_cap, eff_price, _trend_arrow(key)] + spike_tag
 		label.custom_minimum_size = Vector2(420, 0)
@@ -2824,8 +2848,13 @@ func _load_game() -> void:
 		forecast_weather = "sunny"
 	owned_upgrades = parsed.get("owned_upgrades", owned_upgrades)
 	active_event = parsed.get("active_event", active_event)
-	if not (active_event.is_empty() or (active_event.has("crop") and CROPS.has(active_event["crop"]))):
-		active_event = {}
+	if not active_event.is_empty():
+		var event_valid = active_event.has("crop")
+		if event_valid:
+			event_valid = (active_event.get("kind", "crop") == "livestock" and LIVESTOCK_PRODUCT_KEYS.has(active_event["crop"])) \
+				or (active_event.get("kind", "crop") == "crop" and CROPS.has(active_event["crop"]))
+		if not event_valid:
+			active_event = {}
 	if parsed.has("regions"):
 		var loaded_regions = parsed["regions"]
 		# `regions` here still holds the freshly initialized real-world roster
