@@ -676,14 +676,6 @@ func _load_world_assets():
 	# plain 1x1 quad, built once here and reused via .instantiate() exactly
 	# like the other world_scenes entries.
 	world_scenes["ground_grass"] = _build_textured_ground_scene("res://assets_3d/textures/grass_real.webp")
-	# The backdrop skirt (see _build_scenery) sits much farther from the
-	# camera on average than the real playable grid, so the GPU samples a
-	# coarser, blurred-down mip level for it - and averaging this specific
-	# photo's texel data skews noticeably brighter, leaving a visible tonal
-	# seam right at the grid's edge. A dedicated, gently-darkened tint on the
-	# backdrop-only copy brings its far-mip average back in line with the
-	# grid's close-up tone, without touching the real tiles or the texture.
-	world_scenes["ground_grass_backdrop"] = _build_textured_ground_scene("res://assets_3d/textures/grass_real.webp", Color(0.82, 0.86, 0.78))
 	# crops_dirtSingle.glb is a small raised dirt MOUND meant to sit decoratively
 	# on top of a full grass tile, not a full-tile ground mesh - using it as the
 	# tilled-soil ground left every tilled/planted tile with no ground plane at
@@ -891,31 +883,30 @@ func _build_scenery():
 	# Scaled off COLS (tuned as 20 tiles at the original COLS=10) so a bigger
 	# playable grid - which also zooms the camera out further, see cam.size
 	# in _build_farm_view - still gets enough backdrop to hide the sky.
-	# A single huge flat plane beneath everything as a horizon fallback - the
-	# full-bleed HUD v2 viewport reveals a much taller vertical slice of the
-	# world than before, wide enough that the finite tiled backdrop's edge
-	# could show sky past its corners at some zoom levels; this guarantees
-	# grass-colored ground to the horizon in every direction without having
-	# to further balloon the backdrop tile count (already ~6000 tiles).
-	var horizon_plane := MeshInstance3D.new()
-	var horizon_mesh := PlaneMesh.new()
-	horizon_mesh.size = Vector2(500, 500)
-	horizon_plane.mesh = horizon_mesh
-	var horizon_mat := StandardMaterial3D.new()
-	horizon_mat.albedo_color = Color(0.55, 0.68, 0.42)
-	horizon_mat.roughness = 0.95
-	horizon_plane.material_override = horizon_mat
-	horizon_plane.position = Vector3((COLS - 1) * WORLD_TILE * 0.5, -0.03, (ROWS - 1) * WORLD_TILE * 0.5)
-	world_root.add_child(horizon_plane)
-
-	var BACKDROP_MARGIN := int(COLS * 2.0)
-	for tz in range(-BACKDROP_MARGIN, ROWS + BACKDROP_MARGIN):
-		for tx in range(-BACKDROP_MARGIN, COLS + BACKDROP_MARGIN):
-			if tx >= 0 and tx < COLS and tz >= 0 and tz < ROWS:
-				continue # the real playable grid already covers this cell
-			var backdrop_tile: Node3D = world_scenes["ground_grass_backdrop"].instantiate()
-			backdrop_tile.position = Vector3(tx * WORLD_TILE, -0.01, tz * WORLD_TILE)
-			world_root.add_child(backdrop_tile)
+	# One large plane with the grass texture UV-tiled across it, instead of
+	# thousands of individual 1x1 backdrop tile nodes (the old approach
+	# instantiated ~6000 separate MeshInstance3D nodes for a COLS*2 margin).
+	# That many draw calls was always wasteful, but it became a real
+	# stability risk once the HUD v2 full-bleed camera started keeping far
+	# more of them simultaneously in view than the old letterboxed camera
+	# ever did - WebGL/mobile GPUs have a much smaller per-frame draw-call
+	# budget than a native desktop process, and this is the kind of thing
+	# that renders fine locally while silently failing (a black viewport,
+	# no error) in an actual browser. One mesh with a repeated UV costs the
+	# same single draw call regardless of how far it extends.
+	var backdrop_size := COLS * 6.0
+	var backdrop_plane := MeshInstance3D.new()
+	var backdrop_mesh := PlaneMesh.new()
+	backdrop_mesh.size = Vector2(backdrop_size, backdrop_size)
+	backdrop_plane.mesh = backdrop_mesh
+	var backdrop_mat := StandardMaterial3D.new()
+	backdrop_mat.albedo_texture = load("res://assets_3d/textures/grass_real.webp")
+	backdrop_mat.albedo_color = Color(0.82, 0.86, 0.78)
+	backdrop_mat.roughness = 0.95
+	backdrop_mat.uv1_scale = Vector3(backdrop_size, backdrop_size, 1.0)
+	backdrop_plane.material_override = backdrop_mat
+	backdrop_plane.position = Vector3((COLS - 1) * WORLD_TILE * 0.5, -0.01, (ROWS - 1) * WORLD_TILE * 0.5)
+	world_root.add_child(backdrop_plane)
 
 	var deco = [
 		{"key": "tree", "tx": -1, "tz": -1},
