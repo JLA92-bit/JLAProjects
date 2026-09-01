@@ -5,9 +5,12 @@ sourced from the `ETdoFresh/kenney.nl` GitHub mirror. No attribution is legally
 required, but it's credited here anyway.
 
 - `nature_kit/` — Kenney "Nature Kit" 2.1 (ground, crops, fences, trees,
-  plus scattered rocks/flowers/mushrooms/a stump/a sign/a bush for
-  backdrop variety). See `nature_kit/LICENSE.txt`. This pack has 329
-  models total and only a fraction are pulled in here - see
+  plus a much wider scatter of rocks/flowers/mushrooms/stumps/bushes/a
+  sign/a gate/a stone path for backdrop variety - see
+  `_build_backdrop_decor()` in `scripts/Main.gd`, which scatters this set
+  across the whole area past the farm instead of just a handful of
+  hand-placed pieces near the fence). See `nature_kit/LICENSE.txt`. This
+  pack has 329 models total and only a fraction are pulled in here - see
   `ASSET_LIBRARY.md` for the rest of what's available from it and other
   Kenney packs without needing to re-search.
 - `character/` — Kenney "Blocky Characters" (player model + skin texture).
@@ -23,16 +26,26 @@ required, but it's credited here anyway.
   repository is MIT licensed (Copyright (c) 2014-present Godot Engine
   contributors); no separate per-asset license file was present for this
   texture, so it falls under the repo's blanket MIT license.
-- `fantasy_town_kit/` — a handful of pieces (`wallWood`, `wallWoodDoor`,
-  `roofGable`, `chimney`) from Kenney's "Fantasy Town Kit", sourced from
-  the same `ETdoFresh/kenney.nl` mirror as everything else above, used as
-  the farmhouse landmark (see `_build_farmhouse_scene()` in
-  `scripts/Main.gd`). No per-kit license file exists in that folder of the
-  mirror, so it falls under the repo's blanket CC0 README statement -
-  independently corroborated against kenney.nl's own listing for this kit.
-  The wall pieces are each modeled to occupy one edge of a 1x1x1 cell, so
-  the same piece is instantiated 4 times at 90-degree yaw increments to
-  close a small box, with the gable roof capping it.
+- `fantasy_town_kit/` — pieces from Kenney's "Fantasy Town Kit", sourced
+  from the same `ETdoFresh/kenney.nl` mirror as everything else above. No
+  per-kit license file exists in that folder of the mirror, so it falls
+  under the repo's blanket CC0 README statement - independently
+  corroborated against kenney.nl's own listing for this kit. The wall
+  pieces are each modeled to occupy one edge of a 1x1x1 cell, so the same
+  piece is instantiated 4 times at 90-degree yaw increments to close a
+  small box, with a roof piece capping it - see `_build_wall_box_scene()`
+  in `scripts/Main.gd`, used for three separate buildings:
+  - `wallWood`/`wallWoodDoor`/`roofGable`/`chimney` — the farmhouse.
+  - `wallWood`/`wallWoodDoor`/`roofHigh` — a barn (no chimney, taller roof
+    for a distinct silhouette next to the farmhouse).
+  - `wall`/`wallDoor`/`wallWindowShutters`/`roofGable`/`chimney` — a stone
+    cottage (the kit's stone wall set instead of wood, shuttered window
+    instead of a door on the front face).
+  Plus two single-piece props used as-is: `stall` (a market stall) and
+  `cart` (a produce cart) - both placed near the buildings as a small
+  village cluster behind the farmhouse (see `_build_village()`), so the
+  area past the fence reads as "a farm on the edge of a settlement"
+  instead of one lone house facing empty grass.
 - `food_kit/tomato.glb` — from Kenney's "Food Kit", same mirror as above,
   replacing the melon model that previously stood in for tomato's
   ready-to-harvest stage. Modeled at Food Kit's own (much smaller,

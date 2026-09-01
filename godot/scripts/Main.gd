@@ -624,34 +624,66 @@ func _set_owner_recursive(node: Node, root: Node) -> void:
 		child.owner = root
 		_set_owner_recursive(child, root)
 
-# A small cottage assembled from real Kenney "Fantasy Town Kit" pieces (CC0,
-# see CREDITS.md) rather than another procedural stand-in - these wood wall
-# models are each authored to occupy one edge of a 1x1x1 cell (a thin slab
-# spanning the full width of one side), so instantiating the same cell's
-# four wall pieces at yaw 0/90/180/270 around a shared origin closes them
-# into a simple box, with the gable roof piece sized to cap that same cell.
-func _build_farmhouse_scene() -> PackedScene:
+# Assembles a small building from real Kenney "Fantasy Town Kit" pieces (CC0,
+# see CREDITS.md) rather than a procedural stand-in - these wall models are
+# each authored to occupy one edge of a 1x1x1 cell (a thin slab spanning the
+# full width of one side), so instantiating the same cell's four wall pieces
+# at yaw 0/90/180/270 around a shared origin closes them into a simple box,
+# with a roof piece sized to cap that same cell. Generalized off the original
+# farmhouse-only version so a handful of wall/roof piece swaps produces a
+# small village of distinct-looking buildings instead of just one house.
+func _build_wall_box_scene(front_wall_path: String, side_wall_path: String, roof_path: String, chimney_path: String = "") -> PackedScene:
 	const FT := "res://assets_3d/fantasy_town_kit/"
 	var root := Node3D.new()
 	var walls = [
-		{"path": "wallWoodDoor.glb", "yaw": 0.0}, # front, the only side with an entrance
-		{"path": "wallWood.glb", "yaw": PI / 2.0},
-		{"path": "wallWood.glb", "yaw": PI},
-		{"path": "wallWood.glb", "yaw": -PI / 2.0},
+		{"path": front_wall_path, "yaw": 0.0}, # front, the only side with an entrance/window
+		{"path": side_wall_path, "yaw": PI / 2.0},
+		{"path": side_wall_path, "yaw": PI},
+		{"path": side_wall_path, "yaw": -PI / 2.0},
 	]
 	for w in walls:
 		var inst = load(FT + w["path"]).instantiate()
 		inst.rotation.y = w["yaw"]
 		root.add_child(inst)
 
-	var roof_inst = load(FT + "roofGable.glb").instantiate()
+	var roof_inst = load(FT + roof_path).instantiate()
 	roof_inst.position = Vector3(0, 1.0, 0)
 	root.add_child(roof_inst)
 
-	var chimney_inst = load(FT + "chimney.glb").instantiate()
-	chimney_inst.position = Vector3(0.2, 1.0, -0.2)
-	root.add_child(chimney_inst)
+	if chimney_path != "":
+		var chimney_inst = load(FT + chimney_path).instantiate()
+		chimney_inst.position = Vector3(0.2, 1.0, -0.2)
+		root.add_child(chimney_inst)
 
+	_set_owner_recursive(root, root)
+	var scene := PackedScene.new()
+	scene.pack(root)
+	return scene
+
+func _build_farmhouse_scene() -> PackedScene:
+	return _build_wall_box_scene("wallWoodDoor.glb", "wallWood.glb", "roofGable.glb", "chimney.glb")
+
+# Same wood walls as the farmhouse but capped with the taller roofHigh piece
+# instead of roofGable and no chimney - reads as a barn/storage building next
+# to it rather than a second identical house.
+func _build_barn_scene() -> PackedScene:
+	return _build_wall_box_scene("wallWoodDoor.glb", "wallWood.glb", "roofHigh.glb")
+
+# The kit's stone wall set (vs. the farmhouse/barn's wood set) with a
+# shuttered window on the front instead of a door, for a third distinct
+# building silhouette in the village cluster.
+func _build_stone_cottage_scene() -> PackedScene:
+	return _build_wall_box_scene("wallDoor.glb", "wallWindowShutters.glb", "roofGable.glb", "chimney.glb")
+
+# A single-piece Fantasy Town Kit model used as-is (market stall, windmill) -
+# no assembly needed, just loaded and optionally scaled like
+# _build_real_animal_scene does for the animal models.
+func _build_prop_scene(path: String, model_scale: float = 1.0) -> PackedScene:
+	var root := Node3D.new()
+	var inst = load(path).instantiate()
+	if model_scale != 1.0:
+		inst.scale = Vector3.ONE * model_scale
+	root.add_child(inst)
 	_set_owner_recursive(root, root)
 	var scene := PackedScene.new()
 	scene.pack(root)
@@ -700,6 +732,7 @@ func _play_sfx(key: String) -> void:
 
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
+	const FT := "res://assets_3d/fantasy_town_kit/"
 	# Kenney's ground_grass.glb is a flat solid vertex color (no texture at
 	# all), which read as an unrealistic flat-green void once it was also
 	# used to fill the whole backdrop beyond the farm. Swapped for a real
@@ -761,6 +794,18 @@ func _load_world_assets():
 	world_scenes["sheep"] = _build_real_animal_scene("res://assets_3d/animal_models/sheep.glb", 0.055)
 	world_scenes["cow"] = _build_real_animal_scene("res://assets_3d/animal_models/cow.glb", 0.075)
 	world_scenes["farmhouse"] = _build_farmhouse_scene()
+	world_scenes["barn"] = _build_barn_scene()
+	world_scenes["stone_cottage"] = _build_stone_cottage_scene()
+	world_scenes["market_stall"] = _build_prop_scene(FT + "stall.glb")
+	world_scenes["cart"] = _build_prop_scene(FT + "cart.glb")
+	world_scenes["fence_gate"] = load(NK + "fence_gate.glb")
+	world_scenes["path_stone"] = load(NK + "path_stone.glb")
+	world_scenes["tree_oak"] = load(NK + "tree_oak.glb")
+	world_scenes["tree_pine_tall"] = load(NK + "tree_pineTallA.glb")
+	world_scenes["rock_tall_c"] = load(NK + "rock_tallC.glb")
+	world_scenes["rock_small_d"] = load(NK + "rock_smallD.glb")
+	world_scenes["bush_large"] = load(NK + "plant_bushLarge.glb")
+	world_scenes["stump_old"] = load(NK + "stump_old.glb")
 
 func _init_fresh_state():
 	plots = {"home": _make_empty_grid()}
@@ -992,8 +1037,11 @@ func _build_scenery():
 		e.rotation.y = randf() * TAU
 		world_root.add_child(e)
 
+	var gate_col := int(round((COLS - 1) * 0.5))
 	for c in range(-1, COLS + 1):
-		var f = world_scenes["fence"].instantiate()
+		# The path to the village crosses the top fence here - a gate piece
+		# instead of a solid rail marks it as the farm's actual entrance.
+		var f = world_scenes["fence_gate" if c == gate_col else "fence"].instantiate()
 		f.position = Vector3(c * WORLD_TILE, 0, -1 * WORLD_TILE)
 		world_root.add_child(f)
 		var f2 = world_scenes["fence"].instantiate()
@@ -1009,6 +1057,153 @@ func _build_scenery():
 		f4.position = Vector3(COLS * WORLD_TILE, 0, r * WORLD_TILE)
 		f4.rotation.y = PI / 2.0
 		world_root.add_child(f4)
+
+	_build_village()
+	_build_backdrop_decor()
+
+# A small cluster of buildings behind the farmhouse - barn, stone cottage,
+# market stall and a windmill landmark, linked to the farm gate with a stone
+# path - so the area past the fence reads as "a farm on the edge of a
+# settlement" instead of one lone house facing empty grass. All positioned
+# in world_root directly, same as the farmhouse itself: backdrop dressing,
+# not on the playable grid.
+func _build_village() -> void:
+	var cx: float = (COLS - 1) * 0.5
+
+	var barn = world_scenes["barn"].instantiate()
+	barn.position = Vector3((cx - 3.2) * WORLD_TILE, 0, -3.4 * WORLD_TILE)
+	barn.rotation.y = PI / 2.0
+	world_root.add_child(barn)
+
+	var cottage = world_scenes["stone_cottage"].instantiate()
+	cottage.position = Vector3((cx + 3.6) * WORLD_TILE, 0, -3.7 * WORLD_TILE)
+	cottage.rotation.y = -PI / 2.0
+	world_root.add_child(cottage)
+
+	var stall = world_scenes["market_stall"].instantiate()
+	stall.position = Vector3((cx + 1.7) * WORLD_TILE, 0, -1.9 * WORLD_TILE)
+	stall.rotation.y = PI
+	world_root.add_child(stall)
+
+	var cart = world_scenes["cart"].instantiate()
+	cart.position = Vector3((cx + 2.6) * WORLD_TILE, 0, -1.6 * WORLD_TILE)
+	cart.rotation.y = -PI / 3.0
+	world_root.add_child(cart)
+
+	# A short stone path from the fence gate up to the farmhouse, through the
+	# middle of the cluster.
+	for i in range(4):
+		var tile = world_scenes["path_stone"].instantiate()
+		tile.position = Vector3(cx * WORLD_TILE, 0, (-1.4 - i * 0.55) * WORLD_TILE)
+		world_root.add_child(tile)
+
+# Everything past the immediate farm/village area was bare flat grass out to
+# the edge of the backdrop plane - the "empty void" the land-feels-empty
+# feedback was about. Scatters trees/rocks/bushes/flowers/mushrooms/stumps
+# across that whole area instead. Grouped per asset type into one
+# MultiMeshInstance3D each (one draw call per type, however many instances)
+# rather than one MeshInstance3D per placement - the ~150 individual nodes
+# this would otherwise add is exactly the kind of per-instance draw-call cost
+# that silently broke the live web build once before (see the backdrop-plane
+# fix above), so batching keeps this dense without repeating that mistake.
+func _build_backdrop_decor() -> void:
+	var half_extent := COLS * 3.0 * 0.9 # backdrop plane is COLS*6 wide, stay just inside its edge
+	var center := Vector2((COLS - 1) * 0.5, (ROWS - 1) * 0.5)
+	# Keep clear of the playable grid/fence and the village cluster above.
+	var exclude_rects = [
+		Rect2(-3.0, -3.0, COLS + 6.0, ROWS + 6.0),
+		Rect2(center.x - 8.5, -8.0, 17.0, 7.5),
+	]
+	var batches = [
+		{"key": "tree", "count": 12},
+		{"key": "pine", "count": 12},
+		{"key": "tree_oak", "count": 10},
+		{"key": "tree_pine_tall", "count": 8},
+		{"key": "rock_large_a", "count": 6},
+		{"key": "rock_large_c", "count": 6},
+		{"key": "rock_small_b", "count": 8},
+		{"key": "rock_tall_c", "count": 6},
+		{"key": "rock_small_d", "count": 8},
+		{"key": "bush", "count": 10},
+		{"key": "bush_large", "count": 8},
+		{"key": "flower_red", "count": 10},
+		{"key": "flower_yellow", "count": 10},
+		{"key": "flower_purple", "count": 10},
+		{"key": "mushroom_red", "count": 6},
+		{"key": "mushroom_tan", "count": 6},
+		{"key": "stump", "count": 5},
+		{"key": "stump_old", "count": 5},
+	]
+	for batch in batches:
+		var positions := []
+		var attempts := 0
+		while positions.size() < batch["count"] and attempts < batch["count"] * 20:
+			attempts += 1
+			var p := Vector2(
+				center.x + (randf() * 2.0 - 1.0) * half_extent,
+				center.y + (randf() * 2.0 - 1.0) * half_extent
+			)
+			var blocked := false
+			for rect in exclude_rects:
+				if rect.has_point(p):
+					blocked = true
+					break
+			if not blocked:
+				positions.append(p)
+		_scatter_multimesh(batch["key"], positions)
+
+# Builds one MultiMeshInstance3D covering every position for a single
+# world_scenes key - one draw call regardless of instance count. Falls back
+# to individual instancing if the source scene doesn't reduce to a single
+# mesh (none of the keys used by _build_backdrop_decor do, but this keeps
+# the helper safe to reuse for anything added later).
+func _scatter_multimesh(key: String, positions: Array) -> void:
+	if positions.is_empty():
+		return
+	var info := _mesh_and_local_transform(world_scenes[key])
+	var mesh: Mesh = info["mesh"]
+	if mesh == null:
+		for p in positions:
+			var inst = world_scenes[key].instantiate()
+			inst.position = Vector3(p.x * WORLD_TILE, 0, p.y * WORLD_TILE)
+			inst.rotation.y = randf() * TAU
+			world_root.add_child(inst)
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = positions.size()
+	var local_xform: Transform3D = info["xform"]
+	for i in range(positions.size()):
+		var p: Vector2 = positions[i]
+		var basis := Basis(Vector3.UP, randf() * TAU)
+		var origin := Vector3(p.x * WORLD_TILE, 0, p.y * WORLD_TILE)
+		mm.set_instance_transform(i, Transform3D(basis, origin) * local_xform)
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	world_root.add_child(mmi)
+
+# Returns the Mesh resource and its local transform if a scene instantiates
+# to exactly one MeshInstance3D at its root (or as its single child) - true
+# for every plain single-model Nature Kit .glb this project loads directly
+# via load(), most of which carry a small non-identity offset baked in by
+# the source file (e.g. rocks sit half a unit into the ground at translation
+# y=-0.05) that has to be preserved, not dropped. Returns a null mesh for
+# anything else (multi-part assemblies like the buildings, or code-built
+# wrapper scenes) so the caller can fall back to normal instancing instead.
+func _mesh_and_local_transform(scene: PackedScene) -> Dictionary:
+	var inst := scene.instantiate()
+	var mesh: Mesh = null
+	var local_xform := Transform3D.IDENTITY
+	if inst is MeshInstance3D:
+		mesh = inst.mesh
+		local_xform = inst.transform
+	elif inst.get_child_count() == 1 and inst.get_child(0) is MeshInstance3D:
+		var child: MeshInstance3D = inst.get_child(0)
+		mesh = child.mesh
+		local_xform = inst.transform * child.transform
+	inst.free()
+	return {"mesh": mesh, "xform": local_xform}
 
 func _build_player():
 	player_node = world_scenes["player"].instantiate()
