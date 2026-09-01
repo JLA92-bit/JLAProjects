@@ -541,9 +541,29 @@ var livestock_panel: Panel
 var feed_label: Label
 var livestock_rows_container: VBoxContainer
 
+# Godot's built-in default font has no emoji glyphs at all - on the Web
+# export specifically (no OS-level emoji font to fall back to, unlike
+# desktop testing where the system usually has one), every 🔥/🐄/🔨-style
+# glyph used throughout this file's UI text was rendering as literal
+# fallback text (the Unicode codepoint, e.g. "0 1F 528") instead of an
+# icon. Registers a small monochrome emoji font (see assets_fonts/
+# CREDITS.md) as a fallback on the project's default font, applying to
+# every Label/Button created anywhere in the game with no explicit font
+# override - which is all of them, via the _add_label()/_add_button()
+# helpers - without touching each of the ~25 individual call sites.
+func _apply_emoji_font_fallback() -> void:
+	var emoji_font: FontFile = load("res://assets_fonts/emoji_fallback.ttf")
+	var variation := FontVariation.new()
+	variation.base_font = ThemeDB.fallback_font
+	variation.fallbacks = [emoji_font]
+	var theme := Theme.new()
+	theme.default_font = variation
+	get_window().theme = theme
+
 # ---------- Lifecycle ----------
 func _ready():
 	randomize()
+	_apply_emoji_font_fallback()
 	is_new_game = not FileAccess.file_exists(SAVE_PATH)
 	_load_audio()
 	_load_world_assets()
