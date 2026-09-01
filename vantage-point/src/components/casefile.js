@@ -19,6 +19,7 @@ export function renderCaseFile(root, { levels, cluesByLevel, foundClueIdsByLevel
         card.className = 'pin-card';
         card.style.setProperty('--tilt', `${(Math.random() * 4 - 2).toFixed(2)}deg`);
         card.innerHTML = `
+          <img class="pc-pin" src="src/brand/pin.svg" alt="" aria-hidden="true" />
           <p class="pc-day">${level.day} — ${level.title}</p>
           <p class="pc-title">${clue.title}</p>
           <p class="pc-flavor">${clue.flavor}</p>

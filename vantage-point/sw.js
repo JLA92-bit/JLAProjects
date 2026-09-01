@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vantage-point-v1';
+const CACHE_NAME = 'vantage-point-v2';
 
 const APP_SHELL = [
   './',
@@ -24,6 +24,12 @@ const APP_SHELL = [
   './scenes/level-5.svg',
   './icons/icon-192.svg',
   './icons/icon-512.svg',
+  './icons/icon-maskable-512.svg',
+  './src/brand/wordmark.svg',
+  './src/brand/wordmark-stacked.svg',
+  './src/brand/pin.svg',
+  './src/brand/magnifier.svg',
+  './src/brand/grain.svg',
 ];
 
 self.addEventListener('install', (event) => {

@@ -6,8 +6,10 @@ accusation. Plain HTML5 + CSS + JavaScript (ES modules, no build step),
 installable as a PWA.
 
 **Status: playable MVP.** The full loop works end to end — welcome/name
-entry, briefing, 5 levels, case file, accusation, both endings — but every
-scene is currently a **labeled placeholder image**, not final art. See
+entry, briefing, 5 levels, case file, accusation, both endings. Branding
+(wordmark, app icons, corkboard pin, magnifier tool icon, film grain) is
+real, designed art. Scene backgrounds are still **labeled placeholder
+images**, not final photo-realistic art — that's the one piece left. See
 [Swapping in real art](#swapping-in-real-art) below.
 
 ## Running it locally
@@ -31,7 +33,7 @@ vantage-point/
   index.html              all screen markup, as inert <template> blocks
   manifest.webmanifest     PWA manifest
   sw.js                    offline-caching service worker
-  icons/                   PWA icons (placeholder)
+  icons/                   PWA icons — real designed art (icon-192/512, maskable-512)
   scenes/                  one image per level: level-N.svg (placeholder) or .jpg (final)
   data/
     case.json               case metadata: title, briefing, suspects, motives,
@@ -41,12 +43,15 @@ vantage-point/
     style.css               noir visual style, mobile-first
     main.js                  state machine / screen router
     state/store.js           localStorage save/load
+    brand/                   real SVG art: wordmark(-stacked), pin, magnifier, grain
     components/
       panzoom.js             custom pinch-zoom + pan (no library)
       scene.js                tap-to-inspect, magnifier, hints, toast feedback
       casefile.js             corkboard of found clues
       accusation.js           final suspect/motive/evidence picker
   scripts/make-placeholders.py   regenerates the placeholder scene SVGs
+  tools/clue-calibrator.html     drop in a real scene photo, click clues, export level JSON
+  SHOT-LIST.md                   per-level art brief for the 5 scene backgrounds
 ```
 
 ### Game flow (state machine, driven by `src/main.js`)
@@ -119,18 +124,16 @@ photo-realistic AI-generated image (`scenes/level-N.jpg`), then update the
 stored as **percentages** of the image, so a same-aspect-ratio replacement
 image needs no coordinate changes — only re-check placement if the new
 image's composition differs meaningfully from the placeholder's implied
-layout (see the per-level shot list below).
+layout.
 
-Suggested content per level (also see each `clue.title`/`flavor` in
-`data/level-N-clues.json` for exactly what needs to be visible):
-
-1. **The Study** — a private office/study, evening light. Large, obvious
-   details (this is the easy level).
-2. **The Gallery Floor** — an art gallery exhibition hall, post-reception.
-3. **The Loading Alley** — a dim service alley at night, more clutter.
-4. **Elena's Office** — a cluttered office interior, small hidden details.
-5. **The Car** — a car interior in a parking garage, tiny details (this is
-   the level that needs the magnifier).
+**[`SHOT-LIST.md`](./SHOT-LIST.md)** is the actual art brief — deliverable
+spec (3:4 portrait, 1200×1600 min, level 5 needs 2400×3200), grade/palette
+notes, and a per-level table of every clue's exact target position and
+size as a % of frame width, taken directly from the shipped
+`data/level-N-clues.json`. Compose to it and no coordinate rework is
+needed. If a scene gets shot to a different composition anyway, use
+`tools/clue-calibrator.html` instead — drop the photo in, click each clue,
+export ready-to-paste JSON.
 
 ## Mobile/PWA notes
 
@@ -150,10 +153,8 @@ Suggested content per level (also see each `clue.title`/`flavor` in
 
 ## Known follow-ups (flagged, not blocking)
 
-- **Final art** — see above; this is the big one.
+- **Final scene art** — see above; this is the only real placeholder left.
 - Only one case ships (`the-hargrove-affair`). A case-select menu is a
   natural next step once more cases exist.
-- PWA icons are placeholder SVGs; swap `icons/icon-192.svg` /
-  `icons/icon-512.svg` for real artwork alongside the scene images.
 - No sound design yet (a soft "miss" tick and a satisfying "found" chime
   would sell the tap-to-inspect loop well).

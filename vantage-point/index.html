@@ -20,7 +20,7 @@
   <section class="screen screen-welcome">
     <div class="film-grain"></div>
     <div class="welcome-content">
-      <p class="kicker">VANTAGE POINT</p>
+      <img class="wordmark" src="src/brand/wordmark-stacked.svg" alt="Vantage Point — a noir clue hunt" width="220" height="220" />
       <h1>Welcome, Detective.</h1>
       <p class="welcome-text">Before you open the case file, the department needs a name for the record. It's how the case file — and everyone in it — will address you from here on.</p>
       <label class="name-field">
@@ -91,7 +91,8 @@
       <button class="tool-btn" data-action="zoom-reset" aria-label="Reset view">⤾</button>
       <button class="tool-btn" data-action="zoom-in" aria-label="Zoom in">+</button>
       <button class="tool-btn tool-btn-magnifier" data-action="toggle-magnifier" aria-label="Magnifying glass" hidden>
-        🔍<span class="badge" data-bind="magnifierUses"></span>
+        <img class="tool-icon" src="src/brand/magnifier.svg" alt="" aria-hidden="true" />
+        <span class="badge" data-bind="magnifierUses"></span>
       </button>
       <button class="btn btn-primary btn-continue" data-action="finish-level" hidden>Continue →</button>
     </footer>
