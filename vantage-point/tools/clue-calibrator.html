@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vantage Point — Clue Calibrator</title>
+<style>
+  :root {
+    --ink: #0f0d0b;
+    --panel: #171310;
+    --panel-2: #201a16;
+    --paper: #e8dcc0;
+    --paper-dim: #a89d84;
+    --amber: #c9932f;
+    --amber-bright: #e8a93a;
+    --line: #332b23;
+    --danger: #c25454;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'Courier New', monospace;
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 1rem;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 1rem; margin: 0; color: var(--amber-bright); font-weight: bold; }
+  header .sub { color: var(--paper-dim); font-size: 0.75rem; }
+  .toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-left: auto; }
+  label.file-btn, button {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--paper);
+    padding: 0.4rem 0.7rem;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  button.primary { background: var(--amber); color: var(--ink); border-color: var(--amber); font-weight: bold; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  input[type="file"] { display: none; }
+  input[type="number"], input[type="text"], select, textarea {
+    background: var(--ink);
+    border: 1px solid var(--line);
+    color: var(--paper);
+    padding: 0.35rem 0.5rem;
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 0.8rem;
+    width: 100%;
+  }
+  textarea { resize: vertical; min-height: 50px; }
+
+  .canvas-wrap {
+    position: relative;
+    overflow: auto;
+    background: #050403;
+    background-image:
+      linear-gradient(45deg, #0a0806 25%, transparent 25%),
+      linear-gradient(-45deg, #0a0806 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #0a0806 75%),
+      linear-gradient(-45deg, transparent 75%, #0a0806 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 2rem;
+  }
+  .stage {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+  }
+  .stage img {
+    display: block;
+    max-width: none;
+  }
+  .placeholder-msg {
+    color: var(--paper-dim);
+    padding: 3rem;
+    text-align: center;
+    max-width: 420px;
+    line-height: 1.6;
+  }
+  .marker {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 2px solid var(--amber-bright);
+    background: rgba(232, 169, 58, 0.18);
+    cursor: grab;
+  }
+  .marker.noise { border-color: var(--danger); background: rgba(194, 84, 84, 0.18); }
+  .marker.selected { border-width: 3px; box-shadow: 0 0 0 3px rgba(255,255,255,0.25); }
+  .marker.too-small::after {
+    content: '!';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: bold;
+    font-size: 11px;
+    background: var(--danger);
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    top: -6px;
+    right: -6px;
+    inset: auto;
+  }
+  .marker-label {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    font-size: 10px;
+    background: rgba(15,13,11,0.85);
+    padding: 1px 4px;
+    border-radius: 2px;
+    color: var(--paper-dim);
+    pointer-events: none;
+  }
+
+  aside {
+    border-left: 1px solid var(--line);
+    background: var(--panel);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-section {
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .panel-section h2 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--amber);
+    margin: 0 0 0.5rem;
+  }
+  .field-row { display: flex; gap: 0.5rem; margin-bottom: 0.45rem; }
+  .field-row > div { flex: 1; }
+  .field-row label { display: block; font-size: 0.68rem; color: var(--paper-dim); margin-bottom: 2px; }
+  .radio-row { display: flex; gap: 1rem; align-items: center; font-size: 0.8rem; }
+
+  .clue-list { flex: 1; overflow-y: auto; }
+  .clue-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 1rem;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .clue-row:hover { background: var(--panel-2); }
+  .clue-row.active { background: rgba(201,147,47,0.15); }
+  .clue-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber-bright); flex-shrink: 0; }
+  .clue-row.noise .dot { background: var(--danger); }
+  .clue-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clue-row .warn { color: var(--danger); font-weight: bold; }
+  .clue-row button { padding: 2px 6px; font-size: 0.7rem; }
+
+  .empty-hint { color: var(--paper-dim); font-size: 0.78rem; padding: 0.8rem 1rem; line-height: 1.5; }
+
+  output-area { display: block; }
+  #jsonOut { font-size: 0.72rem; height: 220px; white-space: pre; }
+
+  .phone-frame {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-left: 2px dashed rgba(255,255,255,0.35);
+    border-right: 2px dashed rgba(255,255,255,0.35);
+    pointer-events: none;
+  }
+  .badge { font-size: 0.68rem; padding: 1px 6px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Vantage Point — Clue Calibrator</h1>
+    <div class="sub">Load a scene image, click to drop clues, export ready-to-paste level JSON.</div>
+  </div>
+  <div class="toolbar">
+    <label class="file-btn">Load image
+      <input type="file" id="imgInput" accept="image/*" />
+    </label>
+    <label class="file-btn">Load existing clue JSON
+      <input type="file" id="jsonInput" accept="application/json" />
+    </label>
+    <span class="badge" id="imgSizeBadge">no image loaded</span>
+    <button id="togglePhoneFrame">Toggle 390px phone-width guide</button>
+  </div>
+</header>
+
+<div class="canvas-wrap" id="canvasWrap">
+  <div class="placeholder-msg" id="placeholderMsg">
+    Load a scene image (drag-and-drop or "Load image" above) to start placing clues.<br /><br />
+    Click anywhere on the image to drop a new clue marker. Drag a marker to reposition it.
+    Click a marker (or its row in the sidebar) to edit its details.
+  </div>
+  <div class="stage" id="stage" style="display:none;">
+    <img id="sceneImg" alt="scene" />
+    <div id="phoneFrame" class="phone-frame" style="display:none;"></div>
+  </div>
+</div>
+
+<aside>
+  <div class="panel-section">
+    <h2>Level</h2>
+    <div class="field-row">
+      <div>
+        <label>Level number</label>
+        <input type="number" id="levelNum" value="1" min="1" max="20" />
+      </div>
+      <div>
+        <label>Base image width (px)</label>
+        <input type="number" id="baseWidth" value="1200" readonly />
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-section" id="editSection" style="display:none;">
+    <h2>Selected clue</h2>
+    <div class="field-row">
+      <div>
+        <label>id</label>
+        <input type="text" id="f-id" />
+      </div>
+      <div>
+        <label>type</label>
+        <select id="f-type">
+          <option value="real">real</option>
+          <option value="noise">noise</option>
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label>x %</label>
+        <input type="number" id="f-x" step="0.1" />
+      </div>
+      <div>
+        <label>y %</label>
+        <input type="number" id="f-y" step="0.1" />
+      </div>
+      <div>
+        <label>radius (px @ base width)</label>
+        <input type="number" id="f-radius" step="1" />
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label>title</label>
+        <input type="text" id="f-title" />
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label>flavor text</label>
+        <textarea id="f-flavor"></textarea>
+      </div>
+    </div>
+    <div class="field-row">
+      <div>
+        <label>evidenceId (optional)</label>
+        <input type="text" id="f-evidenceId" />
+      </div>
+    </div>
+    <div class="field-row">
+      <button id="deleteClue" style="border-color: var(--danger); color: var(--danger);">Delete this clue</button>
+    </div>
+    <div class="empty-hint" id="tapWarning" style="display:none; color: var(--danger); padding: 0;"></div>
+  </div>
+
+  <div class="panel-section" style="border-bottom: none; padding-bottom: 0.4rem;">
+    <h2>Clues (<span id="clueCount">0</span>)</h2>
+  </div>
+  <div class="clue-list" id="clueList">
+    <div class="empty-hint">No clues yet. Click the image to add one.</div>
+  </div>
+
+  <div class="panel-section">
+    <h2>Export</h2>
+    <button class="primary" id="exportBtn" style="width:100%; margin-bottom: 0.5rem;">Generate level-N-clues.json</button>
+    <textarea id="jsonOut" readonly placeholder="Exported JSON appears here — copy and paste into data/level-N-clues.json"></textarea>
+  </div>
+</aside>
+
+<script>
+(() => {
+  const imgInput = document.getElementById('imgInput');
+  const jsonInput = document.getElementById('jsonInput');
+  const stage = document.getElementById('stage');
+  const sceneImg = document.getElementById('sceneImg');
+  const canvasWrap = document.getElementById('canvasWrap');
+  const placeholderMsg = document.getElementById('placeholderMsg');
+  const imgSizeBadge = document.getElementById('imgSizeBadge');
+  const levelNumInput = document.getElementById('levelNum');
+  const baseWidthInput = document.getElementById('baseWidth');
+  const clueList = document.getElementById('clueList');
+  const clueCount = document.getElementById('clueCount');
+  const editSection = document.getElementById('editSection');
+  const phoneFrame = document.getElementById('phoneFrame');
+  const togglePhoneFrameBtn = document.getElementById('togglePhoneFrame');
+  const tapWarning = document.getElementById('tapWarning');
+
+  const fId = document.getElementById('f-id');
+  const fType = document.getElementById('f-type');
+  const fX = document.getElementById('f-x');
+  const fY = document.getElementById('f-y');
+  const fRadius = document.getElementById('f-radius');
+  const fTitle = document.getElementById('f-title');
+  const fFlavor = document.getElementById('f-flavor');
+  const fEvidenceId = document.getElementById('f-evidenceId');
+
+  // Mirrors the live game's src/components/scene.js hit-target math.
+  const HIT_MULTIPLIER = 1.6;
+  const PHONE_WIDTH = 390; // a representative small-phone CSS width
+  const MIN_TAP_PX = 44; // Apple HIG / WCAG 2.5.5 minimum touch target
+
+  let naturalWidth = 0;
+  let naturalHeight = 0;
+  let clues = [];
+  let selectedId = null;
+  let phoneFrameOn = false;
+  let dragState = null;
+
+  function uid() {
+    return 'clue-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  // ---------- Image loading ----------
+
+  imgInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) loadImageFile(file);
+  });
+
+  canvasWrap.addEventListener('dragover', (e) => e.preventDefault());
+  canvasWrap.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) loadImageFile(file);
+  });
+
+  function loadImageFile(file) {
+    const url = URL.createObjectURL(file);
+    sceneImg.onload = () => {
+      naturalWidth = sceneImg.naturalWidth;
+      naturalHeight = sceneImg.naturalHeight;
+      baseWidthInput.value = naturalWidth;
+      imgSizeBadge.textContent = `${naturalWidth}×${naturalHeight}px — ${file.name}`;
+      placeholderMsg.style.display = 'none';
+      stage.style.display = 'inline-block';
+      renderMarkers();
+      updatePhoneFrame();
+    };
+    sceneImg.src = url;
+  }
+
+  // ---------- Existing JSON loading ----------
+
+  jsonInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (data.level) levelNumInput.value = data.level;
+        if (data.baseImageWidth) baseWidthInput.value = data.baseImageWidth;
+        clues = (data.clues || []).map((c) => ({ ...c }));
+        renderMarkers();
+        renderClueList();
+      } catch (err) {
+        alert('Could not parse that JSON file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  // ---------- Click-to-add ----------
+
+  stage.addEventListener('click', (e) => {
+    if (e.target !== sceneImg) return; // ignore clicks on markers themselves
+    if (naturalWidth === 0) return;
+    const rect = sceneImg.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    const clue = {
+      id: uid(),
+      type: 'real',
+      x: round1(x),
+      y: round1(y),
+      radius: Number(defaultRadiusForLevel()),
+      title: 'New clue',
+      flavor: '',
+      evidenceId: null,
+    };
+    clues.push(clue);
+    selectedId = clue.id;
+    renderMarkers();
+    renderClueList();
+    fillForm(clue);
+  });
+
+  function defaultRadiusForLevel() {
+    const map = { 1: 60, 2: 40, 3: 28, 4: 18, 5: 10 };
+    return map[Number(levelNumInput.value)] || 30;
+  }
+
+  function round1(n) {
+    return Math.round(n * 10) / 10;
+  }
+
+  // ---------- Markers ----------
+
+  function renderMarkers() {
+    [...stage.querySelectorAll('.marker')].forEach((m) => m.remove());
+    if (naturalWidth === 0) return;
+    const displayedWidth = sceneImg.getBoundingClientRect().width || naturalWidth;
+    const scaleFactor = displayedWidth / naturalWidth;
+
+    clues.forEach((clue) => {
+      const px = clue.radius * scaleFactor * HIT_MULTIPLIER;
+      const marker = document.createElement('div');
+      marker.className = 'marker' + (clue.type === 'noise' ? ' noise' : '') + (clue.id === selectedId ? ' selected' : '');
+      marker.style.left = clue.x + '%';
+      marker.style.top = clue.y + '%';
+      marker.style.width = px + 'px';
+      marker.style.height = px + 'px';
+      marker.dataset.id = clue.id;
+
+      const phoneDiameter = tapDiameterAtPhoneWidth(clue);
+      if (phoneDiameter < MIN_TAP_PX) marker.classList.add('too-small');
+
+      const label = document.createElement('div');
+      label.className = 'marker-label';
+      label.textContent = clue.title || clue.id;
+      marker.appendChild(label);
+
+      marker.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        selectedId = clue.id;
+        renderMarkers();
+        renderClueList();
+        fillForm(clue);
+        dragState = { id: clue.id, pointerId: e.pointerId };
+        marker.setPointerCapture(e.pointerId);
+      });
+      marker.addEventListener('pointermove', (e) => {
+        if (!dragState || dragState.id !== clue.id || dragState.pointerId !== e.pointerId) return;
+        const rect = sceneImg.getBoundingClientRect();
+        clue.x = round1(Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)));
+        clue.y = round1(Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100)));
+        renderMarkers();
+        if (selectedId === clue.id) fillForm(clue, true);
+      });
+      marker.addEventListener('pointerup', (e) => {
+        if (dragState && dragState.pointerId === e.pointerId) dragState = null;
+        renderClueList();
+      });
+
+      stage.appendChild(marker);
+    });
+  }
+
+  function tapDiameterAtPhoneWidth(clue) {
+    const scaleFactor = PHONE_WIDTH / naturalWidth;
+    return clue.radius * scaleFactor * HIT_MULTIPLIER * 2;
+  }
+
+  // ---------- Sidebar list ----------
+
+  function renderClueList() {
+    clueCount.textContent = clues.length;
+    if (clues.length === 0) {
+      clueList.innerHTML = '<div class="empty-hint">No clues yet. Click the image to add one.</div>';
+      return;
+    }
+    clueList.innerHTML = '';
+    clues.forEach((clue) => {
+      const row = document.createElement('div');
+      row.className = 'clue-row' + (clue.type === 'noise' ? ' noise' : '') + (clue.id === selectedId ? ' active' : '');
+      const tooSmall = naturalWidth && tapDiameterAtPhoneWidth(clue) < MIN_TAP_PX;
+      row.innerHTML = `
+        <span class="dot"></span>
+        <span class="name">${escapeHtml(clue.title || clue.id)}</span>
+        ${tooSmall ? '<span class="warn" title="Tap target under 44px at 390px phone width">⚠</span>' : ''}
+      `;
+      row.addEventListener('click', () => {
+        selectedId = clue.id;
+        renderMarkers();
+        renderClueList();
+        fillForm(clue);
+      });
+      clueList.appendChild(row);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // ---------- Edit form ----------
+
+  function fillForm(clue, skipReflow) {
+    editSection.style.display = 'block';
+    fId.value = clue.id;
+    fType.value = clue.type;
+    fX.value = clue.x;
+    fY.value = clue.y;
+    fRadius.value = clue.radius;
+    fTitle.value = clue.title || '';
+    fFlavor.value = clue.flavor || '';
+    fEvidenceId.value = clue.evidenceId || '';
+    updateTapWarning(clue);
+    if (!skipReflow) renderClueList();
+  }
+
+  function updateTapWarning(clue) {
+    if (!naturalWidth) {
+      tapWarning.style.display = 'none';
+      return;
+    }
+    const d = tapDiameterAtPhoneWidth(clue);
+    if (d < MIN_TAP_PX) {
+      tapWarning.style.display = 'block';
+      tapWarning.textContent = `⚠ Hit target is only ~${d.toFixed(0)}px at a ${PHONE_WIDTH}px phone width — under the ${MIN_TAP_PX}px minimum. Consider a larger radius, or accept it's meant to require the magnifier.`;
+    } else {
+      tapWarning.style.display = 'none';
+    }
+  }
+
+  function currentClue() {
+    return clues.find((c) => c.id === selectedId);
+  }
+
+  [fId, fType, fX, fY, fRadius, fTitle, fFlavor, fEvidenceId].forEach((el) => {
+    el.addEventListener('input', () => {
+      const clue = currentClue();
+      if (!clue) return;
+      if (el === fId) {
+        const newId = fId.value.trim() || clue.id;
+        clue.id = newId;
+        selectedId = newId;
+      } else if (el === fType) clue.type = fType.value;
+      else if (el === fX) clue.x = Number(fX.value);
+      else if (el === fY) clue.y = Number(fY.value);
+      else if (el === fRadius) clue.radius = Number(fRadius.value);
+      else if (el === fTitle) clue.title = fTitle.value;
+      else if (el === fFlavor) clue.flavor = fFlavor.value;
+      else if (el === fEvidenceId) clue.evidenceId = fEvidenceId.value.trim() || null;
+      renderMarkers();
+      renderClueList();
+      updateTapWarning(clue);
+    });
+  });
+
+  document.getElementById('deleteClue').addEventListener('click', () => {
+    clues = clues.filter((c) => c.id !== selectedId);
+    selectedId = null;
+    editSection.style.display = 'none';
+    renderMarkers();
+    renderClueList();
+  });
+
+  // ---------- Phone-width guide ----------
+
+  togglePhoneFrameBtn.addEventListener('click', () => {
+    phoneFrameOn = !phoneFrameOn;
+    updatePhoneFrame();
+  });
+
+  function updatePhoneFrame() {
+    if (!phoneFrameOn || naturalWidth === 0) {
+      phoneFrame.style.display = 'none';
+      return;
+    }
+    const displayedWidth = sceneImg.getBoundingClientRect().width || naturalWidth;
+    const scaleFactor = displayedWidth / naturalWidth;
+    const frameWidth = PHONE_WIDTH * scaleFactor;
+    phoneFrame.style.display = 'block';
+    phoneFrame.style.width = frameWidth + 'px';
+    phoneFrame.style.left = (displayedWidth - frameWidth) / 2 + 'px';
+  }
+
+  window.addEventListener('resize', () => {
+    renderMarkers();
+    updatePhoneFrame();
+  });
+
+  // ---------- Export ----------
+
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    const payload = {
+      level: Number(levelNumInput.value),
+      baseImageWidth: Number(baseWidthInput.value) || naturalWidth || 1200,
+      clues: clues.map((c) => ({
+        id: c.id,
+        type: c.type,
+        x: c.x,
+        y: c.y,
+        radius: c.radius,
+        title: c.title || '',
+        flavor: c.flavor || '',
+        evidenceId: c.evidenceId || null,
+      })),
+    };
+    document.getElementById('jsonOut').value = JSON.stringify(payload, null, 2);
+  });
+})();
+</script>
+</body>
+</html>
