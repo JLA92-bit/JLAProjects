@@ -1,0 +1,94 @@
+{
+  "level": 3,
+  "baseImageWidth": 1200,
+  "clues": [
+    {
+      "id": "keycard",
+      "type": "real",
+      "x": 30.0,
+      "y": 62.0,
+      "radius": 28,
+      "title": "Cloned security keycard",
+      "flavor": "Dropped near a drain grate. The gallery's real keycards are white - this one's a cheap duplicate, the kind sold at any hardware kiosk.",
+      "evidenceId": "keycard"
+    },
+    {
+      "id": "tire-tracks",
+      "type": "real",
+      "x": 68.0,
+      "y": 80.0,
+      "radius": 28,
+      "title": "Tire tracks by the service door",
+      "flavor": "Narrow-set tread, consistent with a compact sedan. Elena Voss drives one just like it.",
+      "evidenceId": null
+    },
+    {
+      "id": "cigarette-butts",
+      "type": "real",
+      "x": 15.0,
+      "y": 30.0,
+      "radius": 28,
+      "title": "Cigarette butts",
+      "flavor": "A specific menthol brand. Priya Anand smokes these on her breaks - she said she never left the front desk that night.",
+      "evidenceId": null
+    },
+    {
+      "id": "torn-fabric",
+      "type": "real",
+      "x": 82.0,
+      "y": 44.0,
+      "radius": 28,
+      "title": "Torn fabric on the fence",
+      "flavor": "A scrap of dark wool caught on the chain-link. Someone climbed over rather than through the gate.",
+      "evidenceId": null
+    },
+    {
+      "id": "sprayed-camera",
+      "type": "real",
+      "x": 50.0,
+      "y": 18.0,
+      "radius": 28,
+      "title": "Spray-painted camera housing",
+      "flavor": "The lens is coated in black paint. Deliberate, and recent - the paint's still slightly tacky.",
+      "evidenceId": null
+    },
+    {
+      "id": "footprints",
+      "type": "real",
+      "x": 40.0,
+      "y": 90.0,
+      "radius": 28,
+      "title": "Partial footprints in a puddle",
+      "flavor": "A woman's heel, mid-size. Heading toward the service door, not away from it.",
+      "evidenceId": null
+    },
+    {
+      "id": "receipt-scrap",
+      "type": "real",
+      "x": 58.0,
+      "y": 66.0,
+      "radius": 28,
+      "title": "Pawn shop receipt, crumpled",
+      "flavor": "Priya Anand's name is on it. A loan against a watch, dated three weeks ago. Desperate, but not damning on its own.",
+      "evidenceId": "receipt"
+    },
+    {
+      "id": "noise-trashbag",
+      "type": "noise",
+      "x": 20.0,
+      "y": 50.0,
+      "radius": 28,
+      "title": "Trash bag",
+      "flavor": "Just kitchen waste from the cafe next door. Nothing here."
+    },
+    {
+      "id": "noise-puddle",
+      "type": "noise",
+      "x": 74.0,
+      "y": 68.0,
+      "radius": 28,
+      "title": "Oil-slicked puddle",
+      "flavor": "Just runoff from a delivery van. Dead end."
+    }
+  ]
+}

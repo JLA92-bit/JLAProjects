@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#141110" />
+<meta name="description" content="Vantage Point - a noir detective clue-hunt game. Examine crime scenes, find hidden clues, solve the case." />
+<title>Vantage Point</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icons/icon-192.svg" />
+<link rel="apple-touch-icon" href="icons/icon-192.svg" />
+<link rel="stylesheet" href="src/style.css" />
+</head>
+<body>
+<div id="app" class="app"></div>
+
+<!-- ===== Templates (cloned by the JS state machine; kept out of markup as inert <template> blocks) ===== -->
+
+<template id="tpl-welcome">
+  <section class="screen screen-welcome">
+    <div class="film-grain"></div>
+    <div class="welcome-content">
+      <p class="kicker">VANTAGE POINT</p>
+      <h1>Welcome, Detective.</h1>
+      <p class="welcome-text">Before you open the case file, the department needs a name for the record. It's how the case file — and everyone in it — will address you from here on.</p>
+      <label class="name-field">
+        <span class="name-label">Detective</span>
+        <input class="name-input" data-role="name-input" type="text" maxlength="24" autocomplete="off" autocapitalize="words" placeholder="Your name" />
+      </label>
+      <button class="btn btn-primary" data-action="confirm-name">Report for Duty</button>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-intro">
+  <section class="screen screen-intro">
+    <div class="film-grain"></div>
+    <div class="intro-content">
+      <p class="kicker" data-bind="detectiveGreeting"></p>
+      <h1 class="case-title" data-bind="title"></h1>
+      <p class="case-tagline" data-bind="tagline"></p>
+      <p class="case-briefing" data-bind="briefing"></p>
+      <div class="suspect-strip" data-bind="suspectStrip"></div>
+      <button class="btn btn-primary" data-action="start-case">Open the Case</button>
+      <button class="btn btn-ghost" data-action="continue-case" hidden>Continue Investigation</button>
+      <button class="btn btn-ghost" data-action="change-name">Not you? Change name</button>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-level-intro">
+  <section class="screen screen-level-intro">
+    <div class="film-grain"></div>
+    <div class="level-intro-content">
+      <p class="kicker" data-bind="day"></p>
+      <h2 data-bind="title"></h2>
+      <p class="level-location" data-bind="location"></p>
+      <p class="level-intro-text" data-bind="intro"></p>
+      <button class="btn btn-primary" data-action="enter-scene">Examine the Scene</button>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-scene">
+  <section class="screen screen-scene">
+    <header class="scene-hud">
+      <button class="icon-btn" data-action="open-casefile" aria-label="Case file">🗂</button>
+      <div class="scene-progress">
+        <span data-bind="day"></span>
+        <div class="clue-pips" data-bind="cluePips"></div>
+      </div>
+      <button class="icon-btn" data-action="use-hint" aria-label="Hint">
+        💡<span class="badge" data-bind="hintCount"></span>
+      </button>
+    </header>
+
+    <div class="scene-viewport" data-role="viewport">
+      <div class="scene-stage" data-role="stage">
+        <img class="scene-image" data-role="image" draggable="false" alt="Crime scene" />
+        <div class="hotspot-layer" data-role="hotspots"></div>
+        <div class="hint-glow" data-role="hint-glow" hidden></div>
+      </div>
+      <div class="scan-overlay"></div>
+      <div class="vignette-overlay"></div>
+    </div>
+
+    <div class="magnifier-lens" data-role="magnifier" hidden></div>
+
+    <footer class="scene-toolbar">
+      <button class="tool-btn" data-action="zoom-out" aria-label="Zoom out">−</button>
+      <button class="tool-btn" data-action="zoom-reset" aria-label="Reset view">⤾</button>
+      <button class="tool-btn" data-action="zoom-in" aria-label="Zoom in">+</button>
+      <button class="tool-btn tool-btn-magnifier" data-action="toggle-magnifier" aria-label="Magnifying glass" hidden>
+        🔍<span class="badge" data-bind="magnifierUses"></span>
+      </button>
+      <button class="btn btn-primary btn-continue" data-action="finish-level" hidden>Continue →</button>
+    </footer>
+
+    <div class="clue-toast" data-role="toast" hidden>
+      <div class="clue-toast-card">
+        <p class="clue-toast-title" data-bind="toastTitle"></p>
+        <p class="clue-toast-flavor" data-bind="toastFlavor"></p>
+      </div>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-casefile">
+  <section class="screen screen-casefile">
+    <header class="casefile-header">
+      <div>
+        <h2>Case File</h2>
+        <p class="casefile-detective" data-bind="detectiveLine"></p>
+      </div>
+      <button class="icon-btn" data-action="close-casefile" aria-label="Close">✕</button>
+    </header>
+    <div class="corkboard" data-role="corkboard"></div>
+  </section>
+</template>
+
+<template id="tpl-accusation">
+  <section class="screen screen-accusation">
+    <div class="film-grain"></div>
+    <div class="accusation-content">
+      <p class="kicker">FINAL ACCUSATION</p>
+      <h2>Who did it? Why? With what?</h2>
+      <p class="accusation-help">Choose from what you actually found. Get all three right to close the case.</p>
+
+      <div class="accusation-group">
+        <h3>Suspect</h3>
+        <div class="choice-list" data-role="suspect-choices"></div>
+      </div>
+      <div class="accusation-group">
+        <h3>Motive</h3>
+        <div class="choice-list" data-role="motive-choices"></div>
+      </div>
+      <div class="accusation-group">
+        <h3>Key Evidence</h3>
+        <div class="choice-list" data-role="evidence-choices"></div>
+      </div>
+
+      <button class="btn btn-primary" data-action="submit-accusation" disabled>Make the Accusation</button>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-ending">
+  <section class="screen screen-ending">
+    <div class="film-grain"></div>
+    <div class="ending-content">
+      <p class="kicker" data-bind="stamp"></p>
+      <h1 data-bind="headline"></h1>
+      <p class="ending-explanation" data-bind="explanation"></p>
+      <p class="ending-signoff" data-bind="signoff"></p>
+      <button class="btn btn-primary" data-action="restart-case">Start a New Investigation</button>
+    </div>
+  </section>
+</template>
+
+<script type="module" src="src/main.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch((err) => console.warn('[vantage-point] sw failed', err));
+    });
+  }
+  // Block iOS/Safari's native pinch-zoom and double-tap-to-zoom so the
+  // custom in-scene pan/zoom is the only zoom gesture on the page.
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  let lastTouchEnd = 0;
+  document.addEventListener(
+    'touchend',
+    (e) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) e.preventDefault();
+      lastTouchEnd = now;
+    },
+    { passive: false }
+  );
+</script>
+</body>
+</html>

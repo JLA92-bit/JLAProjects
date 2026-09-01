@@ -1,0 +1,66 @@
+{
+  "level": 2,
+  "baseImageWidth": 1200,
+  "clues": [
+    {
+      "id": "forged-signature",
+      "type": "real",
+      "x": 22.0,
+      "y": 40.0,
+      "radius": 40,
+      "title": "Mismatched signature",
+      "flavor": "Damon Reyes's signature on this canvas doesn't match the one on his contract. This piece is a forgery wearing his name.",
+      "evidenceId": null
+    },
+    {
+      "id": "guest-list",
+      "type": "real",
+      "x": 68.0,
+      "y": 58.0,
+      "radius": 40,
+      "title": "Guest sign-in sheet",
+      "flavor": "Colin Hargrove signed in under 'C. Hart.' He didn't want the front desk connecting his name to Marcus's.",
+      "evidenceId": null
+    },
+    {
+      "id": "unplugged-camera",
+      "type": "real",
+      "x": 84.0,
+      "y": 22.0,
+      "radius": 40,
+      "title": "Unplugged security camera",
+      "flavor": "The power cable's been pulled from this unit. Someone didn't want this angle recorded.",
+      "evidenceId": null
+    },
+    {
+      "id": "champagne-lipstick",
+      "type": "real",
+      "x": 40.0,
+      "y": 72.0,
+      "radius": 40,
+      "title": "Champagne flute with lipstick",
+      "flavor": "The shade matches a lipstick Elena Voss is known to wear. She said she left before the reception ended.",
+      "evidenceId": null
+    },
+    {
+      "id": "cufflink",
+      "type": "real",
+      "x": 55.0,
+      "y": 85.0,
+      "radius": 40,
+      "title": "Dropped cufflink",
+      "flavor": "Engraved with a family crest. Not one anyone on staff recognizes - but it matches an old photo of the Hargrove family.",
+      "evidenceId": null
+    },
+    {
+      "id": "ledger-note",
+      "type": "real",
+      "x": 12.0,
+      "y": 66.0,
+      "radius": 40,
+      "title": "Sticky note near the office door",
+      "flavor": "'Numbers don't match Q3 - ask E.' in Marcus's handwriting. He'd noticed something was wrong before he died.",
+      "evidenceId": null
+    }
+  ]
+}

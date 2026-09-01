@@ -1,0 +1,74 @@
+{
+  "level": 4,
+  "baseImageWidth": 1200,
+  "clues": [
+    {
+      "id": "torn-ledger",
+      "type": "real",
+      "x": 34.0,
+      "y": 74.0,
+      "radius": 18,
+      "title": "Half-burned ledger page",
+      "flavor": "Fished from the wastebasket, only half burned. The surviving numbers show three years of quietly skimmed commissions - all funneled through Elena's approvals.",
+      "evidenceId": "torn-ledger"
+    },
+    {
+      "id": "second-books",
+      "type": "real",
+      "x": 60.0,
+      "y": 40.0,
+      "radius": 18,
+      "title": "Hidden second ledger",
+      "flavor": "Taped beneath a desk drawer. The real numbers, next to the ones shown to Marcus and the accountant.",
+      "evidenceId": null
+    },
+    {
+      "id": "bank-statement",
+      "type": "real",
+      "x": 18.0,
+      "y": 28.0,
+      "radius": 18,
+      "title": "Bank transfer statement",
+      "flavor": "Regular transfers to an account that isn't the gallery's. The dates line up with the discrepancies in the second ledger.",
+      "evidenceId": null
+    },
+    {
+      "id": "colins-letter",
+      "type": "real",
+      "x": 76.0,
+      "y": 62.0,
+      "radius": 18,
+      "title": "Unsent letter, unrelated hand",
+      "flavor": "Colin Hargrove's handwriting, addressed to Marcus, full of old grievances about the family trust. Angry, but it's about the past - dated over a year ago.",
+      "evidenceId": null
+    },
+    {
+      "id": "damons-email",
+      "type": "real",
+      "x": 46.0,
+      "y": 18.0,
+      "radius": 18,
+      "title": "Printed email thread",
+      "flavor": "Damon Reyes accusing Marcus of selling forgeries under his name. Furious, but it ends with Damon threatening a lawsuit - not violence.",
+      "evidenceId": null
+    },
+    {
+      "id": "noise-stapler",
+      "type": "noise",
+      "x": 66.0,
+      "y": 80.0,
+      "radius": 18,
+      "title": "Stapler",
+      "flavor": "Just office supplies."
+    },
+    {
+      "id": "noise-calendar",
+      "type": "noise",
+      "x": 28.0,
+      "y": 50.0,
+      "radius": 18,
+      "title": "Desk calendar",
+      "flavor": "Dentist appointment circled in red. Not relevant."
+    }
+  ]
+}

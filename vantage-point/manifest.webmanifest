@@ -1,0 +1,15 @@
+{
+  "name": "Vantage Point",
+  "short_name": "Vantage Point",
+  "description": "A noir detective clue-hunt game. Examine crime scenes, find hidden clues, solve the case.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f0d0b",
+  "theme_color": "#141110",
+  "icons": [
+    { "src": "icons/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
