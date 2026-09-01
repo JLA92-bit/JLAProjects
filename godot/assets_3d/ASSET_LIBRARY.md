@@ -21,11 +21,14 @@ multi-piece assemblies (see the farmhouse).
 
 ## Already in this repo
 
-- `nature_kit/` — 27 of 329 available pieces (ground, crops, fences, trees,
-  rocks, flowers, mushrooms, a stump, a sign, a bush).
+- `nature_kit/` — 34 of 329 available pieces (ground, crops, fences, a
+  gate, trees, rocks, flowers, mushrooms, stumps, a sign, a bush, a stone
+  path tile).
 - `character/` — full Blocky Characters kit (player model + skin).
-- `fantasy_town_kit/` — 4 of ~160 available pieces (the farmhouse's walls,
-  roof, and chimney).
+- `fantasy_town_kit/` — 10 of ~160 available pieces: the wood and stone
+  wall/roof/chimney sets for three buildings (farmhouse, barn, stone
+  cottage - see `_build_wall_box_scene()`), plus a market stall and cart
+  as the village's two single-piece props.
 - `food_kit/` — 1 of 200 available pieces (tomato).
 - `textures/` — a real grass photo texture and Kacie's portrait (not from
   Kenney; see CREDITS.md for those two specifically).
@@ -138,25 +141,32 @@ confirmed independently against kenney.nl - see CREDITS.md). Only the
 plain wood wall, door wall, gable roof, and chimney are used (the
 farmhouse). Still available:
 
-- **More wall variants**: stone walls (`wall.glb`, `wallBlock`,
-  `wallCorner`, `wallCurved`, `wallBroken`, arches, etc. - a full parallel
-  stone set to the wood one already used), plus `wallWoodWindowGlass`,
-  `wallWoodWindowRound`, `wallWoodWindowShutters`, `wallWoodWindowSmall`,
-  `wallWoodWindowStone` (window variety - the farmhouse tried the glass
-  one and reverted to plain walls because the glass read as a solid black
-  square at this camera's distance; the *small* or *shutters* window
-  might read better and is worth trying if the farmhouse gets revisited).
-- **More roofs**: `roofFlat`, `roofHigh` (+ corner/gable/flat variants),
-  `roofCorner`, `roofCornerRound` — could build a second, differently-
-  shaped building (a barn or shed) alongside the farmhouse.
-- **Fences/hedges**: `fence.glb`, `fenceBroken`, `fenceCurved`,
-  `fenceGate.glb`, `hedge.glb`, `hedgeCurved`, `hedgeGate` — an
-  alternative fence style if the Nature Kit one ever needs variety.
-  `fenceGate`/`hedgeGate` in particular could mark the farm's entrance.
-  visually rather than a plain fence segment.
+- **More wall variants**: `wall`/`wallDoor`/`wallWindowShutters` (the
+  stone set) and `roofHigh` are now used for the barn/stone cottage - see
+  `assets_3d/CREDITS.md`. Still unused: `wallBlock`, `wallCorner`,
+  `wallCurved`, `wallBroken`, arches, etc. for more wall variety, plus
+  `wallWoodWindowGlass`, `wallWoodWindowRound`, `wallWoodWindowSmall`,
+  `wallWoodWindowStone` (more window styles - the farmhouse itself tried
+  the glass window and reverted to a plain wall because it read as a
+  solid black square at this camera's distance; `wallWindowShutters`,
+  used on the new stone cottage, reads fine).
+- **More roofs**: `roofFlat` (+ corner/gable/flat variants), `roofCorner`,
+  `roofCornerRound` — could build a 4th, differently-shaped building if
+  the village ever wants more variety beyond the farmhouse/barn/cottage.
+- **Fences/hedges**: `hedge.glb`, `hedgeCurved`, `hedgeGate` — an
+  alternative fence style to the Nature Kit one now used (including its
+  own `fence_gate.glb`, marking the farm's entrance where the path to the
+  village crosses the fence - see `_build_village()`).
   - a `pillarWood`/`pillarStone`, `lantern.glb`, `chimney` variants, and
-  `cart.glb`/`cartHigh.glb` (a produce cart - thematically perfect for a
-  farm stand or market stall if that's ever added as a feature).
+  `cartHigh.glb` (`cart.glb` itself is now used, parked by the market
+  stall - see `_build_village()`).
+  - `windmill.glb` was tried as a landmark and dropped: its blade-plane
+    happened to line up almost edge-on with this game's fixed diagonal
+    camera angle and rendered as a near-invisible dark sliver even after
+    a 90-degree yaw; `stall.glb` + `cart.glb` cover the "village prop"
+    need instead. Worth another look only with either a different camera
+    angle or an explicit yaw tuned by trial and error against a render,
+    not assumed from the raw glTF bounds alone.
 
 ```bash
 cd kenney_mirror && git sparse-checkout add "fantasy-town-kit-1.0/Models/GLTF format"
