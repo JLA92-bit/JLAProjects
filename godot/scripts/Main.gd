@@ -42,6 +42,10 @@ const COL_ALERT := Color(0.910, 0.384, 0.235)       # ~oklch(0.72 0.17 28) - bad
 const WORLD_TILE := 1.0
 const PLAYER_SCALE := 0.1 # basicCharacter.gltf is modeled ~17 units tall
 const PLAYER_Y_OFFSET := 0.1 # compensates its feet sitting slightly below y=0
+const WALK_CYCLE_SPEED := 9.0 # radians/sec the leg/arm swing phase advances at while moving
+const WALK_LEG_SWING := 0.55 # radians, peak hip rotation
+const WALK_ARM_SWING := 0.4 # radians, peak shoulder rotation
+const WALK_BLEND_SPEED := 4.0 # how fast walk_amount eases toward 0/1 on start/stop, in 1/sec
 
 # ---------- In-app update check (Android only) ----------
 # Compares the commit this build was stamped with (godot/build_version.json,
@@ -444,6 +448,9 @@ var is_new_game := false # true only for the very first _ready() before any save
 
 var player_pos := Vector2(TILE * 2, TILE * 2)
 var player_facing := "down"
+var player_is_moving := false
+var walk_phase := 0.0
+var walk_amount := 0.0 # smoothed 0..1 - how much walk-swing to blend in, so stopping doesn't snap the limbs to idle
 
 # ---------- Node refs ----------
 var world_scenes := {} # key -> PackedScene (3D models)
@@ -451,6 +458,10 @@ var farm_viewport: SubViewport
 var world_root: Node3D
 var tile_nodes := [] # 2D array of {"node":Node3D, "ground":Node3D, "ground_key":String, "crop":Node3D}
 var player_node: Node3D
+var player_leg_left_pivot: Node3D
+var player_leg_right_pivot: Node3D
+var player_arm_left_pivot: Node3D
+var player_arm_right_pivot: Node3D
 var player_skin_material: StandardMaterial3D
 var tile_highlight: MeshInstance3D
 var farm_camera: Camera3D
@@ -1004,7 +1015,33 @@ func _build_player():
 	player_node.scale = Vector3.ONE * PLAYER_SCALE
 	_apply_player_skin(player_node)
 	world_root.add_child(player_node)
+	_rig_walk_pivots()
 	_build_tile_highlight()
+
+# basicCharacter.gltf ships as six flat mesh nodes (Body1/Head1/Arm*1/Leg*1)
+# with no skeleton and no animations - the geometry itself is baked at its
+# final world-space offset rather than centred on a joint. To swing a limb
+# it first needs a pivot Node3D placed at its joint (shoulder/hip), with the
+# mesh reparented underneath and shifted back by the same amount so nothing
+# visually moves until the pivot rotates.
+func _rig_walk_pivots() -> void:
+	player_leg_left_pivot = _make_limb_pivot("LegLeft1", Vector3(1, 6, 0))
+	player_leg_right_pivot = _make_limb_pivot("LegRight1", Vector3(-1, 6, 0))
+	player_arm_left_pivot = _make_limb_pivot("ArmLeft1", Vector3(3, 12, 0))
+	player_arm_right_pivot = _make_limb_pivot("ArmRight1", Vector3(-3, 12, 0))
+
+func _make_limb_pivot(node_name: String, pivot_pos: Vector3) -> Node3D:
+	var mesh := player_node.get_node_or_null(node_name) as MeshInstance3D
+	if mesh == null:
+		return null
+	var pivot := Node3D.new()
+	pivot.name = node_name + "Pivot"
+	pivot.position = pivot_pos
+	player_node.add_child(pivot)
+	player_node.remove_child(mesh)
+	pivot.add_child(mesh)
+	mesh.position = -pivot_pos
+	return pivot
 
 # A bright, semi-transparent quad marking the tile a tool use (or harvest)
 # will actually land on - sized slightly smaller than a full tile so the
@@ -1036,6 +1073,7 @@ func _process(delta: float) -> void:
 		day_progress = 0.0
 		_day_tick()
 	_update_player_visual()
+	_update_player_walk_anim(delta)
 	_update_tile_highlight()
 
 func _handle_movement(delta: float) -> void:
@@ -1052,7 +1090,8 @@ func _handle_movement(delta: float) -> void:
 	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT) or move_right_held:
 		dir.x += 1
 		player_facing = "right"
-	if dir.length() > 0:
+	player_is_moving = dir.length() > 0
+	if player_is_moving:
 		dir = dir.normalized()
 		player_pos += dir * PLAYER_SPEED * delta
 		player_pos.x = clamp(player_pos.x, 0, (COLS - 1) * TILE)
@@ -1073,6 +1112,22 @@ func _update_player_visual() -> void:
 	# visibly turned to look right when moving left, and vice versa.
 	var facing_yaw: float = {"down": 0.0, "up": PI, "left": -PI / 2.0, "right": PI / 2.0}[player_facing]
 	player_node.rotation.y = facing_yaw
+
+func _update_player_walk_anim(delta: float) -> void:
+	walk_amount = move_toward(walk_amount, 1.0 if player_is_moving else 0.0, delta * WALK_BLEND_SPEED)
+	if player_is_moving or walk_amount > 0.001:
+		walk_phase += delta * WALK_CYCLE_SPEED
+	var leg_swing := sin(walk_phase) * WALK_LEG_SWING * walk_amount
+	var arm_swing := sin(walk_phase) * WALK_ARM_SWING * walk_amount
+	if player_leg_left_pivot:
+		player_leg_left_pivot.rotation.x = leg_swing
+	if player_leg_right_pivot:
+		player_leg_right_pivot.rotation.x = -leg_swing
+	# arms swing opposite the same-side leg, like a natural gait
+	if player_arm_left_pivot:
+		player_arm_left_pivot.rotation.x = -arm_swing
+	if player_arm_right_pivot:
+		player_arm_right_pivot.rotation.x = arm_swing
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
