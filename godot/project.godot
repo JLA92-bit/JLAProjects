@@ -25,3 +25,12 @@ window/energy_saving/keep_screen_on=true
 
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
+# stretch/aspect="keep" above pillarboxes/letterboxes this portrait-designed
+# project on any window whose aspect doesn't match 720x1560 - inevitable on
+# a wide desktop browser, where it reads as a narrow phone-shaped strip with
+# huge bars on both sides. Those bars are the root viewport's own clear
+# color, stark black by default, which reports as "broken"/"ugly" even
+# though it's expected letterboxing. Matches boot_splash/bg_color above (and
+# COL_GLASS_BG in scripts/Main.gd, the same tone every HUD glass card uses)
+# so the bars read as this game's own dark frame instead of empty void.
+environment/defaults/default_clear_color=Color(0.105882, 0.164706, 0.117647, 1)
