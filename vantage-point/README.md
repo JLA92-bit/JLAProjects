@@ -1,6 +1,6 @@
 # Vantage Point
 
-A mobile-first, noir detective clue-hunt game. Examine photo-realistic crime
+A mobile-first, noir detective clue-hunt game. Examine illustrated crime
 scenes, tap to find hidden clues, review your case file, and make a final
 accusation. Plain HTML5 + CSS + JavaScript (ES modules, no build step),
 installable as a PWA.
@@ -9,7 +9,7 @@ installable as a PWA.
 entry, briefing, 5 levels, case file, accusation, both endings. Branding
 (wordmark, app icons, corkboard pin, magnifier tool icon, film grain) is
 real, designed art. Scene backgrounds are still **labeled placeholder
-images**, not final photo-realistic art — that's the one piece left. See
+images**, not final illustrated art — that's the one piece left. See
 [Swapping in real art](#swapping-in-real-art) below.
 
 ## Running it locally
@@ -90,8 +90,9 @@ closing it returns to the scene in progress.
    }
    ```
 
-3. Drop a scene image at `scenes/level-N.jpg` (or `.svg` while placeholder)
-   and point `case.json`'s `levels[N].image` at it.
+3. Drop a scene image at `scenes/level-N.svg` (illustrated art — see
+   [Swapping in real art](#swapping-in-real-art) below) and point
+   `case.json`'s `levels[N].image` at it.
 4. Tune `requiredClues` (the "good enough" threshold to unlock Continue)
    and `clueGoal` (total real clues, used for the HUD pip count) per level.
 
@@ -105,9 +106,9 @@ Difficulty is entirely data-driven per level, via the clue JSON:
 - **Distraction** — `"type": "noise"` hotspots (from level 3 on) give flavor
   text but don't count toward progress — dead ends that look plausible.
 - **Camouflage** — this one lives in the *art*, not the code: later scene
-  images should color/texture-match clues to their surroundings. The
-  placeholder art can't demonstrate this; it'll show up once real/AI photos
-  are dropped in.
+  illustrations should color/shape-match clues to their surroundings. The
+  placeholder art can't demonstrate this; it'll show up once final art is
+  dropped in.
 - The magnifying glass (`level.magnifierUnlocked`) is available from level 3
   on in the shipped case, with a limited number of uses per level
   (`MAGNIFIER_USES_PER_LEVEL` in `src/components/scene.js`).
@@ -118,22 +119,24 @@ Every scene is currently a generated placeholder SVG (regenerate them via
 `python3 scripts/make-placeholders.py`) — a solid noir-toned background with
 the level name stamped on it, clearly **not** final art.
 
-To finish the game, replace each `scenes/level-N.svg` with a real photo or
-photo-realistic AI-generated image (`scenes/level-N.jpg`), then update the
-`"image"` field for that level in `data/case.json`. Hotspot coordinates are
-stored as **percentages** of the image, so a same-aspect-ratio replacement
-image needs no coordinate changes — only re-check placement if the new
-image's composition differs meaningfully from the placeholder's implied
-layout.
+**Art direction: illustrated/vector noir, not photo-realistic** — chosen
+specifically so the final art can be built the same way the icons/wordmark/
+pin/magnifier were: directly as SVG (by Claude Design or any vector tool),
+dropped straight into `scenes/level-N.svg` with no format conversion. To
+finish the game, replace each placeholder `scenes/level-N.svg` with a real
+illustrated one at the same path — `data/case.json` already points there,
+so it's a straight overwrite, not a data change. Hotspot coordinates are
+stored as **percentages** of the image; since this is vector art built to
+spec rather than a photo shoot, there's no reason for the final composition
+to drift from the coordinates at all.
 
 **[`SHOT-LIST.md`](./SHOT-LIST.md)** is the actual art brief — deliverable
-spec (3:4 portrait, 1200×1600 min, level 5 needs 2400×3200), grade/palette
-notes, and a per-level table of every clue's exact target position and
-size as a % of frame width, taken directly from the shipped
-`data/level-N-clues.json`. Compose to it and no coordinate rework is
-needed. If a scene gets shot to a different composition anyway, use
-`tools/clue-calibrator.html` instead — drop the photo in, click each clue,
-export ready-to-paste JSON.
+spec (3:4 portrait, viewBox `0 0 1200 1600`, illustrated noir look, palette
+matched to `src/style.css`), and a per-level table of every clue's exact
+target position and size as a % of frame width, taken directly from the
+shipped `data/level-N-clues.json`. Build to it and no coordinate rework is
+needed. If a composition drifts anyway, `tools/clue-calibrator.html` is the
+fallback — drop the image in, click each clue, export ready-to-paste JSON.
 
 ## Mobile/PWA notes
 

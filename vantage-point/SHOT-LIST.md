@@ -1,28 +1,33 @@
-# Vantage Point — scene shot list & prompt sheet
+# Vantage Point — scene art brief
 
-Art brief for the five `scenes/level-N.jpg` backgrounds of *The Hargrove Affair*.
+Art brief for the five `scenes/level-N.svg` backgrounds of *The Hargrove Affair*.
+
+**Art direction (revised):** illustrated/vector noir, not photo-realistic. Built directly as SVG —
+by Claude Design, or any hand-drawn/vector tool — so it can be dropped straight into the game with
+no format conversion. This replaced an earlier photo-realistic direction; see the note at the bottom
+of this file for why.
+
 Positions are taken from the shipped `data/level-N-clues.json` — they are a spec, not a suggestion.
-**Compose to these maps and no coordinate rework is needed.** If a scene has already been shot to a
-different composition, use `tools/clue-calibrator.html` instead (drop the photo in, click each clue,
-export JSON) — that's the fallback, not the plan.
-
-A laid-out version with visual framing maps (dots drawn at each clue's true relative size) is in the
-design project alongside this file.
+**Because this is vector art built in code, clue objects should be placed at these exact
+coordinates** — unlike a photo shoot or an AI photo render, there's no reason for the final
+composition to drift from the spec at all. If it does anyway, `tools/clue-calibrator.html` is still
+the fallback (drop the image in, click each clue, export JSON).
 
 ## Deliverable spec
 
 | | |
 |---|---|
-| Format | `scenes/level-N.jpg` |
+| Format | `scenes/level-N.svg`, viewBox `0 0 1200 1600` (matches `baseImageWidth` in the clue JSON) |
 | Aspect | **3:4 portrait** — non-negotiable, coordinates are % based |
-| Size | 1200×1600 min · 2400×3200 preferred · level 5 **must** be 2400×3200 |
-| Look | real photo or photoreal AI render only — no illustration, 3D-render or vector look |
-| Grade | warm amber key, cold shadow, deep falloff; one dominant practical per scene |
-| Palette | match the UI — amber `#c9932f`, paper `#e8dcc0`, ink `#0f0d0b` |
-| Avoid | faces, readable brand signage, motion blur |
+| Look | illustrated noir — flat/limited color, strong shapes, moody lighting via gradients and shadow shapes. Not photo-realistic, not a literal line-art sketch, not clip-art flat. Think noir graphic-novel panel, not a UI icon. |
+| Grade | warm amber key, cold shadow, deep falloff; one dominant light source per scene |
+| Palette | match the UI already shipped in `src/style.css` — ink `#0f0d0b`, panel `#171310`, amber `#c9932f`, amber-bright `#e8a93a`, paper `#e8dcc0` |
+| Avoid | faces (silhouette or off-frame is fine), readable text/signage baked into the art |
 
 Clue diameter as a share of frame width, by level: **L1 10.0% · L2 6.7% · L3 4.7% · L4 3.0% · L5 1.7%**.
 In-game hit areas are 1.6× the visual radius, so small clues stay tappable — they only need to be hard to *spot*.
+Camouflage (levels 3-5) means matching the clue object's fill color and simplified shape closely to
+whatever's around it in the illustration, not literally hiding it off-canvas.
 
 ---
 
@@ -111,7 +116,7 @@ Cluttered co-director's office, mid-morning, blinds half-shut throwing hard slat
 
 Interior of a compact sedan in an underground garage, shot from the rear seat toward the dash and open glove box, driver's door ajar. Cold fluorescents through the windshield, near-black footwells. Visor, dash, glove box, door pocket and a sliver of tyre all in frame.
 
-*Difficulty:* Magnifier level. ~20px objects on a 1200px image: genuinely small but absolutely sharp. Shoot 2400×3200, deep depth of field, no soft focus where a clue sits.
+*Difficulty:* Magnifier level. ~20px objects on a 1200px canvas: genuinely small but drawn with clean, crisp linework — no object a clue sits on should be rendered soft or blurred, since the in-game magnifier will zoom straight into it.
 
 | # | Object | Placement | x / y | ø |
 |---|---|---|---|---|
@@ -124,9 +129,21 @@ Interior of a compact sedan in an underground garage, shot from the rear seat to
 
 ---
 
-## After the images land
+## After the art lands
 
-1. Drop each file at `scenes/level-N.jpg`.
-2. Point `levels[N].image` in `data/case.json` at the new path.
-3. Spot-check one clue per level against the map above; if a composition drifted, re-export that level's coordinates with `tools/clue-calibrator.html`.
-4. Bump `CACHE_NAME` in `sw.js` so installed clients pick up the new art.
+1. Drop each file at `scenes/level-N.svg` (already the path `data/case.json` points to — placeholder art lives there today, so this is a straight overwrite).
+2. Spot-check one clue per level against the map above; because this is vector art placed at exact coordinates, it should match without rework. If it doesn't, re-plot that level's coordinates with `tools/clue-calibrator.html`.
+3. Bump `CACHE_NAME` in `sw.js` so installed clients pick up the new art.
+
+## Why this changed from a photo brief to an illustration brief
+
+This file originally specified real photos / photoreal AI renders, generated externally (Gemini) and
+manually dropped in — because that's what a "photo-realistic crime scene" strictly requires, and no
+tool in this project's own toolchain can generate photorealistic pixels. That pipeline worked (see
+git history), but it meant two tools and a manual per-level handoff/recalibration step for every
+scene. The art direction changed to illustrated/vector noir specifically so the whole pipeline could
+live in one place — Claude Design draws directly in SVG with clues placed at the exact spec
+coordinates, and it drops straight into the game with no conversion or recalibration step. The
+trade-off is real: illustrated art is a genuine departure from the original "photo-realistic, texture-
+camouflaged" brief, and camouflage on levels 3-5 now relies on matched flat color/shape rather than
+matched photo texture. That trade was made deliberately in favor of a single-tool pipeline.
