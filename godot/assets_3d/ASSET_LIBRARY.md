@@ -30,6 +30,11 @@ multi-piece assemblies (see the farmhouse).
   cottage - see `_build_wall_box_scene()`), plus a market stall and cart
   as the village's two single-piece props.
 - `food_kit/` — 1 of 200 available pieces (tomato).
+- `hexagon_kit/` — 5 of ~63 available pieces, used as terrain-matched
+  world-map region landmarks (`building_village`/`building_farm`/
+  `building_mine`/`water`/`sand` - see `TERRAIN_LANDMARK` and
+  `_set_region_landmark()` in `scripts/Main.gd`, and `assets_3d/CREDITS.md`
+  for the full mapping/rationale).
 - `textures/` — a real grass photo texture and Kacie's portrait (not from
   Kenney; see CREDITS.md for those two specifically).
 - `animal_models/` — real cow and sheep models converted from `.blend`
@@ -181,6 +186,46 @@ Worth checking for specific produce names if a new crop type is added.
 
 ```bash
 cd kenney_mirror && git sparse-checkout add "foodKit_v1.2"
+```
+
+## Kenney "Hexagon Kit" (1.0) — `kenney_hexagonkit_1/Models/GLTF format/`
+~63 models, a hex-tile-based terrain/settlement kit. 5 pieces used as the
+world map's per-region landmarks (see `assets_3d/CREDITS.md`). Each piece
+is a complete standalone hex tile - terrain and any building on it baked
+into one mesh at native ~1-unit hex width, matching this project's
+`WORLD_TILE = 1.0` - so any of these can be dropped in directly with no
+scale tuning beyond an intentional size bump (used at 3x for landmark
+presence). Confirmed via a throwaway-project render to be a close style
+match for the existing Nature Kit/Fantasy Town Kit pieces (same flat-
+shaded low-poly look, same muted palette) despite coming from a different
+pack. Still unused:
+- **More buildings**: `building_house`, `building_cabin`, `building_dock`,
+  `building_castle`, `building_tower`, `building_wall`, `building_market`,
+  `building_mill`, `building_sheep`, `building_water` - a bigger variety
+  than the 5 terrains this game currently has, useful if `COUNTRY_TERRAIN`
+  or the Act/tier system ever wants a visually distinct "capital"/high-
+  value region landmark instead of reusing the same one per terrain type.
+  `building_dock` and `building_cabin` were tried for "water"/"beach" and
+  dropped - their own baked-in hex base reads as plain grass/stone rather
+  than sand or water, so the plain `water`/`sand` terrain tiles alone read
+  more honestly for an all-water or all-sand country.
+- **More terrain**: `grass_forest`, `dirt`, `dirt_lumber`, `sand_rocks`,
+  `stone`, `stone_mountain`, `stone_rocks`, `water_island`, `water_rocks` -
+  finer-grained terrain variety than the current 5-terrain/5-landmark
+  mapping uses.
+- **Path/river connector pieces**: `path_corner`/`path_straight`/
+  `path_crossing`/etc. and a parallel `river_*` set (both come in every
+  hex-edge orientation) - built for tiling a real hex-grid world map (as
+  opposed to this game's one-landmark-per-region approach), if the World
+  Map screen ever becomes a real navigable hex grid instead of the
+  scrollable text list it is now.
+- **Units**: `unit_boat`, `unit_house`, `unit_houseLarge`, `unit_mill`,
+  `unit_tower`, `unit_tree`, `unit_wallTower` - smaller standalone props
+  (no baked-in hex base) meant to sit loose on top of any terrain tile,
+  unlike the self-contained `building_*` pieces above.
+
+```bash
+cd kenney_mirror && git sparse-checkout add "kenney_hexagonkit_1/Models/GLTF format"
 ```
 
 ## Kenney "Holiday Pack" — `kenney_holidaypack/Models/GLTF format/`

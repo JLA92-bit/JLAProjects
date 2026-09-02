@@ -46,6 +46,21 @@ required, but it's credited here anyway.
   village cluster behind the farmhouse (see `_build_village()`), so the
   area past the fence reads as "a farm on the edge of a settlement"
   instead of one lone house facing empty grass.
+- `hexagon_kit/` — 5 of ~63 available pieces from Kenney's "Hexagon Kit"
+  (1.0), same mirror as above. Each piece here is a complete, self-
+  contained hex tile (terrain + whatever sits on it modeled and colored
+  together) rather than a separate ground+prop pair, which is what makes
+  it usable as a drop-in "landmark" - see `_set_region_landmark()` in
+  `scripts/Main.gd`. Every owned world-map region used to render with the
+  exact same farmhouse/village backdrop as the Home Farm regardless of its
+  real terrain; switching to an owned region now hides that home cluster
+  and shows one of these instead, picked by `TERRAIN_LANDMARK` from the
+  region's `COUNTRY_TERRAIN` entry: `building_farm` (a tilled field) for
+  "farmland", `building_village` for "grass", `building_mine` (a rocky
+  quarry) for "cliff", and the plain `water`/`sand` terrain tiles alone
+  (no building) for "water"/"beach" - an all-ocean or all-sand country
+  reads fine without a settlement drawn on top of it. See
+  `hexagon_kit/License.txt`.
 - `food_kit/tomato.glb` — from Kenney's "Food Kit", same mirror as above,
   replacing the melon model that previously stood in for tomato's
   ready-to-harvest stage. Modeled at Food Kit's own (much smaller,

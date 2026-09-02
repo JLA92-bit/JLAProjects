@@ -108,6 +108,19 @@ const TERRAIN_FLAVOR := {
 	"water": "naturally irrigated - never needs manual watering",
 }
 
+# Which world_scenes key stands in as an owned region's 3D landmark, per
+# terrain - see _set_region_landmark(). "farmland" gets its own exact-match
+# hex (a tilled field); "beach"/"water" use a plain terrain hex with no
+# building since an all-sand or all-ocean country reads fine on its own;
+# "cliff" gets a quarry/mine tile for a barren, rocky-outpost feel.
+const TERRAIN_LANDMARK := {
+	"grass": "hex_village",
+	"farmland": "hex_farm",
+	"cliff": "hex_mine",
+	"water": "hex_water",
+	"beach": "hex_sand",
+}
+
 # ---------- Equipment upgrades (durable money sinks, Act 2+) ----------
 const BASE_STORAGE_CAP := 15
 const UPGRADE_KEYS := ["watering_can_2", "storage_silo_1", "storage_silo_2", "sprinkler_system", "scarecrow", "greenhouse", "regional_council"]
@@ -464,6 +477,9 @@ var player_arm_left_pivot: Node3D
 var player_arm_right_pivot: Node3D
 var player_skin_material: StandardMaterial3D
 var tile_highlight: MeshInstance3D
+var home_landmark_root: Node3D
+var region_landmark_root: Node3D
+var current_landmark_terrain := ""
 var farm_camera: Camera3D
 var cam_base_size: float
 var cam_zoom := 1.0
@@ -733,6 +749,7 @@ func _play_sfx(key: String) -> void:
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
 	const FT := "res://assets_3d/fantasy_town_kit/"
+	const HK := "res://assets_3d/hexagon_kit/"
 	# Kenney's ground_grass.glb is a flat solid vertex color (no texture at
 	# all), which read as an unrealistic flat-green void once it was also
 	# used to fill the whole backdrop beyond the farm. Swapped for a real
@@ -806,6 +823,17 @@ func _load_world_assets():
 	world_scenes["rock_small_d"] = load(NK + "rock_smallD.glb")
 	world_scenes["bush_large"] = load(NK + "plant_bushLarge.glb")
 	world_scenes["stump_old"] = load(NK + "stump_old.glb")
+	# Kenney "Hexagon Kit" pieces (CC0, see assets_3d/CREDITS.md) - each is a
+	# complete, self-contained hex tile (ground + whatever sits on it baked
+	# together) rather than a separate ground+prop pair, so one of these
+	# alone is enough to stand in as an owned region's landmark. Used by
+	# _set_region_landmark() to give each owned world-map region a terrain-
+	# matched 3D landmark instead of every plot looking identical.
+	world_scenes["hex_village"] = load(HK + "building_village.glb")
+	world_scenes["hex_farm"] = load(HK + "building_farm.glb")
+	world_scenes["hex_mine"] = load(HK + "building_mine.glb")
+	world_scenes["hex_water"] = load(HK + "water.glb")
+	world_scenes["hex_sand"] = load(HK + "sand.glb")
 
 func _init_fresh_state():
 	plots = {"home": _make_empty_grid()}
@@ -859,8 +887,35 @@ func _switch_active_plot(plot_id: String) -> void:
 	tiles = plots[plot_id]
 	_redraw_all_tiles()
 	var terrain = _terrain_for_plot(plot_id)
+	_set_region_landmark(plot_id)
 	_log("Now farming: %s (%s)." % [_plot_display_name(plot_id), TERRAIN_FLAVOR.get(terrain, "")])
 	_refresh_all()
+
+# Every owned plot used to render with the exact same farmhouse-and-village
+# backdrop regardless of which real-world region it actually was - Fiji
+# (water) and Nepal (cliff) looked identical to the Home Farm. Swaps in a
+# terrain-matched Hexagon Kit landmark instead: home_landmark_root (the
+# farmhouse/barn/cottage cluster) only makes sense as "your own farm", so it
+# shows only for "home"; every other plot gets region_landmark_root rebuilt
+# with the one hex tile TERRAIN_LANDMARK maps its terrain to.
+func _set_region_landmark(plot_id: String) -> void:
+	if plot_id == "home":
+		home_landmark_root.visible = true
+		region_landmark_root.visible = false
+		return
+	home_landmark_root.visible = false
+	region_landmark_root.visible = true
+	var terrain := _terrain_for_plot(plot_id)
+	if terrain == current_landmark_terrain:
+		return
+	current_landmark_terrain = terrain
+	for child in region_landmark_root.get_children():
+		child.queue_free()
+	var landmark_key: String = TERRAIN_LANDMARK.get(terrain, "hex_village")
+	var landmark = world_scenes[landmark_key].instantiate()
+	landmark.position = Vector3((COLS - 1) * 0.5 * WORLD_TILE, 0, -3.5 * WORLD_TILE)
+	landmark.scale = Vector3.ONE * 3.0
+	region_landmark_root.add_child(landmark)
 
 # ---------- Farm grid rendering (3D) ----------
 func _build_farm_view(layer: CanvasLayer) -> void:
@@ -995,11 +1050,21 @@ func _build_scenery():
 		s.position = Vector3(d["tx"] * WORLD_TILE, 0, d["tz"] * WORLD_TILE)
 		world_root.add_child(s)
 
+	# The farmhouse and its village cluster only make sense while farming the
+	# Home Farm - an owned world-map region gets its own terrain-matched
+	# landmark instead (see _set_region_landmark()). Both containers live in
+	# world_root the whole time; _set_region_landmark() just toggles which
+	# one is visible rather than rebuilding the home side on every switch.
+	home_landmark_root = Node3D.new()
+	world_root.add_child(home_landmark_root)
+	region_landmark_root = Node3D.new()
+	world_root.add_child(region_landmark_root)
+
 	# The farmhouse - a landmark sitting in the backdrop behind the top
 	# fence, not on the playable grid itself.
 	var farmhouse: Node3D = world_scenes["farmhouse"].instantiate()
 	farmhouse.position = Vector3((COLS - 1) * 0.5 * WORLD_TILE, 0, -3.0 * WORLD_TILE)
-	world_root.add_child(farmhouse)
+	home_landmark_root.add_child(farmhouse)
 
 	# A few farm animals wandering just outside the fence, purely for
 	# ambience - not interactive, not on the playable grid.
@@ -1060,42 +1125,44 @@ func _build_scenery():
 
 	_build_village()
 	_build_backdrop_decor()
+	_set_region_landmark(active_plot_id)
 
 # A small cluster of buildings behind the farmhouse - barn, stone cottage,
 # market stall and a windmill landmark, linked to the farm gate with a stone
 # path - so the area past the fence reads as "a farm on the edge of a
-# settlement" instead of one lone house facing empty grass. All positioned
-# in world_root directly, same as the farmhouse itself: backdrop dressing,
-# not on the playable grid.
+# settlement" instead of one lone house facing empty grass. All parented
+# under home_landmark_root (same as the farmhouse itself): backdrop
+# dressing, not on the playable grid, and hidden whenever a different plot
+# is active - see _set_region_landmark().
 func _build_village() -> void:
 	var cx: float = (COLS - 1) * 0.5
 
 	var barn = world_scenes["barn"].instantiate()
 	barn.position = Vector3((cx - 3.2) * WORLD_TILE, 0, -3.4 * WORLD_TILE)
 	barn.rotation.y = PI / 2.0
-	world_root.add_child(barn)
+	home_landmark_root.add_child(barn)
 
 	var cottage = world_scenes["stone_cottage"].instantiate()
 	cottage.position = Vector3((cx + 3.6) * WORLD_TILE, 0, -3.7 * WORLD_TILE)
 	cottage.rotation.y = -PI / 2.0
-	world_root.add_child(cottage)
+	home_landmark_root.add_child(cottage)
 
 	var stall = world_scenes["market_stall"].instantiate()
 	stall.position = Vector3((cx + 1.7) * WORLD_TILE, 0, -1.9 * WORLD_TILE)
 	stall.rotation.y = PI
-	world_root.add_child(stall)
+	home_landmark_root.add_child(stall)
 
 	var cart = world_scenes["cart"].instantiate()
 	cart.position = Vector3((cx + 2.6) * WORLD_TILE, 0, -1.6 * WORLD_TILE)
 	cart.rotation.y = -PI / 3.0
-	world_root.add_child(cart)
+	home_landmark_root.add_child(cart)
 
 	# A short stone path from the fence gate up to the farmhouse, through the
 	# middle of the cluster.
 	for i in range(4):
 		var tile = world_scenes["path_stone"].instantiate()
 		tile.position = Vector3(cx * WORLD_TILE, 0, (-1.4 - i * 0.55) * WORLD_TILE)
-		world_root.add_child(tile)
+		home_landmark_root.add_child(tile)
 
 # Everything past the immediate farm/village area was bare flat grass out to
 # the edge of the backdrop plane - the "empty void" the land-feels-empty
