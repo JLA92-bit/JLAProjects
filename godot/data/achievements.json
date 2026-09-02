@@ -1,0 +1,102 @@
+{
+	"first_harvest": {
+		"name": "First Harvest",
+		"description": "Harvest your first crop.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"first_region": {
+		"name": "Land Baron",
+		"description": "Buy your first world-map region.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"continent_mastered": {
+		"name": "Continental Champion",
+		"description": "Fully own every region of one continent.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"act_2": {
+		"name": "Outbreak Begins",
+		"description": "Reach Act 2.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"act_3": {
+		"name": "Expanding Empire",
+		"description": "Reach Act 3.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"act_4": {
+		"name": "Global Reach",
+		"description": "Reach Act 4.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"first_livestock": {
+		"name": "Ranch Hand",
+		"description": "Buy your first animal.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"first_upgrade": {
+		"name": "Upgraded",
+		"description": "Buy your first equipment upgrade.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"rich": {
+		"name": "Big Money",
+		"description": "Reach $10,000 cash.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	},
+	"world_domination": {
+		"name": "World Domination",
+		"description": "Own all 198 regions.",
+		"is_secret": false,
+		"count_goal": 0,
+		"current_progress": 0.0,
+		"icon_path": "res://addons/achievements/trophy.png",
+		"unlocked": false,
+		"active": true
+	}
+}
