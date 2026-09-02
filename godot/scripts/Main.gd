@@ -568,6 +568,9 @@ var livestock_panel: Panel
 var feed_label: Label
 var livestock_rows_container: VBoxContainer
 
+var achievements_panel: Panel
+var achievements_rows_container: VBoxContainer
+
 # Godot's built-in default font has no emoji glyphs at all - on the Web
 # export specifically (no OS-level emoji font to fall back to, unlike
 # desktop testing where the system usually has one), every 🔥/🐄/🔨-style
@@ -591,6 +594,7 @@ func _apply_emoji_font_fallback() -> void:
 func _ready():
 	randomize()
 	_apply_emoji_font_fallback()
+	_achv().achievement_unlocked.connect(_on_achievement_unlocked)
 	is_new_game = not FileAccess.file_exists(SAVE_PATH)
 	_load_audio()
 	_load_world_assets()
@@ -745,6 +749,37 @@ func _play_sfx(key: String) -> void:
 		return
 	sfx_player.stream = sfx[key]
 	sfx_player.play()
+
+# Returns the GodotParadiseAchievements singleton (addons/achievements),
+# instantiating it as a child of the tree root on first call rather than
+# registering it as a real Godot autoload ([autoload] in project.godot).
+# A real autoload was tried first and hit something seriously broken in
+# this specific project: with an [autoload] entry present, NO entry in
+# that section ever actually registered - confirmed by adding a second,
+# trivial one-line dummy autoload alongside it, which also silently never
+# appeared as a child of the tree root, even after clearing every Godot
+# cache and rebuilding from scratch. Never found the actual trigger. This
+# manual/lazy form sidesteps [autoload] entirely, so it isn't exposed to
+# whatever that was. Returns type Node (not the addon's own class) so every
+# call site resolves its methods dynamically at runtime instead of
+# statically at parse time - the get_node()-only version of this (before
+# adding the manual-instantiation fallback below) hit a second, likely
+# related bug where GDScript's static analyzer refused to compile any
+# bare reference to the autoload's global identifier at all.
+func _achv() -> Node:
+	var existing := get_node_or_null("GodotParadiseAchievements")
+	if existing != null:
+		return existing
+	# Parented under self (Main), not get_tree().root - adding straight to
+	# root fails ("Parent node is busy setting up children") when this
+	# first-call instantiation happens from within Main's own _ready(),
+	# since root is still mid-propagating _ready() down to Main at that
+	# exact moment. Main itself has no such restriction on new children
+	# added after its own _ready() has started running.
+	var instance = load("res://addons/achievements/achievements.tscn").instantiate()
+	instance.name = "GodotParadiseAchievements"
+	add_child(instance)
+	return instance
 
 func _load_world_assets():
 	const NK := "res://assets_3d/nature_kit/"
@@ -1483,6 +1518,7 @@ func _do_action() -> void:
 				lifetime_harvested += amount
 				_log("Harvested %dx %s (%s quality)%s." % [amount, CROPS[tile["crop"]]["name"], QUALITY_LABELS[quality], " - well-tended bonus!" if well_tended else ""])
 				_play_sfx("harvest")
+				_achv().unlock_achievement("first_harvest")
 				tile["type"] = "soil"
 			var same_crop = tile.get("last_crop", "") == tile["crop"]
 			tile["soil_quality"] = max(0.0, sq - (SOIL_DEGRADE_SAME_CROP if same_crop else SOIL_DEGRADE_ROTATED))
@@ -2192,6 +2228,7 @@ func _check_act_progress() -> void:
 			victory_shown = true
 			_show_victory_banner()
 			_play_sfx("act_complete")
+			_achv().unlock_achievement("world_domination")
 		return
 	var advanced = false
 	match current_act:
@@ -2214,6 +2251,9 @@ func _check_act_progress() -> void:
 			selected_crop = _act()["crops"][0]
 		_show_act_transition(current_act)
 		_play_sfx("act_complete")
+		var act_achievement_key: String = {1: "act_2", 2: "act_3", 3: "act_4"}.get(current_act, "")
+		if act_achievement_key != "":
+			_achv().unlock_achievement(act_achievement_key)
 		_refresh_all()
 
 func _show_act_banner(idx: int) -> void:
@@ -2389,13 +2429,18 @@ func _build_hud_top(layer: CanvasLayer) -> void:
 	_solid_panel(day_pill, Vector2(_dp(88), row1_h * 0.5 - _dp(6)), Vector2(1, _dp(12)), 0, Color(COL_CREAM.r, COL_CREAM.g, COL_CREAM.b, 0.18))
 	hud_season = _add_label(day_pill, "Spring 1/7", Vector2(_dp(96), row1_h * 0.5 - _dp(9)), Vector2(_dp(60), _dp(18)), int(_dp(12)), COL_SEASON_FALL)
 
-	# C. Menu button - purely decorative in the design spec (no bound
-	# behavior in the prototype either; a future settings menu would live
-	# here).
+	# C. Menu button - purely decorative in the design spec, now opens the
+	# Achievements panel (the one thing this "future settings menu" spot
+	# needed to do so far).
 	var menu_size = _dp(38)
 	var menu_btn := _glass_panel(layer, Vector2(720.0 - side - menu_size, top_y), Vector2(menu_size, menu_size), menu_size * 0.5)
 	for i in range(3):
 		_circle(menu_btn, Vector2(menu_size * 0.5 - _dp(1.5), _dp(11) + i * _dp(6)), _dp(3), COL_CREAM)
+	var menu_click := Button.new()
+	menu_click.flat = true
+	menu_click.size = Vector2(menu_size, menu_size)
+	menu_click.pressed.connect(_toggle_achievements_panel)
+	menu_btn.add_child(menu_click)
 
 	# D. Forecast chip
 	var forecast_y = top_y + row1_h + _dp(9)
@@ -2669,6 +2714,7 @@ func _build_ui() -> void:
 	_build_inventory_panel(layer)
 	_build_map_panel(layer)
 	_build_livestock_panel(layer)
+	_build_achievements_panel(layer)
 	_build_act_banner(layer)
 	_build_update_banner(layer)
 	_build_intro_ui(layer)
@@ -3030,6 +3076,80 @@ func _toggle_livestock_panel() -> void:
 	if livestock_panel.visible:
 		_refresh_livestock_panel()
 
+func _build_achievements_panel(layer: CanvasLayer) -> void:
+	achievements_panel = Panel.new()
+	achievements_panel.position = Vector2(20, 40)
+	achievements_panel.size = Vector2(680, 1480)
+	achievements_panel.visible = false
+	layer.add_child(achievements_panel)
+
+	_add_button(achievements_panel, "Close", Vector2(600, 10), Vector2(60, 40), func(): achievements_panel.visible = false)
+	_add_label(achievements_panel, "Achievements", Vector2(20, 10), Vector2(400, 30), 24)
+
+	var scroll := ScrollContainer.new()
+	scroll.position = Vector2(20, 60)
+	scroll.size = Vector2(640, 1400)
+	achievements_panel.add_child(scroll)
+	achievements_rows_container = VBoxContainer.new()
+	achievements_rows_container.custom_minimum_size = Vector2(620, 0)
+	achievements_rows_container.add_theme_constant_override("separation", 10)
+	scroll.add_child(achievements_rows_container)
+
+func _toggle_achievements_panel() -> void:
+	achievements_panel.visible = not achievements_panel.visible
+	if achievements_panel.visible:
+		_refresh_achievements_panel()
+
+func _refresh_achievements_panel() -> void:
+	for child in achievements_rows_container.get_children():
+		child.queue_free()
+	var unlocked_count := 0
+	var total_count := 0
+	for key in _achv().achievements_keys:
+		var achievement: Dictionary = _achv().get_achievement(key)
+		if achievement.is_empty():
+			continue
+		total_count += 1
+		var unlocked: bool = achievement.get("unlocked", false)
+		if unlocked:
+			unlocked_count += 1
+		var row := HBoxContainer.new()
+		var glyph := Label.new()
+		glyph.text = "🏆" if unlocked else "🔒"
+		glyph.custom_minimum_size = Vector2(36, 0)
+		glyph.add_theme_font_size_override("font_size", 20)
+		row.add_child(glyph)
+		var text_col := VBoxContainer.new()
+		text_col.custom_minimum_size = Vector2(560, 0)
+		var name_label := Label.new()
+		name_label.text = String(achievement.get("name", key))
+		name_label.add_theme_font_size_override("font_size", 16)
+		if not unlocked:
+			name_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.6))
+		text_col.add_child(name_label)
+		var desc_label := Label.new()
+		desc_label.text = String(achievement.get("description", ""))
+		desc_label.add_theme_font_size_override("font_size", 13)
+		desc_label.add_theme_color_override("font_color", Color(0.65, 0.7, 0.65))
+		desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+		text_col.add_child(desc_label)
+		row.add_child(text_col)
+		achievements_rows_container.add_child(row)
+	var summary := Label.new()
+	summary.text = "%d / %d unlocked" % [unlocked_count, total_count]
+	summary.add_theme_font_size_override("font_size", 14)
+	summary.add_theme_color_override("font_color", Color(0.7, 0.75, 0.7))
+	achievements_rows_container.add_child(summary)
+	achievements_rows_container.move_child(summary, 0)
+
+# Called once per real achievement unlock (unlock_achievement() no-ops and
+# never emits this if already unlocked, so every call site that reports a
+# milestone can just fire-and-forget without checking "have I already shown
+# this" itself).
+func _on_achievement_unlocked(_key: String, achievement: Dictionary) -> void:
+	_show_toast("🏆 Achievement unlocked: %s" % achievement.get("name", "?"))
+	_play_sfx("act_complete")
+
 func _refresh_livestock_panel() -> void:
 	feed_label.text = "Feed in storage: %d  (buy price: $%d/unit)" % [feed_stock, _feed_price_per_unit()]
 
@@ -3052,6 +3172,7 @@ func _refresh_livestock_panel() -> void:
 				livestock[key] = livestock.get(key, 0) + 1
 				_log("Bought a %s." % animal["name"])
 				_play_sfx("success")
+				_achv().unlock_achievement("first_livestock")
 				_refresh_all()
 			else:
 				_log("Need $%d for a %s." % [animal["cost"], animal["name"]])
@@ -3108,6 +3229,8 @@ const ACT_ROMAN := ["I", "II", "III", "IV"]
 func _refresh_all() -> void:
 	var owned_count = _owned_count()
 	var owned_frac = float(owned_count) / float(regions.size())
+	if cash >= 10000:
+		_achv().unlock_achievement("rich")
 	hud_cash.text = "%d" % cash
 	hud_day.text = "DAY %d" % day
 	hud_season.text = "%s %d/%d" % [_season_name(), season_day + 1, SEASON_LENGTH]
@@ -3419,6 +3542,7 @@ func _refresh_inventory_panel() -> void:
 						cash -= up["cost"]
 						owned_upgrades[key] = true
 						_log("Purchased %s!" % up["name"])
+						_achv().unlock_achievement("first_upgrade")
 						_refresh_all()
 				)
 				row.add_child(buy_btn)
@@ -3503,6 +3627,10 @@ func _refresh_map_panel() -> void:
 						reg["owned"] = true
 						plots[reg["name"]] = _make_empty_grid()
 						_log("You acquired %s! You can farm it directly, or leave it earning passive upkeep income." % reg["name"])
+						_achv().unlock_achievement("first_region")
+						var continent_regions = regions.filter(func(r): return r["continent"] == reg["continent"])
+						if continent_regions.filter(func(r): return r["owned"]).size() >= continent_regions.size():
+							_achv().unlock_achievement("continent_mastered")
 						_check_act_progress()
 						_refresh_all()
 				)
