@@ -1,0 +1,65 @@
+{
+  "level": 5,
+  "baseImageWidth": 1200,
+  "clues": [
+    {
+      "id": "registration",
+      "type": "real",
+      "x": 52.0,
+      "y": 62.0,
+      "radius": 10,
+      "title": "Vehicle registration",
+      "flavor": "Glove compartment. This car is registered to Elena Voss.",
+      "evidenceId": null
+    },
+    {
+      "id": "matching-tire",
+      "type": "real",
+      "x": 20.0,
+      "y": 85.0,
+      "radius": 10,
+      "title": "Tire tread",
+      "flavor": "Same narrow-set compact tread as the alley tracks behind the gallery.",
+      "evidenceId": null
+    },
+    {
+      "id": "gloves",
+      "type": "real",
+      "x": 70.0,
+      "y": 40.0,
+      "radius": 10,
+      "title": "Pair of thin gloves",
+      "flavor": "Tucked in the door pocket. No blood, but no reason for a gallery director to carry these either.",
+      "evidenceId": null
+    },
+    {
+      "id": "receipt-timestamp",
+      "type": "real",
+      "x": 38.0,
+      "y": 22.0,
+      "radius": 10,
+      "title": "Parking receipt",
+      "flavor": "Timestamped 11:47pm the night of the murder - well after Elena claimed she'd already gone home.",
+      "evidenceId": null
+    },
+    {
+      "id": "lighter",
+      "type": "real",
+      "x": 82.0,
+      "y": 70.0,
+      "radius": 10,
+      "title": "Engraved lighter",
+      "flavor": "Initials 'E.V.' Used, from the look of the flint wear, more than once that week.",
+      "evidenceId": null
+    },
+    {
+      "id": "noise-sunglasses",
+      "type": "noise",
+      "x": 30.0,
+      "y": 45.0,
+      "radius": 10,
+      "title": "Sunglasses",
+      "flavor": "Just sunglasses."
+    }
+  ]
+}
