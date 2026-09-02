@@ -1,0 +1,30 @@
+/* Incremental styles on top of ../vantage-point/src/style.css for the 3D prototype. */
+
+.level-intro-hint {
+  color: var(--amber);
+  font-size: 0.82rem;
+  font-style: italic;
+  margin-top: -0.4rem;
+}
+
+.screen-scene3d {
+  background: #000;
+}
+
+.scene3d-viewport {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.scene3d-viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.scene-toolbar {
+  justify-content: center;
+}

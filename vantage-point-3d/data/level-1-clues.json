@@ -1,0 +1,56 @@
+{
+  "level": 1,
+  "baseImageWidth": 1200,
+  "clues": [
+    {
+      "id": "letter-opener",
+      "type": "real",
+      "x": 62.0,
+      "y": 54.0,
+      "radius": 60,
+      "title": "Engraved letter opener",
+      "flavor": "Marcus's initials on the handle. The blade is clean - too clean for what happened here. Someone wiped it down.",
+      "evidenceId": "letter-opener"
+    },
+    {
+      "id": "wine-glass-1",
+      "type": "real",
+      "x": 28.0,
+      "y": 61.0,
+      "radius": 60,
+      "title": "Two wine glasses",
+      "flavor": "One glass, barely touched. A second, empty, with a faint lipstick trace on the rim. He wasn't drinking alone.",
+      "evidenceId": "wine-glass"
+    },
+    {
+      "id": "grate-ash",
+      "type": "real",
+      "x": 18.0,
+      "y": 78.0,
+      "radius": 60,
+      "title": "Cold fireplace grate",
+      "flavor": "Ash, but no full pages - whatever burned here didn't burn all the way through. Someone was in a hurry, or interrupted.",
+      "evidenceId": null
+    },
+    {
+      "id": "photo-frame",
+      "type": "real",
+      "x": 74.0,
+      "y": 32.0,
+      "radius": 60,
+      "title": "Overturned photo frame",
+      "flavor": "A photo of Marcus and Elena Voss at the gallery's opening night, face-down on the desk. Knocked over, or turned away deliberately?",
+      "evidenceId": null
+    },
+    {
+      "id": "desk-bloodstain",
+      "type": "real",
+      "x": 46.0,
+      "y": 68.0,
+      "radius": 60,
+      "title": "Bloodstain on the desk blotter",
+      "flavor": "A single stain, consistent with the letter opener. This is where it happened.",
+      "evidenceId": null
+    }
+  ]
+}

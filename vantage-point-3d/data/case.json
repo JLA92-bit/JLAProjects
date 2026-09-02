@@ -1,0 +1,108 @@
+{
+  "id": "the-hargrove-affair",
+  "title": "The Hargrove Affair",
+  "tagline": "A gallery patron is dead. Five scenes. One story you have to reconstruct yourself.",
+  "briefing": "Marcus Hargrove, owner of the Hargrove Gallery, was found dead in his private study late Friday night. No forced entry. Four people had reason to want him gone, and reason to be in the building that night. You have five days to walk the scenes before the case goes cold. Look carefully - the room remembers what people forget.",
+  "suspects": [
+    {
+      "id": "elena",
+      "name": "Elena Voss",
+      "role": "Gallery co-director",
+      "blurb": "Marcus's business partner of nine years. Quietly furious about being cut out of the will."
+    },
+    {
+      "id": "damon",
+      "name": "Damon Reyes",
+      "role": "Featured artist",
+      "blurb": "Discovered Marcus was selling forged pieces under his name. Confronted him the week before."
+    },
+    {
+      "id": "priya",
+      "name": "Priya Anand",
+      "role": "Night security contractor",
+      "blurb": "Owed Marcus a debt she couldn't pay. Was alone in the building for a two-hour window."
+    },
+    {
+      "id": "colin",
+      "name": "Colin Hargrove",
+      "role": "Estranged brother",
+      "blurb": "Cut out of the family trust a decade ago. Showed up in town, unannounced, the day before."
+    }
+  ],
+  "motives": [
+    { "id": "money", "label": "Financial gain - the will and the gallery's finances" },
+    { "id": "exposure", "label": "Fear of exposure - the forged paintings scheme" },
+    { "id": "coercion", "label": "Desperation - a debt called in at the worst time" },
+    { "id": "revenge", "label": "Old resentment - a decade-old family betrayal" }
+  ],
+  "evidence": [
+    { "id": "letter-opener", "label": "The engraved letter opener" },
+    { "id": "torn-ledger", "label": "The torn page from the gallery ledger" },
+    { "id": "receipt", "label": "The pawn shop receipt" },
+    { "id": "keycard", "label": "The cloned security keycard" },
+    { "id": "wine-glass", "label": "The second wine glass" }
+  ],
+  "solution": {
+    "suspectId": "elena",
+    "motiveId": "money",
+    "evidenceId": "torn-ledger",
+    "explanation": "Elena Voss altered the gallery's books for months to hide her own skimming, and the torn ledger page - found half-burned in the wastebasket of her own office - was the one page that would have proven it. Marcus confronted her with it the night he died, in his study, over a glass of wine he poured for a guest he trusted enough to let close. Damon's forgery accusation and Priya's debt were real, but neither had reason to destroy gallery financial records. Only Elena needed that page gone."
+  },
+  "levels": [
+    {
+      "id": 1,
+      "day": "Day 1",
+      "title": "The Study",
+      "location": "Hargrove Gallery - Private Study",
+      "intro": "This is where they found him. Start here. Don't touch anything you don't have to.",
+      "image": "scenes/level-1.svg",
+      "requiredClues": 4,
+      "clueGoal": 5,
+      "magnifierUnlocked": false
+    },
+    {
+      "id": 2,
+      "day": "Day 2",
+      "title": "The Gallery Floor",
+      "location": "Hargrove Gallery - Main Exhibition Hall",
+      "intro": "Where the guests were. Where the cameras weren't.",
+      "image": "scenes/level-2.svg",
+      "requiredClues": 4,
+      "clueGoal": 6,
+      "magnifierUnlocked": false
+    },
+    {
+      "id": 3,
+      "day": "Day 3",
+      "title": "The Loading Alley",
+      "location": "Behind the Gallery - Service Entrance",
+      "intro": "Everyone says they used the front door. The alley says otherwise.",
+      "image": "scenes/level-3.svg",
+      "requiredClues": 5,
+      "clueGoal": 7,
+      "magnifierUnlocked": true
+    },
+    {
+      "id": 4,
+      "day": "Day 4",
+      "title": "Elena's Office",
+      "location": "Hargrove Gallery - Co-Director's Office",
+      "intro": "Nobody volunteered to let you in here. That's usually a good sign you should look harder.",
+      "image": "scenes/level-4.svg",
+      "requiredClues": 5,
+      "clueGoal": 7,
+      "magnifierUnlocked": true
+    },
+    {
+      "id": 5,
+      "day": "Day 5",
+      "title": "The Car",
+      "location": "Long-Term Parking - Level 2",
+      "intro": "Last stop. Whatever's left to find, it's small, and it's here.",
+      "image": "scenes/level-5.svg",
+      "requiredClues": 4,
+      "clueGoal": 6,
+      "magnifierUnlocked": true
+    }
+  ]
+}
