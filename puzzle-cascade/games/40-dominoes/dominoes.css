@@ -1,0 +1,4 @@
+.dm-meta {
+  display: flex; gap: 12px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  justify-content: center; margin-bottom: 4px; font-size: 0.85rem; flex-wrap: wrap;
+}

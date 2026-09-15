@@ -1,0 +1,6 @@
+.bs-meta {
+  display: flex; flex-direction: column; gap: 4px; align-items: center;
+  color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  text-align: center; font-size: 0.92rem;
+}
+.bs-fleets { font-size: 0.8rem; font-weight: 600; color: rgba(255,255,255,0.85); }

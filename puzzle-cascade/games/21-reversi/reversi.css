@@ -1,0 +1,9 @@
+.rv-meta {
+  display: flex; gap: 16px; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  flex-wrap: wrap; text-align: center;
+}
+.rv-score { display: flex; align-items: center; gap: 6px; }
+.rv-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.rv-dot--you { background: #241436; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); }
+.rv-dot--ai { background: #fffaf2; }

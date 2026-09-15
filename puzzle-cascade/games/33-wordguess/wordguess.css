@@ -1,0 +1,20 @@
+.wg-meta {
+  color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  text-align: center; margin-bottom: 4px; font-size: 0.9rem;
+}
+.wg-keyboard {
+  display: flex; flex-direction: column; gap: 6px; width: 100%; flex: 0 0 auto;
+}
+.wg-krow { display: flex; gap: 5px; justify-content: center; }
+.wg-key {
+  min-width: 28px; height: 42px; padding: 0 6px;
+  border-radius: 8px; background: rgba(255,255,255,0.9); color: var(--pc-ink);
+  font-family: var(--pc-font-display); font-weight: 800; font-size: 0.8rem;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.25); touch-action: manipulation; user-select: none; flex: 1 1 0;
+}
+.wg-key--wide { flex: 1.6 1 0; font-size: 0.68rem; }
+.wg-key:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+.wg-key.is-green { background: #23d18b; color: #fff; }
+.wg-key.is-yellow { background: #ffd93d; color: #3a2a00; }
+.wg-key.is-gray { background: #6a6280; color: #fff; }

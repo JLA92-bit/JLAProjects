@@ -1,0 +1,7 @@
+.an-meta {
+  display: flex; gap: 16px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  flex-wrap: wrap; justify-content: center; margin-bottom: 4px; font-size: 0.9rem;
+}
+.an-clue {
+  color: rgba(255,255,255,0.8); font-weight: 700; text-align: center; font-size: 0.85rem;
+}

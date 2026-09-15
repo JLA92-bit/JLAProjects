@@ -1,0 +1,9 @@
+.ck-meta {
+  display: flex; gap: 16px; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  flex-wrap: wrap; text-align: center;
+}
+.ck-score { display: flex; align-items: center; gap: 6px; }
+.ck-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.ck-dot--you { background: #ff4d8d; }
+.ck-dot--ai { background: #241436; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); }
