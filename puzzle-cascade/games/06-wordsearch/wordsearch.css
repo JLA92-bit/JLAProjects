@@ -1,0 +1,14 @@
+.ws-wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+.ws-wrap .pc-canvas3d { flex: 1 1 320px; max-width: 480px; }
+.ws-words {
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #fff;
+  font-weight: 700;
+  font-family: var(--pc-font-display);
+  padding-top: 8px;
+}
+.ws-word { transition: opacity 0.2s ease, text-decoration 0.2s ease; }
+.ws-word.is-found { opacity: 0.5; text-decoration: line-through; }
