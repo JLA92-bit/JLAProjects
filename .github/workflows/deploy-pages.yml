@@ -2,7 +2,7 @@ name: Deploy Farm World to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/sweet-brahmagupta-q8ikud]
   workflow_dispatch:
 
 permissions:
