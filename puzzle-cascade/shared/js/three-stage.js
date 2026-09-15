@@ -223,10 +223,17 @@ export function roundedRectShape(w, h, r) {
 export function makeTile({ w = 1, h = 1, depth = 0.28, radius = 0.14, color = 0xff4d8d, emissive = 0x000000, emissiveIntensity = 0, roughness = 0.4, metalness = 0.08, opacity = 1 } = {}) {
   const shape = roundedRectShape(w, h, Math.min(radius, w / 2, h / 2));
   const geo = new THREE.ExtrudeGeometry(shape, {
-    depth, bevelEnabled: true, bevelThickness: Math.min(0.035, depth * 0.3), bevelSize: Math.min(0.03, radius * 0.4), bevelSegments: 2, curveSegments: 6,
+    depth, bevelEnabled: true, bevelThickness: Math.min(0.035, depth * 0.3), bevelSize: Math.min(0.03, radius * 0.4), bevelSegments: 3, curveSegments: 10,
   });
   geo.translate(0, 0, -depth / 2);
-  const mat = new THREE.MeshStandardMaterial({ color, emissive, emissiveIntensity, roughness, metalness, transparent: opacity < 1, opacity });
+  // Physical material (not just Standard) so tiles get a thin glossy
+  // clearcoat on top of their base color - a candy-shell highlight that
+  // picks up the PMREM environment map for a much richer "juicy" look
+  // than flat MeshStandardMaterial shading.
+  const mat = new THREE.MeshPhysicalMaterial({
+    color, emissive, emissiveIntensity, roughness, metalness, transparent: opacity < 1, opacity,
+    clearcoat: 0.65, clearcoatRoughness: 0.22,
+  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
