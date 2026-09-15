@@ -15,8 +15,23 @@ import { EffectComposer } from '../../vendor/three-addons/postprocessing/EffectC
 import { RenderPass } from '../../vendor/three-addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from '../../vendor/three-addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from '../../vendor/three-addons/postprocessing/OutputPass.js';
+import { RoomEnvironment } from '../../vendor/three-addons/environments/RoomEnvironment.js';
 
 const VIEW_SCALE = 0.42; // world half-height per unit of opts.distance - tight framing so the board fills the canvas edge to edge
+
+// One shared PMREM environment map (image-based lighting) reused by every
+// stage - gives every MeshStandardMaterial real specular highlights and
+// soft reflections instead of flat single-light shading, for a big visual
+// upgrade at effectively zero extra cost since it's generated once and
+// referenced by every game's scene.environment.
+let sharedEnvMap = null;
+function getEnvMap(renderer) {
+  if (sharedEnvMap) return sharedEnvMap;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  sharedEnvMap = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
+  pmrem.dispose();
+  return sharedEnvMap;
+}
 
 let cachedBgTexture = null;
 function backgroundTexture() {
@@ -60,6 +75,8 @@ export function createStage(container, opts = {}) {
   // transparent canvas would end up solid black - give the scene its own
   // background instead (also just looks more like a real tabletop).
   scene.background = opts.background === null ? null : backgroundTexture();
+  scene.environment = getEnvMap(renderer);
+  scene.environmentIntensity = 0.6;
   const world = new THREE.Group();
   scene.add(world);
 
