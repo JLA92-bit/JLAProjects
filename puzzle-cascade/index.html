@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Puzzle Cascade</title>
+<meta name="description" content="Puzzle Cascade - a 10-game puzzle collection.">
+<meta name="theme-color" content="#6a2dd6">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧩</text></svg>">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.svg">
+<link rel="stylesheet" href="shared/css/theme.css">
+<link rel="stylesheet" href="shared/css/layout.css">
+<link rel="stylesheet" href="games/01-sliding/sliding.css">
+<link rel="stylesheet" href="games/02-memory/memory.css">
+<link rel="stylesheet" href="games/03-match3/match3.css">
+<link rel="stylesheet" href="games/04-maze/maze.css">
+<link rel="stylesheet" href="games/05-sokoban/sokoban.css">
+<link rel="stylesheet" href="games/06-wordsearch/wordsearch.css">
+<link rel="stylesheet" href="games/07-merge2048/merge2048.css">
+<link rel="stylesheet" href="games/08-jigsaw/jigsaw.css">
+<link rel="stylesheet" href="games/09-simon/simon.css">
+<link rel="stylesheet" href="games/10-lightsout/lightsout.css">
+</head>
+<body>
+
+<div class="pc-app">
+  <header class="pc-header">
+    <div class="pc-logo pc-display">
+      <span class="pc-logo-mark">🧩</span>
+      <span>Puzzle Cascade</span>
+    </div>
+    <button class="pc-icon-btn" id="pc-settings-btn" aria-label="Settings">⚙️</button>
+  </header>
+
+  <!-- ============================== HUB ============================== -->
+  <section id="pc-hub">
+    <div class="pc-progress-card">
+      <div class="pc-progress-row">
+        <span id="pc-progress-label">0% complete</span>
+        <span id="pc-streak-label">Play today to start a streak!</span>
+      </div>
+      <div class="pc-progress-track"><div class="pc-progress-fill" id="pc-progress-fill"></div></div>
+    </div>
+
+    <div class="pc-grid" id="pc-puzzle-grid"></div>
+  </section>
+
+  <!-- ============================ GAME VIEW ============================ -->
+  <section id="pc-game-view" class="pc-game-view" hidden>
+    <div class="pc-game-header">
+      <div class="pc-game-header-left">
+        <button class="pc-icon-btn" id="pc-back-btn" aria-label="Back to hub">←</button>
+        <h2 id="pc-game-title" class="pc-display" style="font-size:1.3rem;"></h2>
+      </div>
+      <div class="pc-game-timer" id="pc-game-timer">0:00</div>
+    </div>
+
+    <div class="pc-difficulty-bar" id="pc-difficulty-bar"></div>
+
+    <div class="pc-stage" id="pc-game-stage"></div>
+  </section>
+</div>
+
+<!-- Shared systems -->
+<script src="shared/js/save-manager.js"></script>
+<script src="shared/js/sound-manager.js"></script>
+<script src="shared/js/ui.js"></script>
+<script src="shared/js/app.js"></script>
+
+<!-- Game modules (each self-registers via PC.App.Games.register) -->
+<script src="games/01-sliding/sliding.js"></script>
+<script src="games/02-memory/memory.js"></script>
+<script src="games/03-match3/match3.js"></script>
+<script src="games/04-maze/maze.js"></script>
+<script src="games/05-sokoban/sokoban.js"></script>
+<script src="games/06-wordsearch/wordsearch.js"></script>
+<script src="games/07-merge2048/merge2048.js"></script>
+<script src="games/08-jigsaw/jigsaw.js"></script>
+<script src="games/09-simon/simon.js"></script>
+<script src="games/10-lightsout/lightsout.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>

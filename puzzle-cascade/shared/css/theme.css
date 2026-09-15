@@ -1,0 +1,214 @@
+/* ==========================================================================
+   Puzzle Cascade - shared theme
+   Bright, saturated, "juicy" arcade look shared by the hub and every game.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@600;800&display=swap');
+
+:root {
+  --pc-pink: #ff4d8d;
+  --pc-orange: #ff9f43;
+  --pc-yellow: #ffd93d;
+  --pc-green: #23d18b;
+  --pc-teal: #17c3b2;
+  --pc-blue: #3f8efc;
+  --pc-purple: #a259ff;
+  --pc-red: #ff5c5c;
+
+  --pc-bg-1: #2b0f5c;
+  --pc-bg-2: #6a2dd6;
+  --pc-bg-3: #ff4d8d;
+
+  --pc-ink: #241436;
+  --pc-paper: #fffaf2;
+  --pc-paper-2: #f4ecff;
+  --pc-shadow: rgba(36, 20, 54, 0.35);
+
+  --pc-radius-lg: 28px;
+  --pc-radius-md: 18px;
+  --pc-radius-sm: 12px;
+
+  --pc-font-display: 'Baloo 2', system-ui, sans-serif;
+  --pc-font-body: 'Nunito', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--pc-font-body);
+  color: var(--pc-ink);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(255,255,255,0.18), transparent 40%),
+    radial-gradient(circle at 85% 0%, rgba(255,255,255,0.12), transparent 45%),
+    linear-gradient(160deg, var(--pc-bg-1), var(--pc-bg-2) 55%, var(--pc-bg-3) 120%);
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+  touch-action: manipulation;
+}
+
+h1, h2, h3, .pc-display {
+  font-family: var(--pc-font-display);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+button {
+  font-family: var(--pc-font-body);
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+/* -------------------------------------------------------------------------
+   Chunky rounded "candy" button
+   ------------------------------------------------------------------------- */
+.pc-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 26px;
+  font-family: var(--pc-font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #fff;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--pc-pink), #d6216b);
+  box-shadow: 0 6px 0 #a3134f, 0 10px 18px var(--pc-shadow);
+  transform: translateY(0);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pc-btn:active {
+  transform: translateY(5px);
+  box-shadow: 0 1px 0 #a3134f, 0 4px 10px var(--pc-shadow);
+}
+.pc-btn.pc-btn--blue { background: linear-gradient(180deg, var(--pc-blue), #1e5fd1); box-shadow: 0 6px 0 #14409c, 0 10px 18px var(--pc-shadow); }
+.pc-btn.pc-btn--blue:active { box-shadow: 0 1px 0 #14409c, 0 4px 10px var(--pc-shadow); }
+.pc-btn.pc-btn--green { background: linear-gradient(180deg, var(--pc-green), #0fa46b); box-shadow: 0 6px 0 #0a7c4f, 0 10px 18px var(--pc-shadow); }
+.pc-btn.pc-btn--green:active { box-shadow: 0 1px 0 #0a7c4f, 0 4px 10px var(--pc-shadow); }
+.pc-btn.pc-btn--ghost {
+  background: rgba(255,255,255,0.15);
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5);
+  color: #fff;
+}
+.pc-btn.pc-btn--ghost:active { transform: translateY(2px); }
+.pc-btn:disabled { opacity: 0.5; pointer-events: none; }
+.pc-btn .pc-icon { font-size: 1.2em; line-height: 1; }
+
+/* -------------------------------------------------------------------------
+   Card / panel
+   ------------------------------------------------------------------------- */
+.pc-panel {
+  background: var(--pc-paper);
+  border-radius: var(--pc-radius-lg);
+  box-shadow: 0 14px 0 rgba(0,0,0,0.12), 0 24px 40px var(--pc-shadow);
+}
+
+/* -------------------------------------------------------------------------
+   Star rating widget
+   ------------------------------------------------------------------------- */
+.pc-stars {
+  display: inline-flex;
+  gap: 4px;
+}
+.pc-stars .pc-star {
+  font-size: 1.4rem;
+  color: rgba(0,0,0,0.15);
+  filter: drop-shadow(0 2px 0 rgba(0,0,0,0.05));
+  transition: transform 0.25s cubic-bezier(.34,1.56,.64,1), color 0.2s ease;
+}
+.pc-stars .pc-star.is-lit {
+  color: var(--pc-yellow);
+  text-shadow: 0 0 10px rgba(255,217,61,0.7);
+}
+.pc-stars.pc-stars--pop .pc-star.is-lit { animation: pc-star-pop 0.5s cubic-bezier(.34,1.56,.64,1) both; }
+.pc-stars .pc-star:nth-child(2) { animation-delay: 0.08s; }
+.pc-stars .pc-star:nth-child(3) { animation-delay: 0.16s; }
+@keyframes pc-star-pop {
+  0% { transform: scale(0) rotate(-40deg); }
+  60% { transform: scale(1.3) rotate(10deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+/* -------------------------------------------------------------------------
+   Modal
+   ------------------------------------------------------------------------- */
+.pc-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(20,8,40,0.55);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+  padding: 20px;
+  animation: pc-fade-in 0.2s ease both;
+}
+@keyframes pc-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.pc-modal {
+  width: 100%;
+  max-width: 420px;
+  padding: 28px;
+  text-align: center;
+  animation: pc-modal-in 0.35s cubic-bezier(.34,1.56,.64,1) both;
+}
+@keyframes pc-modal-in {
+  from { opacity: 0; transform: scale(0.75) translateY(30px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* -------------------------------------------------------------------------
+   Screen shake + toast utility
+   ------------------------------------------------------------------------- */
+.pc-shake { animation: pc-shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+@keyframes pc-shake {
+  10%, 90% { transform: translate3d(-2px, 0, 0); }
+  20%, 80% { transform: translate3d(4px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-8px, 0, 0); }
+  40%, 60% { transform: translate3d(8px, 0, 0); }
+}
+
+.pc-toast {
+  position: fixed;
+  left: 50%;
+  top: 24px;
+  transform: translateX(-50%);
+  background: var(--pc-ink);
+  color: #fff;
+  padding: 12px 22px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-family: var(--pc-font-display);
+  z-index: 400;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+  animation: pc-toast-in 0.3s cubic-bezier(.34,1.56,.64,1) both;
+}
+@keyframes pc-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* -------------------------------------------------------------------------
+   Particle burst canvas overlay
+   ------------------------------------------------------------------------- */
+#pc-particle-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 300;
+}
+
+/* -------------------------------------------------------------------------
+   Scrollbar (cosmetic, desktop)
+   ------------------------------------------------------------------------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 10px; }
+
+@media (max-width: 480px) {
+  .pc-btn { padding: 12px 20px; font-size: 0.95rem; }
+}
