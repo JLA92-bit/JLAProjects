@@ -21,6 +21,13 @@
 <link rel="stylesheet" href="games/08-jigsaw/jigsaw.css">
 <link rel="stylesheet" href="games/09-simon/simon.css">
 <link rel="stylesheet" href="games/10-lightsout/lightsout.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js"
+  }
+}
+</script>
 </head>
 <body>
 
@@ -68,17 +75,19 @@
 <script src="shared/js/ui.js"></script>
 <script src="shared/js/app.js"></script>
 
-<!-- Game modules (each self-registers via PC.App.Games.register) -->
-<script src="games/01-sliding/sliding.js"></script>
-<script src="games/02-memory/memory.js"></script>
-<script src="games/03-match3/match3.js"></script>
-<script src="games/04-maze/maze.js"></script>
-<script src="games/05-sokoban/sokoban.js"></script>
-<script src="games/06-wordsearch/wordsearch.js"></script>
-<script src="games/07-merge2048/merge2048.js"></script>
-<script src="games/08-jigsaw/jigsaw.js"></script>
-<script src="games/09-simon/simon.js"></script>
-<script src="games/10-lightsout/lightsout.js"></script>
+<!-- Game modules (each self-registers via PC.Games.register). ES modules so
+     they can `import * as THREE from 'three'`; they still run before
+     DOMContentLoaded, same as the classic scripts above. -->
+<script type="module" src="games/01-sliding/sliding.js"></script>
+<script type="module" src="games/02-memory/memory.js"></script>
+<script type="module" src="games/03-match3/match3.js"></script>
+<script type="module" src="games/04-maze/maze.js"></script>
+<script type="module" src="games/05-sokoban/sokoban.js"></script>
+<script type="module" src="games/06-wordsearch/wordsearch.js"></script>
+<script type="module" src="games/07-merge2048/merge2048.js"></script>
+<script type="module" src="games/08-jigsaw/jigsaw.js"></script>
+<script type="module" src="games/09-simon/simon.js"></script>
+<script type="module" src="games/10-lightsout/lightsout.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

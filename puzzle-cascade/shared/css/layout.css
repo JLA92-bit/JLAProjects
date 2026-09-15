@@ -154,6 +154,43 @@
   font-size: 0.9rem;
 }
 
+/* 3D game canvas host: fills the stage, HUD/controls float as DOM overlays. */
+.pc-canvas3d {
+  position: relative;
+  width: 100%;
+  height: clamp(300px, 58vw, 480px);
+  border-radius: var(--pc-radius-md);
+  overflow: hidden;
+  touch-action: none;
+}
+.pc-canvas3d canvas { display: block; }
+.pc-overlay-top {
+  position: absolute;
+  top: 10px; left: 0; right: 0;
+  display: flex; justify-content: center; gap: 16px;
+  pointer-events: none;
+  z-index: 2;
+}
+.pc-overlay-top > * { pointer-events: auto; }
+.pc-overlay-bottom {
+  position: absolute;
+  bottom: 10px; left: 0; right: 0;
+  display: flex; justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+.pc-overlay-bottom > * { pointer-events: auto; }
+.pc-chip {
+  background: rgba(20,10,40,0.55);
+  color: #fff;
+  font-family: var(--pc-font-display);
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  backdrop-filter: blur(2px);
+}
+
 [hidden] { display: none !important; }
 
 @media (max-width: 560px) {
