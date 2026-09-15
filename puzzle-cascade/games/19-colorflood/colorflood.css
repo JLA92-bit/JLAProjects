@@ -1,0 +1,23 @@
+.cf-meta {
+  display: flex; justify-content: center; color: #fff; font-weight: 700;
+  font-family: var(--pc-font-display); margin-bottom: 4px; text-align: center;
+}
+
+.cf-palette {
+  display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+  margin: 10px auto 0;
+}
+.cf-swatch {
+  width: 42px; height: 42px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.85);
+  box-shadow: 0 3px 0 rgba(0,0,0,0.25);
+  touch-action: manipulation; cursor: pointer;
+}
+.cf-swatch:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+.cf-swatch--hint {
+  animation: cf-pulse 0.5s infinite alternate;
+}
+@keyframes cf-pulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.18); }
+}

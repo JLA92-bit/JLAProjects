@@ -1,9 +1,13 @@
-const CACHE_NAME = 'josh-makes-puzzles-v3';
+const CACHE_NAME = 'josh-makes-puzzles-v4';
 
 const GAME_IDS = [
   '01-sliding/sliding', '02-memory/memory', '03-match3/match3', '04-maze/maze',
   '05-sokoban/sokoban', '06-wordsearch/wordsearch', '07-merge2048/merge2048',
   '08-jigsaw/jigsaw', '09-simon/simon', '10-lightsout/lightsout',
+  '11-tictactoe/tictactoe', '12-whackmole/whackmole', '13-connect4/connect4',
+  '14-minesweeper/minesweeper', '15-hanoi/hanoi', '16-pegsolitaire/pegsolitaire',
+  '17-snake/snake', '18-breakout/breakout', '19-colorflood/colorflood',
+  '20-sudoku/sudoku',
 ];
 
 const APP_SHELL = [

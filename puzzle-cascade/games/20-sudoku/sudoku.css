@@ -1,0 +1,18 @@
+.su-meta {
+  display: flex; justify-content: center; color: #fff; font-weight: 700;
+  font-family: var(--pc-font-display); margin-bottom: 4px; text-align: center;
+}
+
+.su-numpad {
+  display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  margin: 10px auto 0; max-width: 420px;
+}
+.su-numbtn {
+  min-width: 38px; height: 42px; padding: 0 8px; border-radius: 10px;
+  background: rgba(255,255,255,0.9);
+  box-shadow: 0 3px 0 rgba(0,0,0,0.25);
+  font-weight: 800; font-family: var(--pc-font-display);
+  color: var(--pc-ink); touch-action: manipulation;
+}
+.su-numbtn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+.su-numbtn--erase { background: #ff5c5c; color: #fff; }

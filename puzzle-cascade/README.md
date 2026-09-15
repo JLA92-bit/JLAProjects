@@ -1,10 +1,12 @@
 # Josh Makes Puzzles
 
-A 10-game puzzle collection that unlocks one puzzle at a time as you clear
+A 20-game puzzle collection that unlocks one puzzle at a time as you clear
 each one - sliding tiles, memory match, match-3, a maze, Sokoban, word
-search, a 2048-style number merge, a jigsaw, a Simon-style pattern game, and
-a Lights Out logic grid as the "final boss." One shared hub screen, one save
-file, one visual theme.
+search, a 2048-style number merge, a jigsaw, a Simon-style pattern game, a
+Lights Out logic grid, Tic-Tac-Toe vs an AI, Whack-a-Mole, Connect Four vs
+an AI, Minesweeper, Tower of Hanoi, Peg Solitaire, Snake, Brick Breaker
+(Breakout), Color Flood, and a Mini Sudoku as the "final boss." One shared
+hub screen, one save file, one visual theme.
 
 Rendered in real 3D with [Three.js](https://threejs.org/): every board is a
 tilted tabletop scene with extruded rounded tiles, soft shadows, and
@@ -29,7 +31,7 @@ puzzle-cascade/
       three-stage.js   - shared Three.js scaffolding (renderer, camera,
                          lighting, raycasting, tweening) every game builds on
   games/
-    01-sliding/ .. 10-lightsout/
+    01-sliding/ .. 20-sudoku/
                        - one self-contained ES module per puzzle, each
                          registering itself with PC.Games.register(id, {mount})
   vendor/

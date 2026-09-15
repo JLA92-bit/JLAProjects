@@ -1,0 +1,10 @@
+.ms-meta {
+  display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap;
+  color: #fff; font-weight: 700; font-family: var(--pc-font-display); margin-bottom: 4px;
+}
+.ms-flagtoggle {
+  border: none; cursor: pointer; font-family: var(--pc-font-body);
+}
+.ms-flagtoggle.is-active {
+  background: var(--pc-orange, #ff9f43); color: #241436;
+}

@@ -1,0 +1,4 @@
+.ps-meta {
+  display: flex; justify-content: center; color: #fff; font-weight: 700;
+  font-family: var(--pc-font-display); margin-bottom: 4px; text-align: center;
+}
