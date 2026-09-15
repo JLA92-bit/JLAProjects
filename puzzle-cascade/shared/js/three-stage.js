@@ -1,14 +1,18 @@
 /**
  * three-stage.js - shared WebGL scaffolding for every Puzzle Cascade game.
  *
- * Every game gets a small tilted-tabletop scene: an orthographic-feeling
- * perspective camera looking down at an XY board (Z is "up" off the
- * table), soft shadows, and candy-bright extruded rounded tiles. Games
- * build their own meshes with makeTile()/makeRoundedMesh() and drive
- * interaction with pick()/pickPlane() - the render loop and resize
- * handling are all here so each game file only deals with its own logic.
+ * Every game gets a true bird's-eye scene: an orthographic camera looking
+ * straight down at an XY board (Z is "up" off the table) - parallel
+ * projection, so nothing off-center ever shows a tilted side face, unlike
+ * a perspective camera. Soft shadows, candy-bright extruded rounded
+ * tiles. Games build their own meshes with makeTile()/makeRoundedMesh()
+ * and drive interaction with pick()/pickPlane() - the render loop and
+ * resize handling are all here so each game file only deals with its own
+ * logic.
  */
 import * as THREE from 'three';
+
+const VIEW_SCALE = 0.62; // world half-height per unit of opts.distance
 
 export function createStage(container, opts = {}) {
   const width = () => container.clientWidth || 320;
@@ -33,16 +37,28 @@ export function createStage(container, opts = {}) {
   scene.add(world);
 
   const dist = opts.distance || 16;
-  const camera = new THREE.PerspectiveCamera(32, width() / height(), 0.1, 200);
-  camera.up.set(0, 0, 1);
-  camera.position.set(0, -dist * 0.78, dist * 0.92);
-  camera.lookAt(0, opts.lookAtY || 0, 0);
+  const lookAtY = opts.lookAtY || 0;
+  const halfH = dist * VIEW_SCALE;
+  const camera = new THREE.OrthographicCamera(-halfH, halfH, halfH, -halfH, 0.1, 400);
+  camera.up.set(0, 1, 0);
+  camera.position.set(0, lookAtY, 50);
+  camera.lookAt(0, lookAtY, 0);
   scene.add(camera);
+
+  function fitCamera() {
+    const aspect = width() / height() || 1;
+    camera.left = -halfH * aspect;
+    camera.right = halfH * aspect;
+    camera.top = halfH;
+    camera.bottom = -halfH;
+    camera.updateProjectionMatrix();
+  }
+  fitCamera();
 
   const hemi = new THREE.HemisphereLight(0xfff3e0, 0x2b0f5c, 0.85);
   scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffffff, 1.15);
-  key.position.set(-4, -6, 10);
+  key.position.set(-4, 3, 10);
   key.castShadow = true;
   key.shadow.mapSize.set(1024, 1024);
   key.shadow.camera.left = -10; key.shadow.camera.right = 10;
@@ -106,8 +122,7 @@ export function createStage(container, opts = {}) {
   const ro = new ResizeObserver(() => {
     const w = width(), h = height();
     if (w === 0 || h === 0) return;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    fitCamera();
     renderer.setSize(w, h);
   });
   ro.observe(container);
