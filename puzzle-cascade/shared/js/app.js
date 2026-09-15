@@ -17,62 +17,72 @@
     {
       id: 'sliding', name: 'Sliding Tiles', icon: '🧩', color: '#ff4d8d',
       blurb: 'Slide tiles back into order.',
-      goal: 'Slide tiles into the empty gap until the numbers run in order, left to right, top to bottom.',
-      controls: 'Tap a tile next to the empty gap to slide it.',
+      goal: "Put the numbered tiles in order - 1, 2, 3... - reading left to right, top to bottom. There's one empty gap you slide tiles into.",
+      controls: 'Tap any tile that sits right next to the empty gap. That tile slides into the gap, opening a new gap where it used to be.',
+      example: "If the gap is below the '5' tile, tap '5' - it slides down into the gap. Keep doing this, one tile at a time, until every number is in order.",
     },
     {
       id: 'memory', name: 'Memory Match', icon: '🃏', color: '#ff9f43',
       blurb: 'Flip cards, find every pair.',
-      goal: 'Flip two cards at a time and find every matching pair, using as few attempts as you can.',
-      controls: 'Tap a card to flip it face up.',
+      goal: 'Every card has a hidden matching twin somewhere on the board. Find all the pairs.',
+      controls: "Tap any card to flip it face-up. Then tap a second card. If they match, both stay face-up for good. If they don't, they flip back over - so remember where they were!",
+      example: "You flip a card and see 🍎. Remember that spot. A few turns later you flip another card and it's also 🍎 - tap it right after and you've found the pair.",
     },
     {
       id: 'match3', name: 'Color Match-3', icon: '💎', color: '#ffd93d',
       blurb: 'Swap gems, clear lines of 3+.',
-      goal: 'Swap two neighboring gems to line up 3 or more of the same color, and reach the target score before your moves run out.',
-      controls: 'Tap a gem, then tap a neighbor to swap them.',
+      goal: 'Line up 3 or more gems of the same color in a row or column to clear them and score points, before you run out of moves.',
+      controls: 'Tap one gem, then tap a gem directly next to it (up, down, left, or right) to swap their places. The swap only happens if it lines up 3 or more matching gems.',
+      example: 'Two red gems sit side by side with a yellow gem next to them. Tap the yellow gem, then tap the red gem beside it to swap - if that completes a row of 3 reds, they clear!',
     },
     {
       id: 'maze', name: 'Maze Runner', icon: '🏃', color: '#23d18b',
       blurb: 'Race to the exit before time runs out.',
-      goal: 'Guide your character through the maze to the flag before the clock runs out.',
-      controls: 'Arrow keys, WASD, or the on-screen pad.',
+      goal: 'Guide your character through the maze from the start to the flag 🏁 before the clock hits zero.',
+      controls: 'Use the arrow keys, WASD, or tap the on-screen arrow pad to move one step at a time. Yellow walls block your path - you have to go around them.',
+      example: "If a wall blocks you from moving right, try moving up or down first, then right again once you're past the wall - like finding a detour.",
     },
     {
       id: 'sokoban', name: 'Block Push', icon: '📦', color: '#17c3b2',
       blurb: 'Push every crate onto its target.',
-      goal: 'Push every crate onto a glowing target. You can only push, never pull, so plan your route before you commit.',
-      controls: 'Arrow keys, WASD, or the on-screen pad.',
+      goal: 'Push every crate 📦 onto a glowing target circle. Once all crates are on targets, you win.',
+      controls: "Walk into a crate to push it one space further in that same direction. You can only push crates, never pull them - so think ahead about which side you need to be on before you start pushing.",
+      example: "If a crate needs to move left, you must first walk around to stand on its right side, then move left - that pushes the crate one step left, onto or toward the target.",
     },
     {
       id: 'wordsearch', name: 'Word Search', icon: '🔤', color: '#3f8efc',
       blurb: 'Find every hidden word in the grid.',
-      goal: 'Find every word from the list hidden in the letter grid - across, down, diagonal, even backwards.',
-      controls: 'Drag across the letters that spell a word.',
+      goal: 'Find every word from the list hidden inside the letter grid.',
+      controls: 'Press and drag in a straight line across the letters that spell a word. Words can run left-to-right, right-to-left, up, down, or diagonally.',
+      example: "If 'CAT' is hidden going downward, find the 'C', press down on it, then drag straight down through the 'A' and 'T' below it, then let go - the word highlights and is found.",
     },
     {
       id: 'merge2048', name: 'Number Merge', icon: '🔢', color: '#a259ff',
       blurb: 'Merge tiles to reach the target number.',
-      goal: 'Slide every tile at once - two tiles with the same number merge into one, doubled. Reach the target number to win.',
-      controls: 'Swipe, or use the arrow keys.',
+      goal: "Combine matching numbers to build up to the target number shown at the top of the screen.",
+      controls: 'Swipe (or press an arrow key) to slide every tile at once in that direction. When two tiles with the same number bump into each other, they merge into one tile worth double.',
+      example: "Swipe right. If a '2' tile slides into another '2' tile, they combine into a single '4' tile. Two '4' tiles later combine into an '8', and so on.",
     },
     {
       id: 'jigsaw', name: 'Jigsaw', icon: '🧩', color: '#ff5c5c',
       blurb: 'Drag pieces to rebuild the picture.',
-      goal: 'Drag every scattered piece into its outlined slot on the board to rebuild the full picture.',
-      controls: 'Drag a piece with your finger or mouse.',
+      goal: 'Rebuild the full picture by moving every scattered piece to its correct spot on the board.',
+      controls: 'Press and drag a piece from the scattered pile toward the board. When you drop it near the right outlined square, it snaps into place automatically.',
+      example: "A piece shows the corner of a yellow sun. Look at the picture pieces already placed to guess roughly where the sun goes, then drag your piece there and let go - it'll snap in if you're close enough.",
     },
     {
       id: 'simon', name: 'Pattern Memory', icon: '🎵', color: '#ff4d8d',
       blurb: 'Repeat the ever-growing sequence.',
-      goal: 'Watch the pads light up in sequence, then repeat the pattern back. Every round adds one more step - and speeds up.',
-      controls: 'Tap the pads in the order they lit up.',
+      goal: 'Watch which colored pads light up in order, then tap them back in that exact same order. Every round the sequence gets one step longer - and faster.',
+      controls: "Wait and watch first - don't tap anything while the pads are flashing. Once they stop, tap the pads yourself in the same order you just saw.",
+      example: 'The game flashes green, then blue, then green again. Once it stops, you tap: green, blue, green - in that exact order - to complete the round.',
     },
     {
       id: 'lightsout', name: 'Logic Grid', icon: '💡', color: '#ffd93d',
       blurb: 'The final boss: clear every light.',
-      goal: 'Turn every light off. Pressing a light also flips its neighbors, so think ahead - this is the final boss puzzle.',
-      controls: 'Tap a light to flip it and its orthogonal neighbors.',
+      goal: "Turn off every single light on the grid. This is the final boss puzzle - it takes some planning.",
+      controls: "Tap any light to toggle it on/off - but that same tap ALSO toggles the lights directly above, below, left, and right of it. One tap changes up to 5 lights at once.",
+      example: "Tapping a lit light in the middle of the grid turns it off, but also flips its 4 neighbors - so a tap can turn OTHER lights on too. Use the Hint button if you get stuck figuring out where to tap next.",
     },
   ];
 
@@ -109,6 +119,7 @@
 
   function init() {
     els = {
+      header: byId('pc-header'),
       hub: byId('pc-hub'),
       gameView: byId('pc-game-view'),
       grid: byId('pc-puzzle-grid'),
@@ -273,6 +284,7 @@
   }
 
   function launchLevel(level) {
+    els.header.hidden = true;
     els.hub.hidden = true;
     els.gameView.hidden = false;
     els.difficultyBar.hidden = true;
@@ -282,17 +294,38 @@
     els.gameTimer.textContent = '0:00';
     els.gameStage.innerHTML = '';
     stopTimer();
-    spinSlotWheel(level, (puzzle, index) => {
+
+    const onPicked = (puzzle, index) => {
       const difficulty = difficultyForLevel(level);
       els.gameTitle.textContent = `Level ${level} · ${puzzle.name}`;
       els.gameStage.style.setProperty('--tile-color', puzzle.color);
       showIntro(puzzle, difficulty, () => beginRound(puzzle, Games.get(puzzle.id), difficulty, index, { levelMode: true, level }), { levelMode: true, level });
-    });
+    };
+
+    const pool = unlockedPuzzles();
+    if (pool.length <= 1) {
+      // Nothing to actually spin for yet - skip the wheel theatrics and go
+      // straight to the one puzzle that's unlocked so far.
+      onPicked(pool[0].p, pool[0].i);
+    } else {
+      spinSlotWheel(level, onPicked);
+    }
+  }
+
+  function unlockedPuzzles() {
+    // One progression model, not two: the wheel only ever offers puzzles
+    // already unlocked via the normal clear-a-puzzle-to-unlock-the-next
+    // flow, same as the Free Play grid. Otherwise the wheel could hand
+    // someone a puzzle that still shows locked on the Free Play tab,
+    // which reads as a bug ("where did this extra one come from?").
+    return PUZZLES.map((p, i) => ({ p, i })).filter(({ p, i }) => save.isUnlocked(p.id, i));
   }
 
   function spinSlotWheel(level, onLanded) {
-    const chosenIndex = Math.floor(Math.random() * PUZZLES.length);
-    const chosen = PUZZLES[chosenIndex];
+    const pool = unlockedPuzzles();
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    const chosen = pick.p;
+    const chosenIndex = pick.i;
 
     const wrap = document.createElement('div');
     wrap.className = 'pc-slotwheel';
@@ -308,10 +341,11 @@
     const reel = wrap.querySelector('#pc-reel');
     const resultEl = wrap.querySelector('#pc-slotwheel-result');
     const CELL = 96;
-    const LOOPS = 5;
+    const LOOPS = pool.length <= 2 ? 12 : 5; // keep the spin feeling substantial even with few unlocked games
 
+    const reelPool = pool.map(({ p }) => p);
     const sequence = [];
-    for (let i = 0; i < LOOPS; i++) sequence.push(...PUZZLES);
+    for (let i = 0; i < LOOPS; i++) sequence.push(...reelPool);
     sequence.push(chosen);
     sequence.forEach((p) => {
       const cell = document.createElement('div');
@@ -352,6 +386,7 @@
       UI.toast(`${puzzle.name} is coming soon!`);
       return;
     }
+    els.header.hidden = true;
     els.hub.hidden = true;
     els.gameView.hidden = false;
     els.difficultyBar.hidden = false;
@@ -398,9 +433,20 @@
       <div class="pc-intro-icon">${puzzle.icon}</div>
       <div class="pc-intro-name">${puzzle.name}</div>
       ${levelBadge}
-      <p class="pc-intro-line pc-intro-goal">${puzzle.goal}</p>
-      <p class="pc-intro-line pc-intro-controls"><strong>How to play:</strong> ${puzzle.controls}</p>
-      <p class="pc-intro-line pc-intro-tip">💡 Stuck? Tap the Hint button any time.</p>
+      <div class="pc-intro-block pc-intro-block--goal">
+        <div class="pc-intro-block-label">🎯 Goal</div>
+        <p class="pc-intro-line">${puzzle.goal}</p>
+      </div>
+      <div class="pc-intro-block pc-intro-block--controls">
+        <div class="pc-intro-block-label">👆 How to play</div>
+        <p class="pc-intro-line">${puzzle.controls}</p>
+      </div>
+      ${puzzle.example ? `
+      <div class="pc-intro-block pc-intro-block--example">
+        <div class="pc-intro-block-label">✅ For example</div>
+        <p class="pc-intro-line">${puzzle.example}</p>
+      </div>` : ''}
+      <p class="pc-intro-line pc-intro-tip">💡 Stuck mid-game? Tap the Hint button any time.</p>
       <button class="pc-btn pc-btn--green pc-intro-start">Let's Go, ${playerName()}! 🚀</button>
     `;
     els.gameStage.appendChild(card);
@@ -515,6 +561,7 @@
     els.gameStage.innerHTML = '';
     els.gameView.hidden = true;
     els.hub.hidden = false;
+    els.header.hidden = false;
     renderHub();
   }
 

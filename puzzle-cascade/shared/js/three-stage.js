@@ -16,7 +16,7 @@ import { RenderPass } from '../../vendor/three-addons/postprocessing/RenderPass.
 import { UnrealBloomPass } from '../../vendor/three-addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from '../../vendor/three-addons/postprocessing/OutputPass.js';
 
-const VIEW_SCALE = 0.5; // world half-height per unit of opts.distance - tight framing so the board fills the (now much larger) canvas
+const VIEW_SCALE = 0.42; // world half-height per unit of opts.distance - tight framing so the board fills the canvas edge to edge
 
 let cachedBgTexture = null;
 function backgroundTexture() {
