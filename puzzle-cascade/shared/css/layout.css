@@ -4,7 +4,9 @@
   max-width: 1100px;
   margin: 0 auto;
   padding: 20px 20px 60px;
-  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---------- Header ---------- */
@@ -293,10 +295,17 @@
 .pc-tile--locked { filter: grayscale(0.6); opacity: 0.7; border-top-color: #999; }
 
 /* ---------- Game view ---------- */
-.pc-game-view { color: #fff; }
+.pc-game-view {
+  color: #fff;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .pc-game-header {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 14px; gap: 10px; flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 .pc-game-header-left { display: flex; align-items: center; gap: 10px; }
 .pc-game-timer {
@@ -310,6 +319,7 @@
 
 .pc-difficulty-bar {
   display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 .pc-diff-btn {
   flex: 1 1 140px;
@@ -329,9 +339,10 @@
   border-radius: var(--pc-radius-lg);
   box-shadow: inset 0 0 0 2px rgba(255,255,255,0.15);
   padding: 18px;
-  min-height: 360px;
+  min-height: 0;
+  flex: 1 1 auto;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
 }
 .pc-stage-inner {
@@ -340,19 +351,26 @@
   flex-direction: column;
   align-items: center;
   gap: 14px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .pc-stage-hint {
   color: rgba(255,255,255,0.85);
   font-weight: 700;
   text-align: center;
   font-size: 0.9rem;
+  flex: 0 0 auto;
 }
 
-/* 3D game canvas host: fills the stage, HUD/controls float as DOM overlays. */
+/* 3D game canvas host: fills whatever vertical room the stage has left after
+   its meta row / d-pad / word list, instead of a fixed height - the canvas
+   should dominate the screen, not a fraction of it. HUD/controls float as
+   DOM overlays on top of it. */
 .pc-canvas3d {
   position: relative;
   width: 100%;
-  height: clamp(300px, 58vw, 480px);
+  flex: 1 1 auto;
+  min-height: 220px;
   border-radius: var(--pc-radius-md);
   overflow: hidden;
   touch-action: none;
@@ -388,9 +406,21 @@
 [hidden] { display: none !important; }
 
 @media (max-width: 560px) {
-  .pc-app { padding: 14px 12px 50px; }
-  .pc-logo { font-size: 1.25rem; }
+  .pc-app { padding: 10px 10px 14px; }
+  .pc-logo { font-size: 1.1rem; }
+  .pc-logo-mark { font-size: 1.5rem; }
+  .pc-icon-btn { width: 38px; height: 38px; font-size: 1.1rem; }
   .pc-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
   .pc-tile-icon { font-size: 2.1rem; }
-  .pc-stage { padding: 10px; min-height: 300px; }
+
+  /* Game view: minimize every bit of chrome so the canvas dominates the screen. */
+  .pc-header { margin-bottom: 8px; }
+  .pc-game-header { margin-bottom: 8px; }
+  .pc-game-header h2 { font-size: 1.05rem !important; }
+  .pc-game-timer { padding: 6px 12px; font-size: 0.85rem; }
+  .pc-hint-btn { padding: 6px 12px; font-size: 0.82rem; }
+  .pc-difficulty-bar { margin-bottom: 10px; gap: 6px; }
+  .pc-diff-btn { padding: 7px 8px; flex-basis: 90px; }
+  .pc-stage { padding: 8px; }
+  .pc-canvas3d { min-height: 200px; border-radius: 14px; }
 }
