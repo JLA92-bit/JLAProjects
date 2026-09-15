@@ -1,0 +1,9 @@
+.db-meta {
+  display: flex; gap: 16px; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  flex-wrap: wrap; text-align: center;
+}
+.db-score { display: flex; align-items: center; gap: 6px; }
+.db-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.db-dot--you { background: #ff4d8d; }
+.db-dot--ai { background: #3f8efc; }

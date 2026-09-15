@@ -1,0 +1,5 @@
+.ps-meta {
+  display: flex; gap: 18px; justify-content: center;
+  color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  font-size: 0.9rem;
+}
