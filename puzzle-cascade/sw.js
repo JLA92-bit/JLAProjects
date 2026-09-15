@@ -1,4 +1,4 @@
-const CACHE_NAME = 'puzzle-cascade-v2';
+const CACHE_NAME = 'josh-makes-puzzles-v3';
 
 const GAME_IDS = [
   '01-sliding/sliding', '02-memory/memory', '03-match3/match3', '04-maze/maze',

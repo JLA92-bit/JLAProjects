@@ -143,10 +143,40 @@ function mount(container, difficulty, api) {
     }
   }
 
-  return () => {
-    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-    stage.dispose();
-    wrap.remove();
+  function goalIndex(v) { return v === 0 ? size * size - 1 : v - 1; }
+  function manhattan(idx, goalIdx) {
+    const r1 = Math.floor(idx / size), c1 = idx % size, r2 = Math.floor(goalIdx / size), c2 = goalIdx % size;
+    return Math.abs(r1 - r2) + Math.abs(c1 - c2);
+  }
+  function totalDistance(arr) {
+    let s = 0;
+    arr.forEach((v, i) => { if (v !== 0) s += manhattan(i, goalIndex(v)); });
+    return s;
+  }
+
+  function hint() {
+    if (solved || busy) return;
+    const blank = board.indexOf(0);
+    let best = null, bestScore = Infinity;
+    neighborIndices(blank, size).forEach((n) => {
+      const copy = board.slice();
+      [copy[blank], copy[n]] = [copy[n], copy[blank]];
+      const score = totalDistance(copy);
+      if (score < bestScore) { bestScore = score; best = n; }
+    });
+    if (best === null) return;
+    const mesh = meshByValue.get(board[best]);
+    tween(mesh.scale, { x: 1.3, y: 1.3, z: 1.3 }, 160, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 180, Easing.outCubic));
+    api.ui.toast(`${api.playerName}, try that glowing tile!`);
+  }
+
+  return {
+    unmount: () => {
+      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 

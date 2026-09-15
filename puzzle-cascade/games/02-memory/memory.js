@@ -134,10 +134,32 @@ function mount(container, difficulty, api) {
     }
   }
 
-  return () => {
-    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-    stage.dispose();
-    wrap.remove();
+  function hint() {
+    if (lock) return;
+    const candidates = deck.filter((c) => !c.matched && !c.flipped && (!firstPick || c.id !== firstPick.card.id));
+    const byIcon = {};
+    candidates.forEach((c) => { (byIcon[c.icon] = byIcon[c.icon] || []).push(c); });
+    const pairEntry = Object.values(byIcon).find((arr) => arr.length >= 2);
+    if (!pairEntry) { api.ui.toast(`${api.playerName}, no safe hint right now - keep going!`); return; }
+    const [a, b] = pairEntry;
+    const meshA = meshes.find((m) => m.userData.id === a.id);
+    const meshB = meshes.find((m) => m.userData.id === b.id);
+    flipVisual(meshA, true, a.icon);
+    flipVisual(meshB, true, b.icon);
+    api.ui.toast(`${api.playerName}, remember these two!`);
+    setTimeout(() => {
+      if (!a.matched && !a.flipped) flipVisual(meshA, false);
+      if (!b.matched && !b.flipped) flipVisual(meshB, false);
+    }, 1000);
+  }
+
+  return {
+    unmount: () => {
+      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 

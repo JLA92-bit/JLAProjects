@@ -1,6 +1,6 @@
 # Credits
 
-Puzzle Cascade deliberately avoids third-party art/sound packs so the whole
+Josh Makes Puzzles deliberately avoids third-party art/sound packs so the whole
 game ships as source code with no binary asset licensing to track. Everything
 visual and audible is either generated in code at runtime or comes from the
 two dependencies below.

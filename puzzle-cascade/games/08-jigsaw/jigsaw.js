@@ -179,11 +179,37 @@ function mount(container, difficulty, api) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
 
-  return () => {
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-    stage.dispose();
-    wrap.remove();
+  function hint() {
+    if (finished) return;
+    const unplaced = pieces.filter((p) => !p.placed && p !== dragging);
+    if (!unplaced.length) return;
+    const p = unplaced[Math.floor(Math.random() * unplaced.length)];
+    p.placed = true;
+    p.mesh.rotation.z = 0;
+    tween(p.mesh.scale, { x: 1.15, y: 1.15, z: 1.15 }, 120, Easing.outCubic);
+    tween(p.mesh.position, { x: p.target.x, y: p.target.y, z: 0 }, 280, Easing.outBack, () => {
+      tween(p.mesh.scale, { x: 1, y: 1, z: 1 }, 140, Easing.outCubic);
+      placedCount++;
+      placedEl.textContent = placedCount;
+      api.sound.match();
+      api.ui.burstFromElement(canvasHost, { count: 10 });
+      if (placedCount === total) {
+        finished = true;
+        const stars = starsForMisplacedTries(wrongDrops, total);
+        setTimeout(() => api.win(stars, { wrongDrops }), 300);
+      }
+    });
+    api.ui.toast(`${api.playerName}, here's one piece placed for you!`);
+  }
+
+  return {
+    unmount: () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 

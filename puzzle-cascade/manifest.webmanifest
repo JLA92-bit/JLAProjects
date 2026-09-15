@@ -1,7 +1,7 @@
 {
-  "name": "Puzzle Cascade",
-  "short_name": "Puzzle Cascade",
-  "description": "A 10-game puzzle collection that unlocks as you play - sliding tiles, memory match, match-3, mazes, and more.",
+  "name": "Josh Makes Puzzles",
+  "short_name": "Josh Puzzles",
+  "description": "A 10-game puzzle collection with a Candy Crush-style level path - sliding tiles, memory match, match-3, mazes, and more.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

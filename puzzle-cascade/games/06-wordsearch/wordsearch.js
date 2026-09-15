@@ -156,11 +156,25 @@ function mount(container, difficulty, api) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
 
-  return () => {
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-    stage.dispose();
-    wrap.remove();
+  function hint() {
+    const remaining = placements.filter((p) => !foundWords.has(p.word));
+    if (!remaining.length) return;
+    const pick = remaining[Math.floor(Math.random() * remaining.length)];
+    pick.cells.forEach(([r, c]) => setTileState(tiles[r * cfg.size + c], 'selecting'));
+    api.ui.toast(`${api.playerName}, one word is glowing - go find it!`);
+    setTimeout(() => {
+      pick.cells.forEach(([r, c]) => { if (!isFoundCell(r, c)) setTileState(tiles[r * cfg.size + c], 'idle'); });
+    }, 1000);
+  }
+
+  return {
+    unmount: () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 

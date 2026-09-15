@@ -158,7 +158,54 @@ function mount(container, difficulty, api) {
   window.addEventListener('keydown', onKey);
   wrap.querySelectorAll('.sk-dbtn').forEach((btn) => btn.addEventListener('click', () => move(btn.dataset.dir)));
 
-  return () => { window.removeEventListener('keydown', onKey); stage.dispose(); wrap.remove(); };
+  function stateKey(player, boxes) { return player.r + ',' + player.c + '|' + [...boxes].sort().join(';'); }
+  function isWin(st) { return [...state.targets].every((t) => st.boxes.has(t)) && st.boxes.size === state.targets.size; }
+
+  function solveFromHere() {
+    const DIRS = [['up', -1, 0], ['down', 1, 0], ['left', 0, -1], ['right', 0, 1]];
+    const startState = { player: { ...state.player }, boxes: new Set(state.boxes) };
+    const visited = new Set([stateKey(startState.player, startState.boxes)]);
+    const queue = [{ st: startState, path: [] }];
+    let iterations = 0;
+    while (queue.length && iterations < 200000) {
+      iterations++;
+      const { st: cur, path } = queue.shift();
+      if (isWin(cur)) return path;
+      for (const [dir, dr, dc] of DIRS) {
+        const nr = cur.player.r + dr, nc = cur.player.c + dc, nKey = nr + ',' + nc;
+        if (state.walls.has(nKey)) continue;
+        let boxes = cur.boxes;
+        if (cur.boxes.has(nKey)) {
+          const br = nr + dr, bc = nc + dc, bKey = br + ',' + bc;
+          if (state.walls.has(bKey) || cur.boxes.has(bKey)) continue;
+          boxes = new Set(cur.boxes);
+          boxes.delete(nKey);
+          boxes.add(bKey);
+        }
+        const nextPlayer = { r: nr, c: nc };
+        const key = stateKey(nextPlayer, boxes);
+        if (visited.has(key)) continue;
+        visited.add(key);
+        queue.push({ st: { player: nextPlayer, boxes }, path: [...path, dir] });
+      }
+    }
+    return null;
+  }
+
+  function hint() {
+    if (finished || moving) return;
+    const path = solveFromHere();
+    if (!path || !path.length) { api.ui.toast(`${api.playerName}, try undoing a push - that route's blocked!`); return; }
+    const dir = path[0];
+    const arrow = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️' }[dir];
+    tween(playerMesh.scale, { x: 1.4, y: 1.4, z: 1.4 }, 160, Easing.outBack, () => tween(playerMesh.scale, { x: 1, y: 1, z: 1 }, 200, Easing.outCubic));
+    api.ui.toast(`${api.playerName}, try heading ${dir}! ${arrow}`);
+  }
+
+  return {
+    unmount: () => { window.removeEventListener('keydown', onKey); stage.dispose(); wrap.remove(); },
+    hint,
+  };
 }
 
 PC.Games.register('sokoban', { mount });

@@ -252,10 +252,36 @@ function mount(container, difficulty, api) {
     }
   }
 
-  return () => {
-    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-    stage.dispose();
-    wrap.remove();
+  function hint() {
+    if (busy) return;
+    for (let i = 0; i < board.length; i++) {
+      const r = Math.floor(i / size), c = i % size;
+      const neighbors = [];
+      if (c < size - 1) neighbors.push(i + 1);
+      if (r < size - 1) neighbors.push(i + size);
+      for (const n of neighbors) {
+        const copy = board.slice();
+        [copy[i], copy[n]] = [copy[n], copy[i]];
+        if (findMatches(copy, size).size > 0) {
+          [i, n].forEach((idx) => {
+            const m = meshAt[idx];
+            if (!m) return;
+            tween(m.scale, { x: 1.35, y: 1.35, z: 1.35 }, 180, Easing.outBack, () => tween(m.scale, { x: 1, y: 1, z: 1 }, 200, Easing.outCubic));
+          });
+          api.ui.toast(`${api.playerName}, swap those two glowing gems!`);
+          return;
+        }
+      }
+    }
+  }
+
+  return {
+    unmount: () => {
+      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 

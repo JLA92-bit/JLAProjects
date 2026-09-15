@@ -129,10 +129,21 @@ function mount(container, difficulty, api) {
 
   nextRound();
 
-  return () => {
-    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-    stage.dispose();
-    wrap.remove();
+  function hint() {
+    if (!accepting || finished) return;
+    const nextPad = sequence[inputIndex];
+    litUp(nextPad, 0.9, 1.3, 260);
+    setTimeout(() => litDown(nextPad), 550);
+    api.ui.toast(`${api.playerName}, that glowing pad is next!`);
+  }
+
+  return {
+    unmount: () => {
+      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 

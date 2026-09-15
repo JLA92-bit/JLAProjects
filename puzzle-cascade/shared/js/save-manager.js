@@ -24,6 +24,13 @@
         current: 0,
         best: 0,
       },
+      player: {
+        name: null,
+      },
+      levels: {
+        current: 1,
+        history: {},
+      },
       puzzles: {},
     };
   }
@@ -151,9 +158,47 @@
       return this._state.settings[key];
     }
 
+    getPlayerName() {
+      return (this._state.player && this._state.player.name) || null;
+    }
+
+    setPlayerName(name) {
+      const clean = String(name || '').trim().slice(0, 24);
+      if (!this._state.player) this._state.player = { name: null };
+      this._state.player.name = clean || null;
+      this._persist();
+      return this._state.player.name;
+    }
+
     resetProgress() {
       this._state = defaultState();
       this._persist();
+    }
+
+    getCurrentLevel() {
+      return (this._state.levels && this._state.levels.current) || 1;
+    }
+
+    getLevelHistory(level) {
+      return (this._state.levels.history && this._state.levels.history[level]) || null;
+    }
+
+    recordLevelResult(level, gameId, difficulty, stars, timeMs) {
+      if (!this._state.levels) this._state.levels = { current: 1, history: {} };
+      const existing = this._state.levels.history[level];
+      const improved = !existing || stars > existing.stars;
+      this._state.levels.history[level] = {
+        gameId, difficulty,
+        stars: Math.max(stars, existing ? existing.stars : 0),
+        timeMs: existing && existing.timeMs !== null && existing.timeMs < timeMs ? existing.timeMs : timeMs,
+      };
+      let advanced = false;
+      if (level >= this._state.levels.current) {
+        this._state.levels.current = level + 1;
+        advanced = true;
+      }
+      this._persist();
+      return { improved, advanced };
     }
   }
 

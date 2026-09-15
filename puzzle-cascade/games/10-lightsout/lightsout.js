@@ -111,10 +111,62 @@ function mount(container, difficulty, api) {
   }
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
-  return () => {
-    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-    stage.dispose();
-    wrap.remove();
+  // Gaussian elimination over GF(2): solves "which cells to press" for the
+  // current board. The scramble was built from real presses so a solution
+  // always exists.
+  function solve() {
+    const N = size * size;
+    const A = [];
+    for (let i = 0; i < N; i++) {
+      const row = new Array(N + 1).fill(0);
+      const r = Math.floor(i / size), c = i % size;
+      row[i] = 1;
+      if (r > 0) row[i - size] = 1;
+      if (r < size - 1) row[i + size] = 1;
+      if (c > 0) row[i - 1] = 1;
+      if (c < size - 1) row[i + 1] = 1;
+      row[N] = lights[r][c] ? 1 : 0;
+      A.push(row);
+    }
+    let pivotRow = 0;
+    const pivotCols = [];
+    for (let col = 0; col < N && pivotRow < N; col++) {
+      let sel = -1;
+      for (let r = pivotRow; r < N; r++) { if (A[r][col] === 1) { sel = r; break; } }
+      if (sel === -1) continue;
+      [A[pivotRow], A[sel]] = [A[sel], A[pivotRow]];
+      for (let r = 0; r < N; r++) {
+        if (r !== pivotRow && A[r][col] === 1) {
+          for (let k = col; k <= N; k++) A[r][k] ^= A[pivotRow][k];
+        }
+      }
+      pivotCols.push(col);
+      pivotRow++;
+    }
+    const x = new Array(N).fill(0);
+    for (let i = 0; i < pivotCols.length; i++) x[pivotCols[i]] = A[i][N];
+    return x;
+  }
+
+  function hint() {
+    if (finished) return;
+    const x = solve();
+    const idx = x.findIndex((v) => v === 1);
+    if (idx === -1) return;
+    const r = Math.floor(idx / size), c = idx % size;
+    const mesh = meshes[r][c];
+    const restScale = lights[r][c] ? 1.06 : 1;
+    tween(mesh.scale, { x: 1.4, y: 1.4, z: 1.4 }, 180, Easing.outBack, () => tween(mesh.scale, { x: restScale, y: restScale, z: restScale }, 200, Easing.outCubic));
+    api.ui.toast(`${api.playerName}, try that glowing light!`);
+  }
+
+  return {
+    unmount: () => {
+      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 

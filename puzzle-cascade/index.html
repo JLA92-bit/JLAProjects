@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Puzzle Cascade</title>
-<meta name="description" content="Puzzle Cascade - a 10-game puzzle collection.">
+<title>Josh Makes Puzzles</title>
+<meta name="description" content="Josh Makes Puzzles - a 10-game puzzle collection with a Candy Crush-style level path.">
 <meta name="theme-color" content="#6a2dd6">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧩</text></svg>">
 <link rel="manifest" href="manifest.webmanifest">
@@ -35,13 +35,14 @@
   <header class="pc-header">
     <div class="pc-logo pc-display">
       <span class="pc-logo-mark">🧩</span>
-      <span>Puzzle Cascade</span>
+      <span>Josh Makes Puzzles</span>
     </div>
     <button class="pc-icon-btn" id="pc-settings-btn" aria-label="Settings">⚙️</button>
   </header>
 
   <!-- ============================== HUB ============================== -->
   <section id="pc-hub">
+    <p class="pc-greeting" id="pc-greeting" hidden></p>
     <div class="pc-progress-card">
       <div class="pc-progress-row">
         <span id="pc-progress-label">0% complete</span>
@@ -50,7 +51,18 @@
       <div class="pc-progress-track"><div class="pc-progress-fill" id="pc-progress-fill"></div></div>
     </div>
 
-    <div class="pc-grid" id="pc-puzzle-grid"></div>
+    <div class="pc-hub-tabs" role="tablist">
+      <button class="pc-hub-tab is-active" id="pc-tab-path" data-tab="path">🗺️ Level Path</button>
+      <button class="pc-hub-tab" id="pc-tab-free" data-tab="free">🎮 Free Play</button>
+    </div>
+
+    <div class="pc-hub-panel" id="pc-panel-path">
+      <div class="pc-level-path" id="pc-level-path"></div>
+    </div>
+
+    <div class="pc-hub-panel" id="pc-panel-free" hidden>
+      <div class="pc-grid" id="pc-puzzle-grid"></div>
+    </div>
   </section>
 
   <!-- ============================ GAME VIEW ============================ -->
@@ -60,7 +72,10 @@
         <button class="pc-icon-btn" id="pc-back-btn" aria-label="Back to hub">←</button>
         <h2 id="pc-game-title" class="pc-display" style="font-size:1.3rem;"></h2>
       </div>
-      <div class="pc-game-timer" id="pc-game-timer">0:00</div>
+      <div class="pc-game-header-right">
+        <button class="pc-btn pc-btn--ghost pc-hint-btn" id="pc-hint-btn" hidden>💡 Hint</button>
+        <div class="pc-game-timer" id="pc-game-timer">0:00</div>
+      </div>
     </div>
 
     <div class="pc-difficulty-bar" id="pc-difficulty-bar"></div>

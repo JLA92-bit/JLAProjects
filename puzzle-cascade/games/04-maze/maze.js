@@ -172,11 +172,44 @@ function mount(container, difficulty, api) {
     timeWrapEl.classList.toggle('is-low', remainingMs < cfg.timeLimitMs * 0.25);
   }, 200);
 
-  return () => {
-    window.removeEventListener('keydown', onKey);
-    clearInterval(timerId);
-    stage.dispose();
-    wrap.remove();
+  function hint() {
+    if (finished || moving) return;
+    const start = pos.r * size + pos.c;
+    const goalIdx = goal.r * size + goal.c;
+    const prev = new Array(size * size).fill(-1);
+    const visited = new Array(size * size).fill(false);
+    visited[start] = true;
+    const queue = [start];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (cur === goalIdx) break;
+      const r = Math.floor(cur / size), c = cur % size;
+      const cell = maze[r][c];
+      const options = [];
+      if (!cell.N) options.push((r - 1) * size + c);
+      if (!cell.S) options.push((r + 1) * size + c);
+      if (!cell.W) options.push(r * size + (c - 1));
+      if (!cell.E) options.push(r * size + (c + 1));
+      options.forEach((n) => { if (!visited[n]) { visited[n] = true; prev[n] = cur; queue.push(n); } });
+    }
+    if (!visited[goalIdx]) return;
+    let step = goalIdx;
+    while (prev[step] !== start && prev[step] !== -1) step = prev[step];
+    const nr = Math.floor(step / size), nc = step % size;
+    const dirWord = nr < pos.r ? 'up' : nr > pos.r ? 'down' : nc < pos.c ? 'left' : 'right';
+    const dirArrow = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️' }[dirWord];
+    tween(playerMesh.scale, { x: 1.5, y: 1.5, z: 1.5 }, 160, Easing.outBack, () => tween(playerMesh.scale, { x: 1, y: 1, z: 1 }, 200, Easing.outCubic));
+    api.ui.toast(`${api.playerName}, head ${dirWord}! ${dirArrow}`);
+  }
+
+  return {
+    unmount: () => {
+      window.removeEventListener('keydown', onKey);
+      clearInterval(timerId);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 

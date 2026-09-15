@@ -1,4 +1,4 @@
-# Puzzle Cascade
+# Josh Makes Puzzles
 
 A 10-game puzzle collection that unlocks one puzzle at a time as you clear
 each one - sliding tiles, memory match, match-3, a maze, Sokoban, word
@@ -113,7 +113,7 @@ npm install -g @capacitor/cli
 cd puzzle-cascade
 npm init -y
 npm install @capacitor/core @capacitor/android
-npx cap init "Puzzle Cascade" "com.yourname.puzzlecascade" --web-dir .
+npx cap init "Josh Makes Puzzles" "com.yourname.joshmakespuzzles" --web-dir .
 npx cap add android
 npx cap open android   # builds/opens the project in Android Studio
 ```

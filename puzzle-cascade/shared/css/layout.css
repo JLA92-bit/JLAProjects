@@ -42,6 +42,18 @@
 }
 .pc-icon-btn:active { transform: scale(0.88); }
 
+/* ---------- Greeting ---------- */
+.pc-greeting {
+  color: #fff;
+  font-family: var(--pc-font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 0 0 10px;
+  text-shadow: 0 2px 0 rgba(0,0,0,0.2);
+  animation: pc-greeting-in 0.5s cubic-bezier(.34,1.56,.64,1) both;
+}
+@keyframes pc-greeting-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
 /* ---------- Progress ---------- */
 .pc-progress-card {
   color: #fff;
@@ -66,6 +78,188 @@
   transition: width 0.6s cubic-bezier(.22,1,.36,1);
   box-shadow: 0 0 12px rgba(255,217,61,0.6);
 }
+
+/* ---------- Hub tabs ---------- */
+.pc-hub-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.pc-hub-tab {
+  flex: 1;
+  padding: 12px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+  font-family: var(--pc-font-display);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.25);
+  transition: transform 0.1s ease, background 0.2s ease;
+}
+.pc-hub-tab:active { transform: scale(0.97); }
+.pc-hub-tab.is-active {
+  background: #fffaf2;
+  color: var(--pc-ink);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.15);
+}
+
+/* ---------- Level path ---------- */
+.pc-level-path {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 20px;
+  position: relative;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.pc-level-path::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 50%;
+  width: 4px;
+  transform: translateX(-50%);
+  background: repeating-linear-gradient(to bottom, rgba(255,255,255,0.35) 0 10px, transparent 10px 20px);
+  z-index: 0;
+}
+.pc-level-row {
+  display: flex;
+  align-items: center;
+  min-height: 84px;
+  padding: 0 14%;
+  position: relative;
+  z-index: 1;
+}
+.pc-level-row.is-right { justify-content: flex-end; }
+.pc-level-row.is-left { justify-content: flex-start; }
+.pc-level-node {
+  position: relative;
+  width: 66px; height: 66px;
+  border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-family: var(--pc-font-display);
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(160deg, #6a6a8a, #4a4a66);
+  box-shadow: 0 5px 0 rgba(0,0,0,0.25);
+  flex-shrink: 0;
+}
+.pc-level-node .pc-level-num { font-size: 1.15rem; line-height: 1; }
+.pc-level-node .pc-level-stars { display: flex; gap: 1px; margin-top: 2px; }
+.pc-level-node .pc-level-stars span { font-size: 0.55rem; color: rgba(255,255,255,0.35); }
+.pc-level-node .pc-level-stars span.is-lit { color: var(--pc-yellow); }
+.pc-level-node--done { background: linear-gradient(160deg, var(--pc-green), #0fa46b); }
+.pc-level-node--current {
+  width: 78px; height: 78px;
+  background: linear-gradient(160deg, var(--pc-pink), #d6216b);
+  box-shadow: 0 6px 0 #a3134f, 0 0 0 6px rgba(255,255,255,0.18);
+  animation: pc-level-pulse 1.6s ease-in-out infinite;
+  cursor: pointer;
+}
+.pc-level-node--current .pc-level-play { font-size: 0.65rem; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 1px; }
+@keyframes pc-level-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.07); }
+}
+.pc-level-node--locked { background: rgba(255,255,255,0.12); box-shadow: none; opacity: 0.55; }
+.pc-level-node--locked .pc-level-num { display: none; }
+
+/* ---------- Slot wheel ---------- */
+.pc-slotwheel {
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  width: 100%;
+}
+.pc-slotwheel-title { color: #fff; font-family: var(--pc-font-display); font-weight: 800; font-size: 1.2rem; text-align: center; }
+.pc-slotwheel-window {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  height: 96px;
+  overflow: hidden;
+  border-radius: var(--pc-radius-md);
+  background: rgba(0,0,0,0.25);
+  box-shadow: inset 0 0 0 3px rgba(255,255,255,0.35), 0 10px 24px rgba(0,0,0,0.3);
+}
+.pc-slotwheel-window::before, .pc-slotwheel-window::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 30%;
+  z-index: 2;
+  pointer-events: none;
+}
+.pc-slotwheel-window::before { left: 0; background: linear-gradient(90deg, rgba(43,15,92,0.9), transparent); }
+.pc-slotwheel-window::after { right: 0; background: linear-gradient(-90deg, rgba(43,15,92,0.9), transparent); }
+.pc-slotwheel-pointer {
+  position: absolute;
+  left: 50%; top: -6px;
+  transform: translateX(-50%);
+  font-size: 1.4rem;
+  z-index: 3;
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));
+}
+.pc-slotwheel-reel {
+  position: absolute;
+  top: 0; left: 50%;
+  display: flex;
+  height: 100%;
+  will-change: transform;
+}
+.pc-slotwheel-cell {
+  width: 96px; height: 96px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px;
+  font-size: 2.4rem;
+  flex-shrink: 0;
+}
+.pc-slotwheel-cell .pc-slotwheel-label {
+  font-size: 0.6rem;
+  font-family: var(--pc-font-display);
+  font-weight: 700;
+  color: rgba(255,255,255,0.8);
+  text-align: center;
+  padding: 0 4px;
+}
+.pc-slotwheel-result {
+  color: #fff;
+  font-family: var(--pc-font-display);
+  font-weight: 800;
+  font-size: 1.05rem;
+  text-align: center;
+  min-height: 1.6em;
+  animation: pc-fade-in 0.3s ease both;
+}
+
+/* ---------- Intro card ---------- */
+.pc-intro {
+  background: rgba(255,255,255,0.96);
+  border-radius: var(--pc-radius-lg);
+  box-shadow: 0 14px 0 rgba(0,0,0,0.12), 0 24px 40px rgba(0,0,0,0.25);
+  padding: 30px 26px;
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  color: var(--pc-ink);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.pc-intro.pc-intro--leaving { opacity: 0; transform: scale(0.92); }
+.pc-intro-icon { font-size: 3rem; animation: pc-intro-pop 0.5s cubic-bezier(.34,1.56,.64,1) both; }
+.pc-intro-name { font-family: var(--pc-font-display); font-weight: 800; font-size: 1.4rem; color: var(--pc-purple); margin: 4px 0 14px; animation: pc-intro-rise 0.4s ease both; }
+.pc-intro-line { margin: 0 0 10px; line-height: 1.5; animation: pc-intro-rise 0.4s ease both; }
+.pc-intro-goal { font-weight: 700; }
+.pc-intro-controls { color: rgba(36,20,54,0.75); font-size: 0.92rem; }
+.pc-intro-tip { color: var(--pc-teal); font-weight: 700; font-size: 0.88rem; }
+.pc-intro-start { margin-top: 6px; animation: pc-intro-rise 0.4s ease both; }
+@keyframes pc-intro-pop { from { opacity: 0; transform: scale(0.4) rotate(-15deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+@keyframes pc-intro-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ---------- Hint button ---------- */
+.pc-hint-btn {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+.pc-hint-btn.is-cooling { opacity: 0.5; pointer-events: none; }
+.pc-game-header-right { display: flex; align-items: center; gap: 10px; }
 
 /* ---------- Puzzle grid ---------- */
 .pc-grid {

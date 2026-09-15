@@ -214,12 +214,50 @@ function mount(container, difficulty, api) {
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
   stage.renderer.domElement.addEventListener('pointerup', onPointerUp);
 
-  return () => {
-    window.removeEventListener('keydown', onKey);
-    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-    stage.renderer.domElement.removeEventListener('pointerup', onPointerUp);
-    stage.dispose();
-    wrap.remove();
+  function wouldMove(dir) {
+    let moved = false;
+    for (let k = 0; k < size; k++) {
+      const coords = getLine(dir, k);
+      const tiles = coords.map(([r, c]) => board[r][c]).filter(Boolean);
+      let i = 0, idx = 0;
+      while (i < tiles.length) {
+        const mergedHere = i + 1 < tiles.length && tiles[i].value === tiles[i + 1].value;
+        const [tr, tc] = coords[idx];
+        if (tiles[i].r !== tr || tiles[i].c !== tc) moved = true;
+        if (mergedHere) { moved = true; i += 2; } else { i += 1; }
+        idx++;
+      }
+    }
+    return moved;
+  }
+
+  function causesMerge(dir) {
+    for (let k = 0; k < size; k++) {
+      const coords = getLine(dir, k);
+      const tiles = coords.map(([r, c]) => board[r][c]).filter(Boolean);
+      for (let i = 0; i < tiles.length - 1; i++) if (tiles[i].value === tiles[i + 1].value) return true;
+    }
+    return false;
+  }
+
+  function hint() {
+    if (busy || finished) return;
+    const candidates = ['up', 'down', 'left', 'right'].filter(wouldMove);
+    if (!candidates.length) return;
+    const best = candidates.find(causesMerge) || candidates[0];
+    const arrow = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️' }[best];
+    api.ui.toast(`${api.playerName}, swipe ${best}! ${arrow}`);
+  }
+
+  return {
+    unmount: () => {
+      window.removeEventListener('keydown', onKey);
+      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      stage.renderer.domElement.removeEventListener('pointerup', onPointerUp);
+      stage.dispose();
+      wrap.remove();
+    },
+    hint,
   };
 }
 
