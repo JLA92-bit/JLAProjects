@@ -11,8 +11,31 @@
  * logic.
  */
 import * as THREE from 'three';
+import { EffectComposer } from '../../vendor/three-addons/postprocessing/EffectComposer.js';
+import { RenderPass } from '../../vendor/three-addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from '../../vendor/three-addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from '../../vendor/three-addons/postprocessing/OutputPass.js';
 
 const VIEW_SCALE = 0.62; // world half-height per unit of opts.distance
+
+let cachedBgTexture = null;
+function backgroundTexture() {
+  if (cachedBgTexture) return cachedBgTexture;
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createRadialGradient(size / 2, size / 2, size * 0.05, size / 2, size / 2, size * 0.72);
+  g.addColorStop(0, '#3a1a72');
+  g.addColorStop(0.55, '#24103f' );
+  g.addColorStop(1, '#160a28');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  cachedBgTexture = tex;
+  return tex;
+}
 
 export function createStage(container, opts = {}) {
   const width = () => container.clientWidth || 320;
@@ -33,6 +56,10 @@ export function createStage(container, opts = {}) {
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
+  // Bloom's composite pass writes opaque alpha across the whole frame, so a
+  // transparent canvas would end up solid black - give the scene its own
+  // background instead (also just looks more like a real tabletop).
+  scene.background = opts.background === null ? null : backgroundTexture();
   const world = new THREE.Group();
   scene.add(world);
 
@@ -60,11 +87,13 @@ export function createStage(container, opts = {}) {
   const key = new THREE.DirectionalLight(0xffffff, 1.15);
   key.position.set(-4, 3, 10);
   key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
-  key.shadow.camera.left = -10; key.shadow.camera.right = 10;
-  key.shadow.camera.top = 10; key.shadow.camera.bottom = -10;
+  key.shadow.mapSize.set(2048, 2048);
+  const shadowExtent = Math.max(halfH * 1.4, 10);
+  key.shadow.camera.left = -shadowExtent; key.shadow.camera.right = shadowExtent;
+  key.shadow.camera.top = shadowExtent; key.shadow.camera.bottom = -shadowExtent;
   key.shadow.camera.near = 1; key.shadow.camera.far = 30;
-  key.shadow.bias = -0.002;
+  key.shadow.bias = -0.0015;
+  key.shadow.normalBias = 0.02;
   scene.add(key);
   const fill = new THREE.DirectionalLight(0x8fb4ff, 0.35);
   fill.position.set(5, 4, 6);
@@ -106,13 +135,21 @@ export function createStage(container, opts = {}) {
     return raycaster.ray.intersectPlane(groundPlane, out) ? out : null;
   }
 
+  const composer = new EffectComposer(renderer);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(width(), height()), 0.55, 0.4, 0.86);
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+  composer.setSize(width(), height());
+
   let rafId = null;
   let running = true;
   const tickFns = new Set();
   function frame() {
     if (!running) return;
     tickFns.forEach((fn) => fn());
-    renderer.render(scene, camera);
+    composer.render();
     rafId = requestAnimationFrame(frame);
   }
   rafId = requestAnimationFrame(frame);
@@ -124,6 +161,7 @@ export function createStage(container, opts = {}) {
     if (w === 0 || h === 0) return;
     fitCamera();
     renderer.setSize(w, h);
+    composer.setSize(w, h);
   });
   ro.observe(container);
 
@@ -132,6 +170,7 @@ export function createStage(container, opts = {}) {
     if (rafId) cancelAnimationFrame(rafId);
     ro.disconnect();
     disposeObject(scene);
+    composer.dispose();
     renderer.dispose();
     if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
   }

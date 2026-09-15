@@ -7,9 +7,13 @@ two dependencies below.
 
 ## Libraries
 
-- **[Three.js](https://threejs.org/)** (`vendor/three.module.min.js`) - MIT
+- **[Three.js](https://threejs.org/)** (`vendor/three.module.min.js`, plus the
+  post-processing addon modules under `vendor/three-addons/` - EffectComposer,
+  RenderPass, UnrealBloomPass, and friends, pulled from the same `three`
+  npm package version so they match the vendored core exactly) - MIT
   License, see `vendor/THREE-LICENSE`. Used for every game's 3D rendering
-  (tiles, gems, maze corridors, jigsaw pieces, etc). Vendored locally (not
+  (tiles, gems, maze corridors, jigsaw pieces, etc) and the bloom glow on
+  emissive elements (gems, lit lights, target rings). Vendored locally (not
   loaded from a CDN) so the game works fully offline, which matters for the
   planned Capacitor/APK build.
 
