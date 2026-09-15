@@ -64,8 +64,15 @@ function mount(container, difficulty, api) {
 
   const TILE = 0.86, GAP = 0.14;
   const totalWidthUnits = maxLen * (TILE + GAP);
-  const distance = (totalWidthUnits / 2 + 1.4) / (0.42 * 0.5);
-  const stage = createStage(canvasHost, { distance: Math.max(distance, 10) });
+  // Two stacked rows (answer slots + scrambled letters) centered on y=0:
+  // each row is TILE tall, offset +/-0.95, so the content's vertical
+  // half-extent is 0.95 + TILE/2. Fit both width and height so the board
+  // fills the canvas without being cropped on a narrow phone viewport.
+  const aspectMin = 0.46;
+  const halfContentW = totalWidthUnits / 2 + 0.5;
+  const halfContentH = 0.95 + TILE / 2 + 0.3;
+  const distance = Math.max(halfContentW / (0.42 * aspectMin), halfContentH / 0.42) * 1.1;
+  const stage = createStage(canvasHost, { distance: Math.max(distance, 6) });
 
   const slotGroup = new THREE.Group();
   const letterGroup = new THREE.Group();

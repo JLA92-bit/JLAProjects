@@ -1,4 +1,4 @@
-const CACHE_NAME = 'josh-makes-puzzles-v5';
+const CACHE_NAME = 'josh-makes-puzzles-v6';
 
 const GAME_IDS = [
   '01-sliding/sliding', '02-memory/memory', '03-match3/match3', '04-maze/maze',
@@ -8,6 +8,13 @@ const GAME_IDS = [
   '14-minesweeper/minesweeper', '15-hanoi/hanoi', '16-pegsolitaire/pegsolitaire',
   '17-snake/snake', '18-breakout/breakout', '19-colorflood/colorflood',
   '20-sudoku/sudoku',
+  '21-reversi/reversi', '22-checkers/checkers', '23-battleship/battleship',
+  '24-mastermind/mastermind', '25-nonogram/nonogram', '26-flowconnect/flowconnect',
+  '27-ballsort/ballsort', '28-bubbleshooter/bubbleshooter', '29-dotsboxes/dotsboxes',
+  '30-pyramidsolitaire/pyramidsolitaire', '31-tangram/tangram', '32-anagram/anagram',
+  '33-wordguess/wordguess', '34-airhockey/airhockey', '35-marblemaze/marblemaze',
+  '36-blockdrop/blockdrop', '37-runner/runner', '38-towerdefense/towerdefense',
+  '39-rhythmtap/rhythmtap', '40-dominoes/dominoes',
 ];
 
 const APP_SHELL = [
