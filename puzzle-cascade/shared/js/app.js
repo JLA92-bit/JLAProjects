@@ -179,6 +179,7 @@
   }
 
   let els = {};
+  let lastSpunPuzzleId = null;
   let currentGameUnmount = null;
   let currentGameHint = null;
   let hintCooldown = false;
@@ -376,6 +377,7 @@
     if (pool.length <= 1) {
       // Nothing to actually spin for yet - skip the wheel theatrics and go
       // straight to the one puzzle that's unlocked so far.
+      lastSpunPuzzleId = pool[0].p.id;
       onPicked(pool[0].p, pool[0].i);
     } else {
       spinSlotWheel(level, onPicked);
@@ -393,9 +395,13 @@
 
   function spinSlotWheel(level, onLanded) {
     const pool = unlockedPuzzles();
-    const pick = pool[Math.floor(Math.random() * pool.length)];
+    // Never land on the same game twice in a row - drop last time's pick
+    // from the candidates when there's something else to offer instead.
+    const candidates = pool.length > 1 ? pool.filter(({ p }) => p.id !== lastSpunPuzzleId) : pool;
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
     const chosen = pick.p;
     const chosenIndex = pick.i;
+    lastSpunPuzzleId = chosen.id;
 
     const wrap = document.createElement('div');
     wrap.className = 'pc-slotwheel';

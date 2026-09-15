@@ -124,9 +124,23 @@
 <script type="module" src="games/19-colorflood/colorflood.js"></script>
 <script type="module" src="games/20-sudoku/sudoku.js"></script>
 <script>
+  // Always show the latest pushed build: force a fresh check of sw.js on
+  // every launch (never trust a stale cached copy of the service worker
+  // itself) and reload once when a new version takes over. This only
+  // replaces cached game files/assets - localStorage (all saves, stars,
+  // unlocked puzzles, player name) lives outside the Cache API entirely,
+  // so it's never touched by this.
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+        reg.update().catch(() => {});
+      }).catch(() => {});
+    });
+    let reloadedForUpdate = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloadedForUpdate) return;
+      reloadedForUpdate = true;
+      window.location.reload();
     });
   }
 </script>
