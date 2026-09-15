@@ -1,4 +1,10 @@
-const CACHE_NAME = 'puzzle-cascade-v1';
+const CACHE_NAME = 'puzzle-cascade-v2';
+
+const GAME_IDS = [
+  '01-sliding/sliding', '02-memory/memory', '03-match3/match3', '04-maze/maze',
+  '05-sokoban/sokoban', '06-wordsearch/wordsearch', '07-merge2048/merge2048',
+  '08-jigsaw/jigsaw', '09-simon/simon', '10-lightsout/lightsout',
+];
 
 const APP_SHELL = [
   './',
@@ -10,16 +16,10 @@ const APP_SHELL = [
   './shared/js/sound-manager.js',
   './shared/js/ui.js',
   './shared/js/app.js',
-  './games/01-sliding/sliding.js',
-  './games/02-memory/memory.js',
-  './games/03-match3/match3.js',
-  './games/04-maze/maze.js',
-  './games/05-sokoban/sokoban.js',
-  './games/06-wordsearch/wordsearch.js',
-  './games/07-merge2048/merge2048.js',
-  './games/08-jigsaw/jigsaw.js',
-  './games/09-simon/simon.js',
-  './games/10-lightsout/lightsout.js',
+  './shared/js/three-stage.js',
+  './vendor/three.module.min.js',
+  ...GAME_IDS.map((g) => `./games/${g}.js`),
+  ...GAME_IDS.map((g) => `./games/${g}.css`),
   './icons/icon-192.svg',
   './icons/icon-512.svg',
   './icons/icon-maskable-512.svg',
