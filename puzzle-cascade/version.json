@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "commit": "pending",
+  "builtAt": "2026-09-16T00:00:00Z",
+  "changelog": [
+    { "version": "1.0.0", "date": "2026-09-16", "notes": ["Update checker added - the app now checks for new content on launch and logs what changed."] }
+  ]
+}

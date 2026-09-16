@@ -1,4 +1,4 @@
-const CACHE_NAME = 'josh-makes-puzzles-v6';
+const CACHE_NAME = 'josh-makes-puzzles-v7';
 
 const GAME_IDS = [
   '01-sliding/sliding', '02-memory/memory', '03-match3/match3', '04-maze/maze',
@@ -26,6 +26,8 @@ const APP_SHELL = [
   './shared/js/save-manager.js',
   './shared/js/sound-manager.js',
   './shared/js/ui.js',
+  './shared/js/update-checker.js',
+  './version.json',
   './shared/js/app.js',
   './shared/js/three-stage.js',
   './vendor/three.module.min.js',
@@ -52,8 +54,25 @@ self.addEventListener('activate', (event) => {
 
 // Cache-first for the app shell, network-first fallback for anything else
 // (e.g. the Google Fonts stylesheet, which caches itself via its own headers).
+// version.json is the one exception: the update-checker's whole point is
+// to see the LATEST deployed version, so it must always hit the network
+// first (cache is only a fallback for when the device is offline).
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  if (event.request.url.endsWith('/version.json') && event.request.url.startsWith(self.location.origin)) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;

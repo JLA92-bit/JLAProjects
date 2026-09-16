@@ -367,7 +367,18 @@
       setTimeout(promptForName, 400);
     }
 
+    checkForUpdates();
+
     global.PC.App = { PUZZLES, Games, launch: launchPuzzle };
+  }
+
+  function checkForUpdates() {
+    if (!global.PC.UpdateChecker) return;
+    global.PC.UpdateChecker.check().then((result) => {
+      if (result && result.isNewer) {
+        UI.toast(`✨ Updated to v${result.remote.version} - tap Settings > What's New`, { duration: 3200 });
+      }
+    }).catch(() => {});
   }
 
   function switchTab(tab) {
@@ -798,6 +809,7 @@
             <input type="checkbox" id="pc-set-sfx" ${sfxOn ? 'checked' : ''} style="width:22px;height:22px;">
           </label>
           <button class="pc-btn pc-btn--ghost" id="pc-set-name-btn" style="color:var(--pc-ink);box-shadow:inset 0 0 0 2px rgba(36,20,54,0.25);">✏️ Change name (${playerName()})</button>
+          <button class="pc-btn pc-btn--ghost" id="pc-set-whatsnew-btn" style="color:var(--pc-ink);box-shadow:inset 0 0 0 2px rgba(36,20,54,0.25);">📜 What's New</button>
         </div>
       `,
       buttons: [
@@ -816,6 +828,25 @@
       modalRef.close();
       promptForName(true);
     });
+    modalRef.el.querySelector('#pc-set-whatsnew-btn').addEventListener('click', () => {
+      modalRef.close();
+      showWhatsNew();
+    });
+  }
+
+  function showWhatsNew() {
+    const log = (global.PC.UpdateChecker && global.PC.UpdateChecker.getLog()) || [];
+    const bodyHtml = log.length
+      ? log.map((entry) => `
+          <div style="text-align:left;margin-bottom:14px;">
+            <div style="font-weight:800;color:var(--pc-purple);">v${entry.version} <span style="font-weight:600;color:rgba(36,20,54,0.55);font-size:0.85em;">${entry.date || ''}</span></div>
+            <ul style="margin:4px 0 0;padding-left:20px;">
+              ${(entry.notes || []).map((n) => `<li style="margin:2px 0;">${n}</li>`).join('')}
+            </ul>
+          </div>
+        `).join('')
+      : '<p style="color:rgba(36,20,54,0.7);">No updates logged yet on this device - check back after the app has been open with an internet connection at least once since a new version shipped.</p>';
+    UI.modal({ title: "What's New", bodyHtml, buttons: [{ label: 'Close', className: 'pc-btn--green' }] });
   }
 
   function confirmReset() {
