@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, claude/sweet-brahmagupta-q8ikud]
     paths:
       - "puzzle-cascade/**"
       - ".github/workflows/build-android-apk.yml"
@@ -43,6 +43,22 @@ jobs:
 
       - name: Sync Capacitor Android project
         run: npx cap sync android
+
+      # Reuses the same stable debug keystore already committed for the
+      # Godot Android build (godot/ci/debug.keystore). Gradle's Android
+      # plugin signs debug builds with whatever's at
+      # ~/.android/debug.keystore, auto-generating a NEW one with random
+      # key material if it's missing - since CI runners start clean each
+      # time, that would give every build a different signature, and
+      # Android refuses to install an update over an app signed with a
+      # different key (forces a full uninstall first, losing all
+      # progress). Sharing one fixed keystore across builds means users
+      # actually get functioning in-place updates when installing a newer
+      # APK over an older one.
+      - name: Install stable debug keystore
+        run: |
+          mkdir -p "$HOME/.android"
+          cp ../godot/ci/debug.keystore "$HOME/.android/debug.keystore"
 
       - name: Build debug APK
         working-directory: puzzle-cascade/android
