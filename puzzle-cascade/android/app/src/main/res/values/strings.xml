@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Josh Makes Puzzles</string>
+    <string name="title_activity_main">Josh Makes Puzzles</string>
+    <string name="package_name">com.joshmakespuzzles.app</string>
+    <string name="custom_url_scheme">com.joshmakespuzzles.app</string>
+</resources>

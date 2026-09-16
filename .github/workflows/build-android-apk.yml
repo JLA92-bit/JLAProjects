@@ -1,0 +1,76 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "puzzle-cascade/**"
+      - ".github/workflows/build-android-apk.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: puzzle-cascade
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # GitHub-hosted ubuntu-latest runners ship with the Android SDK
+      # preinstalled (unlike this repo's own dev sandbox, which has no
+      # route to dl.google.com) - no separate SDK install step needed.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the www/ bundle Capacitor packages
+        run: node scripts/prepare-android-www.js
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: puzzle-cascade/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK_PATH=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "Built: $APK_PATH"
+
+      - name: Upload APK as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: josh-makes-puzzles-debug-apk
+          path: puzzle-cascade/${{ steps.apk.outputs.path }}
+          retention-days: 90
+
+      - name: Publish/refresh the "latest-apk" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: "Josh Makes Puzzles - latest APK"
+          body: |
+            Auto-built debug APK from `${{ github.sha }}` on ${{ github.ref_name }}.
+            This is a debug-signed build for sideloading/testing, rebuilt on every push to main that touches puzzle-cascade/.
+            Install: download the .apk below, allow "install from unknown sources" on your device, and open it.
+          files: puzzle-cascade/${{ steps.apk.outputs.path }}
+          prerelease: true
+          make_latest: false

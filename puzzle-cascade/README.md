@@ -97,12 +97,12 @@ modules and the service worker both require `http(s)://`.)
    publishing `puzzle-cascade` as its own repo).
 3. Done - it's fully static, no environment variables, no backend, no build.
 
-## The future Capacitor/APK path
+## The Capacitor/APK path
 
-The brief this was built to keeps a native Android wrap in mind, and the
-project is already shaped for it:
+The app is wrapped for Android with [Capacitor](https://capacitorjs.com/),
+and the project is shaped to make that painless:
 
-- **No server calls anywhere.** All state lives in `localStorage` via
+- **No server calls for gameplay.** All state lives in `localStorage` via
   `SaveManager`. Nothing here will break offline or inside a WebView.
 - **Three.js is vendored locally**, not loaded from a CDN, so 3D rendering
   works with no network access.
@@ -113,22 +113,72 @@ project is already shaped for it:
 - **A service worker + web manifest** already make this installable as a
   PWA today, which is the easiest proof the offline story works before
   wrapping it.
+- **An in-app update checker** (`shared/js/update-checker.js`) fetches
+  `version.json` from the live GitHub Pages deployment on every launch -
+  see "Staying up to date" below.
 
-To actually produce an APK when you're ready:
+### Project layout for the Android wrap
 
-```bash
-npm install -g @capacitor/cli
-cd puzzle-cascade
-npm init -y
-npm install @capacitor/core @capacitor/android
-npx cap init "Josh Makes Puzzles" "com.yourname.joshmakespuzzles" --web-dir .
-npx cap add android
-npx cap open android   # builds/opens the project in Android Studio
+```
+puzzle-cascade/
+  package.json              - @capacitor/core, @capacitor/android, @capacitor/cli
+  capacitor.config.json     - appId com.joshmakespuzzles.app, webDir "www"
+  scripts/prepare-android-www.js
+                             - copies just the real site files (index.html,
+                               shared/, games/, vendor/, icons/, manifest,
+                               sw.js, version.json) into www/, since
+                               Capacitor refuses to use the project root
+                               itself as webDir. Never edit www/ directly -
+                               it's regenerated from the real source files.
+  android/                  - the generated native project, committed to
+                               source control (build outputs are
+                               .gitignore'd, the project itself isn't)
 ```
 
-Capacitor copies this folder in as the WebView's asset bundle as-is - no
-code changes needed going in. You'd just want to remove or adjust the
-service worker registration in `index.html` (Capacitor's WebView doesn't
-need it the way a browser does) and swap the Google Fonts `@import` in
-`theme.css` for locally-bundled font files, since an Android WebView won't
-always have network access to fetch them.
+### Building the APK
+
+This repo's own dev sandbox has no route to `dl.google.com`, so an actual
+Android SDK / Gradle build can't run there - only the Capacitor
+JS-side scaffolding (`cap add android`, syncing `www/`) is possible
+locally. The real build happens in CI, where GitHub-hosted runners
+already have the Android SDK preinstalled:
+
+**`.github/workflows/build-android-apk.yml`** - run it from the Actions
+tab (`workflow_dispatch`) or just push to `main` with changes under
+`puzzle-cascade/`. It installs deps, regenerates `www/`, runs
+`npx cap sync android`, builds a debug APK with `./gradlew assembleDebug`,
+uploads it as a workflow artifact, and refreshes a `latest-apk` GitHub
+Release with the APK attached so there's always one stable download link.
+
+To build locally on a machine that *does* have the Android SDK:
+
+```bash
+cd puzzle-cascade
+npm install
+node scripts/prepare-android-www.js   # regenerate www/ from the real site files
+npx cap sync android
+cd android
+./gradlew assembleDebug               # -> android/app/build/outputs/apk/debug/
+# or: npx cap open android            # open in Android Studio instead
+```
+
+The debug APK is debug-signed (Android's default debug keystore) - fine
+for sideloading and testing, not for a Play Store release. For that you'd
+add a real signing config to `android/app/build.gradle` and build
+`assembleRelease` instead.
+
+### Staying up to date
+
+Because a native app bundle can't silently patch its own compiled code,
+"checking for updates" here means: on every launch, `update-checker.js`
+fetches `version.json` from the live Pages deployment (falling back to
+the known `https://jla92-bit.github.io/...` URL when the origin isn't
+`http(s)` - i.e. when running inside the Capacitor WebView) and compares
+it to the last version this device has seen. If it's newer, the new
+changelog entries are logged to the console, saved to a persisted
+"update log" (`localStorage`, separate from save data), and surfaced as
+a toast; the full history is browsable from **Settings > What's New**.
+`version.json` itself is regenerated on every `deploy-pages.yml` run with
+a monotonically increasing version, the deployed commit SHA, and a
+changelog built from the commit subjects since the last deploy - no
+manual bookkeeping required.

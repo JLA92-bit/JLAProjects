@@ -1,0 +1,17 @@
+{
+  "name": "josh-makes-puzzles",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Josh Makes Puzzles - a 40-game 3D puzzle collection (Three.js, no build step) wrapped for Android with Capacitor.",
+  "scripts": {
+    "cap:sync": "cap sync android",
+    "cap:open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}
