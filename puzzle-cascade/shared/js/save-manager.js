@@ -18,6 +18,8 @@
       settings: {
         muteMusic: false,
         muteSfx: false,
+        haptics: true,
+        lowGraphics: false,
       },
       streak: {
         lastPlayedDate: null,
@@ -32,6 +34,8 @@
         history: {},
       },
       puzzles: {},
+      favorites: [],
+      lastPlayed: null,
     };
   }
 
@@ -56,7 +60,19 @@
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return defaultState();
         const parsed = JSON.parse(raw);
-        return Object.assign(defaultState(), parsed);
+        if (!parsed || typeof parsed !== 'object') return defaultState();
+        const base = defaultState();
+        const merged = Object.assign(base, parsed);
+        // Merge nested objects key-by-key so saves written by older builds
+        // pick up any new default (e.g. a new setting) instead of losing it.
+        ['settings', 'streak', 'player', 'levels'].forEach((k) => {
+          const def = defaultState()[k];
+          merged[k] = Object.assign(def, parsed[k] && typeof parsed[k] === 'object' ? parsed[k] : {});
+        });
+        if (!merged.levels.history || typeof merged.levels.history !== 'object') merged.levels.history = {};
+        if (!merged.puzzles || typeof merged.puzzles !== 'object') merged.puzzles = {};
+        if (!Array.isArray(merged.favorites)) merged.favorites = [];
+        return merged;
       } catch (e) {
         console.warn('[SaveManager] failed to load save, starting fresh', e);
         return defaultState();
@@ -155,7 +171,41 @@
     }
 
     getSetting(key) {
-      return this._state.settings[key];
+      const settings = this._state && this._state.settings;
+      return settings ? settings[key] : undefined;
+    }
+
+    /* ---- Favorites (Free Play grid) ---- */
+
+    getFavorites() {
+      return Array.isArray(this._state.favorites) ? this._state.favorites.slice() : [];
+    }
+
+    isFavorite(id) {
+      return Array.isArray(this._state.favorites) && this._state.favorites.includes(id);
+    }
+
+    // Flips the favorite flag for a puzzle and returns the new value.
+    toggleFavorite(id) {
+      if (!Array.isArray(this._state.favorites)) this._state.favorites = [];
+      const list = this._state.favorites;
+      const i = list.indexOf(id);
+      if (i >= 0) list.splice(i, 1);
+      else list.push(id);
+      this._persist();
+      return i < 0;
+    }
+
+    /* ---- Last played (hub "Continue" button) ---- */
+
+    getLastPlayed() {
+      const lp = this._state.lastPlayed;
+      return lp && lp.id ? lp : null;
+    }
+
+    setLastPlayed(id, difficulty) {
+      this._state.lastPlayed = { id, difficulty, at: Date.now() };
+      this._persist();
     }
 
     getPlayerName() {
@@ -171,7 +221,11 @@
     }
 
     resetProgress() {
+      // Wipes progress but keeps the player's device preferences (sound,
+      // vibration, graphics) - those aren't "progress".
+      const keepSettings = Object.assign({}, this._state.settings);
       this._state = defaultState();
+      Object.assign(this._state.settings, keepSettings);
       this._persist();
     }
 

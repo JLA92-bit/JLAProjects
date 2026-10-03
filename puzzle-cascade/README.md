@@ -1,6 +1,6 @@
 # Josh Makes Puzzles
 
-A 40-game puzzle collection that unlocks one puzzle at a time as you clear
+A 50-game puzzle collection that unlocks one puzzle at a time as you clear
 each one - sliding tiles, memory match, match-3, a maze, Sokoban, word
 search, a 2048-style number merge, a jigsaw, a Simon-style pattern game, a
 Lights Out logic grid, Tic-Tac-Toe vs an AI, Whack-a-Mole, Connect Four vs
@@ -11,7 +11,9 @@ logic puzzle, a Flow-Free-style pipe connector, Ball Sort, Bubble Shooter,
 Dots & Boxes vs an AI, Pyramid Solitaire, Tangram, Word Scramble, a
 Wordle-style word guesser, Air Hockey vs an AI, Marble Maze, mini Block
 Drop (Tetris-style), an endless Lane Runner, mini Tower Defense, Rhythm
-Tap, and Domino Match. One shared hub screen, one save file, one visual
+Tap, Domino Match, Traffic Jam (Rush Hour), Pipe Rotate, Block Fit, Tower
+Stack, Mirror Beam, Bridges (Hashi), Math Cages (KenKen), Mini Golf, Tile
+Match (Mahjong solitaire), and Spot the Difference. One shared hub screen, one save file, one visual
 theme.
 
 Rendered in real 3D with [Three.js](https://threejs.org/): every board is a
@@ -37,7 +39,7 @@ puzzle-cascade/
       three-stage.js   - shared Three.js scaffolding (renderer, camera,
                          lighting, raycasting, tweening) every game builds on
   games/
-    01-sliding/ .. 40-dominoes/
+    01-sliding/ .. 50-spotdiff/
                        - one self-contained ES module per puzzle, each
                          registering itself with PC.Games.register(id, {mount})
   vendor/

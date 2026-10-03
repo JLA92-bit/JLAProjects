@@ -1,0 +1,17 @@
+.mj-meta {
+  display: flex; gap: 14px; align-items: center; color: #fff; font-weight: 700;
+  font-family: var(--pc-font-display); justify-content: center; margin-bottom: 2px; flex-wrap: wrap;
+}
+.mj-shuffle {
+  min-height: 44px; min-width: 44px; padding: 0 16px; border: 0; border-radius: 999px;
+  background: rgba(255,255,255,0.92); color: var(--pc-ink);
+  font-family: var(--pc-font-display); font-weight: 800; font-size: 0.95rem;
+  box-shadow: 0 4px 0 rgba(0,0,0,0.25); touch-action: manipulation; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mj-shuffle:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+.mj-shuffle--pulse { background: var(--pc-yellow); animation: mj-pulse 0.9s ease-in-out infinite; }
+@keyframes mj-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}

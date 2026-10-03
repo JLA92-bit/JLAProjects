@@ -1,0 +1,18 @@
+.kk-meta {
+  display: flex; gap: 18px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  justify-content: center; margin-bottom: 4px; flex-wrap: wrap;
+}
+.kk-numpad {
+  display: grid; gap: 4px; width: 100%; max-width: 440px;
+  flex: 0 0 auto; margin: 0 auto;
+}
+.kk-numbtn {
+  min-width: 44px; height: 50px; padding: 0; border: 0; border-radius: 12px;
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.25);
+  font-size: 1.35rem; font-weight: 800; font-family: var(--pc-font-display);
+  color: var(--pc-ink); touch-action: manipulation; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.kk-numbtn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+.kk-numbtn--erase { background: #ff5c5c; color: #fff; }

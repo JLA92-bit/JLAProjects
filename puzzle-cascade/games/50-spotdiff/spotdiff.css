@@ -1,0 +1,9 @@
+.sd-meta {
+  display: flex; gap: 16px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  justify-content: center; flex-wrap: wrap;
+}
+.sd-meta b { color: var(--pc-yellow); }
+.sd-tip {
+  color: rgba(255,255,255,0.85); font-weight: 700; font-size: 0.85rem; text-align: center;
+  margin-top: -10px; flex: 0 0 auto;
+}

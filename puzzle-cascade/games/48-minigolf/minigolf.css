@@ -1,0 +1,5 @@
+.mg-meta {
+  display: flex; gap: 12px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  justify-content: center; margin-bottom: 4px; flex-wrap: wrap; font-size: 0.95rem;
+}
+.mg-meta b { color: var(--pc-yellow); }

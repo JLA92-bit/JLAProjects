@@ -1,0 +1,12 @@
+.st-meta {
+  display: flex; gap: 18px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  justify-content: center; margin-bottom: 4px;
+}
+.st-canvas { touch-action: none; }
+.st-btn {
+  min-height: 52px; min-width: 150px; padding: 10px 26px; border: 0; border-radius: 999px;
+  background: #ffd93d; color: #2b0f5c; font-family: var(--pc-font-display); font-weight: 800; font-size: 1.15rem;
+  box-shadow: 0 4px 0 rgba(0,0,0,0.25); touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.st-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+.st-again { background: #23d18b; color: #fff; }

@@ -7,6 +7,10 @@
  * Capacitor/APK wrap), and sidesteps any licensing question entirely.
  * Every call is a no-op if the browser has no AudioContext, or if the
  * relevant mute setting is on.
+ *
+ * Haptics ride along with the SFX: click/move/error/win/unlock also fire
+ * a tiny navigator.vibrate() pulse (feature-detected, and gated by the
+ * `haptics` setting, default on), so every game gets them for free.
  */
 (function (global) {
   class SoundManager {
@@ -15,7 +19,24 @@
       this._ctx = null;
       this._musicNodes = null;
       this._musicTimer = null;
+      this._lastBuzz = 0;
+      this._hiddenPaused = false;
     }
+
+    get hapticsOn() { return this._save.getSetting('haptics') !== false; }
+
+    // pattern: ms number or [on, off, on...] array. minGapMs throttles
+    // rapid-fire calls (e.g. a game calling move() every frame).
+    _buzz(pattern, minGapMs = 0) {
+      if (!this.hapticsOn) return;
+      if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+      const now = Date.now();
+      if (minGapMs && now - this._lastBuzz < minGapMs) return;
+      this._lastBuzz = now;
+      try { navigator.vibrate(pattern); } catch (e) { /* blocked before user gesture - ignore */ }
+    }
+
+    vibrate(pattern) { this._buzz(pattern); }
 
     _ensureCtx() {
       if (this._ctx) return this._ctx;
@@ -51,8 +72,8 @@
       osc.stop(t0 + duration + 0.02);
     }
 
-    click() { this._tone(520, { duration: 0.08, type: 'triangle', gain: 0.15 }); }
-    move() { this._tone(340, { duration: 0.07, type: 'square', gain: 0.08 }); }
+    click() { this._tone(520, { duration: 0.08, type: 'triangle', gain: 0.15 }); this._buzz(10); }
+    move() { this._tone(340, { duration: 0.07, type: 'square', gain: 0.08 }); this._buzz(6, 90); }
     select() { this._tone(660, { duration: 0.09, type: 'sine', gain: 0.15 }); }
 
     success() {
@@ -65,17 +86,20 @@
 
     error() {
       this._tone(180, { duration: 0.22, type: 'sawtooth', gain: 0.18, slideTo: 90 });
+      this._buzz([30, 40, 30]);
     }
 
     win() {
       const notes = [523.25, 523.25, 659.25, 783.99, 1046.5, 1318.5];
       notes.forEach((f, i) => this._tone(f, { duration: 0.22, type: 'triangle', gain: 0.17, delay: i * 0.1 }));
+      this._buzz([15, 60, 15, 60, 40]);
     }
 
     unlock() {
       [440, 554.37, 659.25, 880].forEach((f, i) =>
         this._tone(f, { duration: 0.2, type: 'sine', gain: 0.15, delay: i * 0.06 })
       );
+      this._buzz([12, 50, 25]);
     }
 
     startMusic() {
@@ -122,6 +146,20 @@
     syncMusicWithSetting() {
       if (this.musicMuted) this.stopMusic();
       else this.startMusic();
+    }
+
+    // Called when the app is backgrounded / brought back (visibilitychange).
+    pauseForHidden() {
+      this._hiddenPaused = true;
+      this.stopMusic();
+      if (this._ctx && this._ctx.state === 'running') this._ctx.suspend().catch(() => {});
+    }
+
+    resumeFromHidden() {
+      if (!this._hiddenPaused) return;
+      this._hiddenPaused = false;
+      if (this._ctx && this._ctx.state === 'suspended') this._ctx.resume().catch(() => {});
+      this.syncMusicWithSetting();
     }
   }
 

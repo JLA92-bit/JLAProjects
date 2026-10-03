@@ -1,0 +1,5 @@
+.pp-meta {
+  display: flex; gap: 18px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
+  justify-content: center; margin-bottom: 4px;
+}
+.pp-canvas { touch-action: none; }

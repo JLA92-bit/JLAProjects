@@ -28,10 +28,15 @@
   let particles = [];
   let rafId = null;
 
+  function prefersReducedMotion() {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
+  }
+
   function burst(x, y, opts = {}) {
     const canvas = getParticleLayer();
     const ctx = canvas.getContext('2d');
-    const count = opts.count || 26;
+    let count = opts.count || 26;
+    if (prefersReducedMotion()) count = Math.min(count, 8);
     const dpr = devicePixelRatio;
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
@@ -108,6 +113,12 @@
     }, opts.duration || 1600);
   }
 
+  // Toasts are game-scoped messages (hints, encouragement); clear them when
+  // leaving or restarting a game so one game's hint never lingers over the next.
+  function clearToasts() {
+    document.querySelectorAll('.pc-toast').forEach((el) => el.remove());
+  }
+
   function starsMarkup(count, max = 3, animate = false) {
     let html = `<span class="pc-stars${animate ? ' pc-stars--pop' : ''}">`;
     for (let i = 0; i < max; i++) {
@@ -117,11 +128,17 @@
     return html;
   }
 
-  function modal({ title, bodyHtml, buttons }) {
+  // Open modals, oldest first, so the hardware/browser back button can
+  // close the top one (see closeTopModal) instead of leaving the screen.
+  const openModals = [];
+
+  function modal({ title, bodyHtml, buttons, onClose }) {
     const backdrop = document.createElement('div');
     backdrop.className = 'pc-modal-backdrop';
     const box = document.createElement('div');
     box.className = 'pc-modal pc-panel';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
     box.innerHTML = `<h2 style="margin-bottom:12px;font-size:1.6rem;color:var(--pc-purple)">${title}</h2>
       <div class="pc-modal-body">${bodyHtml || ''}</div>
       <div class="pc-modal-actions" style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;"></div>`;
@@ -138,11 +155,35 @@
       actions.appendChild(btn);
     });
     document.body.appendChild(backdrop);
-    function close() { backdrop.remove(); }
+    let closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      backdrop.remove();
+      const i = openModals.indexOf(ref);
+      if (i >= 0) openModals.splice(i, 1);
+      if (onClose) { try { onClose(); } catch (e) { /* ignore */ } }
+    }
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop && buttons === undefined) close();
     });
-    return { close, el: backdrop };
+    const ref = { close, el: backdrop };
+    openModals.push(ref);
+    return ref;
+  }
+
+  function hasOpenModal() {
+    return openModals.some((m) => document.body.contains(m.el));
+  }
+
+  // Closes the most recently opened modal. Returns true if one was closed.
+  function closeTopModal() {
+    while (openModals.length) {
+      const top = openModals[openModals.length - 1];
+      if (document.body.contains(top.el)) { top.close(); return true; }
+      openModals.pop();
+    }
+    return false;
   }
 
   function formatTime(ms) {
@@ -154,5 +195,8 @@
   }
 
   global.PC = global.PC || {};
-  global.PC.UI = { burst, burstFromElement, shake, toast, starsMarkup, modal, formatTime };
+  global.PC.UI = {
+    burst, burstFromElement, shake, toast, clearToasts, starsMarkup, modal, formatTime,
+    hasOpenModal, closeTopModal, prefersReducedMotion,
+  };
 })(window);

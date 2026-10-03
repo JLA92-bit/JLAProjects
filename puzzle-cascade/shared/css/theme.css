@@ -34,6 +34,12 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* No pull-to-refresh / scroll chaining bounce while playing. */
+  overscroll-behavior: none;
+}
 
 body {
   margin: 0;
@@ -46,8 +52,18 @@ body {
   min-height: 100vh;
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
+  /* manipulation = no double-tap-to-zoom delay on taps. */
   touch-action: manipulation;
+  overscroll-behavior: none;
 }
+
+button, a, input, label, [role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+input, textarea { -webkit-user-select: text; user-select: text; }
+input[type="checkbox"] { accent-color: var(--pc-purple); }
+:focus-visible { outline: 3px solid var(--pc-yellow); outline-offset: 2px; }
 
 h1, h2, h3, .pc-display {
   font-family: var(--pc-font-display);
@@ -73,6 +89,7 @@ button {
   justify-content: center;
   gap: 8px;
   padding: 14px 26px;
+  min-height: 44px;
   font-family: var(--pc-font-display);
   font-weight: 700;
   font-size: 1.05rem;
@@ -99,6 +116,12 @@ button {
   color: #fff;
 }
 .pc-btn.pc-btn--ghost:active { transform: translateY(2px); }
+/* Ghost button on a light (paper) surface, e.g. inside modals. */
+.pc-btn.pc-btn--ghost.pc-btn--ghost-dark {
+  color: var(--pc-ink);
+  background: rgba(36,20,54,0.04);
+  box-shadow: inset 0 0 0 2px rgba(36,20,54,0.25);
+}
 .pc-btn:disabled { opacity: 0.5; pointer-events: none; }
 .pc-btn .pc-icon { font-size: 1.2em; line-height: 1; }
 
@@ -147,6 +170,12 @@ button {
   display: flex; align-items: center; justify-content: center;
   z-index: 200;
   padding: 20px;
+  padding:
+    max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  overscroll-behavior: contain;
   animation: pc-fade-in 0.2s ease both;
 }
 @keyframes pc-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -154,6 +183,11 @@ button {
   width: 100%;
   max-width: 420px;
   padding: 28px;
+  /* Never taller than the screen: long modals scroll inside themselves. */
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   text-align: center;
   animation: pc-modal-in 0.35s cubic-bezier(.34,1.56,.64,1) both;
 }
@@ -177,7 +211,12 @@ button {
   position: fixed;
   left: 50%;
   top: 24px;
+  top: calc(16px + env(safe-area-inset-top));
   transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  width: max-content;
+  text-align: center;
+  pointer-events: none;
   background: var(--pc-ink);
   color: #fff;
   padding: 12px 22px;
@@ -211,4 +250,20 @@ button {
 
 @media (max-width: 480px) {
   .pc-btn { padding: 12px 20px; font-size: 0.95rem; }
+  .pc-modal { padding: 22px 18px; }
+  .pc-modal h2 { font-size: 1.4rem !important; }
+}
+
+/* -------------------------------------------------------------------------
+   Reduced motion: keep feedback, drop the big movement.
+   ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .pc-modal-backdrop { backdrop-filter: none; }
 }
