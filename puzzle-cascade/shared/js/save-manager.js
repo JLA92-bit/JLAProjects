@@ -98,11 +98,10 @@
       return this._state.puzzles[id];
     }
 
-    isUnlocked(id, order) {
-      // First puzzle is always unlocked.
-      if (order === 0) return true;
-      const entry = this._state.puzzles[id];
-      return !!(entry && entry.unlocked);
+    // Every game is available from the very first launch; progression now
+    // lives on the Adventure map (levels/worlds), not in per-game locks.
+    isUnlocked() {
+      return true;
     }
 
     unlock(id) {
@@ -231,6 +230,11 @@
 
     getCurrentLevel() {
       return (this._state.levels && this._state.levels.current) || 1;
+    }
+
+    totalLevelStars() {
+      const h = (this._state.levels && this._state.levels.history) || {};
+      return Object.keys(h).reduce((sum, k) => sum + ((h[k] && h[k].stars) || 0), 0);
     }
 
     getLevelHistory(level) {

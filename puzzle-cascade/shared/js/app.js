@@ -1,5 +1,5 @@
 /**
- * PC.App - the hub shell: level path + slot wheel, the free-play puzzle
+ * PC.App - the hub shell: Adventure map (worlds of fixed levels), the free-play puzzle
  * grid, navigation, timer, settings, player-name personalization,
  * animated intro slides, and the glue that connects a mounted game
  * module to SaveManager.
@@ -373,7 +373,107 @@
   ];
 
 
-  const LEVEL_COUNT = 30; // levels 1-10 easy, 11-20 medium, 21-30 hard, then repeats at hard forever
+  /* -------------------- Adventure map: worlds + fixed levels -------------------- */
+
+  // Like a Candy Crush saga map: an endless run of levels grouped into
+  // themed worlds of 12. Every level is a FIXED game + difficulty (no
+  // roulette), so "Level 14" is always the same challenge and can be
+  // replayed for more stars. All 50 games are also always open in the
+  // All Games tab - the map is the guided journey, not a lock.
+  const LEVELS_PER_WORLD = 12;
+  const WORLD_THEMES = [
+    { name: 'Candy Meadow', icon: '🍭', c1: '#ff7eb3', c2: '#ffb36b', decor: ['🍭', '🍬', '🌸', '🧁', '🍩'] },
+    { name: 'Lemon Lagoon', icon: '🍋', c1: '#14b8a6', c2: '#fde047', decor: ['🍋', '🌴', '🐠', '🌊', '🐚'] },
+    { name: 'Berry Woods', icon: '🫐', c1: '#7c3aed', c2: '#ec4899', decor: ['🫐', '🍓', '🌲', '🍄', '🦊'] },
+    { name: 'Frosty Peaks', icon: '❄️', c1: '#3b82f6', c2: '#a5f3fc', decor: ['❄️', '⛄', '🏔️', '🐧', '🎿'] },
+    { name: 'Coral Reef', icon: '🐙', c1: '#0ea5e9', c2: '#fb7185', decor: ['🐙', '🐠', '🪸', '🐚', '🐢'] },
+    { name: 'Volcano Valley', icon: '🌋', c1: '#dc2626', c2: '#f59e0b', decor: ['🌋', '🔥', '🦖', '🪨', '🌶️'] },
+    { name: 'Starlight Sky', icon: '🌙', c1: '#1e1b4b', c2: '#7e22ce', decor: ['⭐', '🌙', '🪐', '✨', '🚀'] },
+    { name: 'Crystal Caves', icon: '💎', c1: '#0f766e', c2: '#818cf8', decor: ['💎', '🔮', '🦇', '🕯️', '⛏️'] },
+    { name: 'Sunset Desert', icon: '🌵', c1: '#ea580c', c2: '#facc15', decor: ['🌵', '🐪', '☀️', '🏜️', '🦂'] },
+    { name: 'Rainbow Castle', icon: '🏰', c1: '#a855f7', c2: '#f472b6', decor: ['🏰', '🌈', '🦄', '👑', '🎠'] },
+  ];
+  // World 1 opens with the gentlest, most familiar games.
+  const FIRST_WORLD_GAMES = ['sliding', 'memory', 'tictactoe', 'lightsout', 'colorflood', 'match3', 'whackmole', 'hanoi', 'connect4', 'wordsearch', 'pipes', 'merge2048'];
+  const DIFF_LABEL = { easy: 'Easy', medium: 'Medium', hard: '🔥 Hard' };
+
+  function seededRandom(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function seededShuffle(list, seed) {
+    const rand = seededRandom(seed);
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+
+  // Each "cycle" visits every game once, in a fixed per-cycle order, and
+  // two neighbouring levels never share a game.
+  const levelGameIds = [];
+  function gameIdForLevel(level) {
+    const n = PUZZLES.length;
+    while (levelGameIds.length < level) {
+      const cycle = levelGameIds.length / n;
+      const ids = PUZZLES.map((p) => p.id);
+      let order;
+      if (cycle === 0) {
+        const first = FIRST_WORLD_GAMES.filter((id) => ids.includes(id));
+        order = first.concat(seededShuffle(ids.filter((id) => !first.includes(id)), 1001));
+      } else {
+        order = seededShuffle(ids, 1001 + cycle * 7919);
+      }
+      const prev = levelGameIds[levelGameIds.length - 1];
+      if (prev && order[0] === prev) [order[0], order[1]] = [order[1], order[0]];
+      levelGameIds.push(...order);
+    }
+    return levelGameIds[level - 1];
+  }
+
+  function difficultyForLevel(level) {
+    const w = Math.floor((level - 1) / LEVELS_PER_WORLD);
+    const p = (level - 1) % LEVELS_PER_WORLD;
+    if (p === LEVELS_PER_WORLD - 1) return 'hard'; // every world ends on a finale
+    if (w === 0) return p < 8 ? 'easy' : 'medium';
+    if (w === 1) return p < 4 ? 'easy' : p < 9 ? 'medium' : 'hard';
+    if (w === 2) return p < 2 ? 'easy' : p < 7 ? 'medium' : 'hard';
+    return p < 5 ? 'medium' : 'hard';
+  }
+
+  function levelInfo(level) {
+    const id = gameIdForLevel(level);
+    const index = PUZZLES.findIndex((p) => p.id === id);
+    const world = Math.floor((level - 1) / LEVELS_PER_WORLD);
+    const pos = (level - 1) % LEVELS_PER_WORLD;
+    return { level, puzzle: PUZZLES[index], index, world, pos, difficulty: difficultyForLevel(level), finale: pos === LEVELS_PER_WORLD - 1 };
+  }
+
+  function worldTheme(w) {
+    const t = WORLD_THEMES[w % WORLD_THEMES.length];
+    const lap = Math.floor(w / WORLD_THEMES.length);
+    const roman = ['', ' II', ' III', ' IV', ' V', ' VI', ' VII', ' VIII', ' IX', ' X'];
+    return Object.assign({}, t, { name: t.name + (lap ? (roman[lap] || ` ${lap + 1}`) : '') });
+  }
+
+  function worldStars(w) {
+    let got = 0;
+    for (let l = w * LEVELS_PER_WORLD + 1; l <= (w + 1) * LEVELS_PER_WORLD; l++) {
+      const h = save.getLevelHistory(l);
+      if (h) got += h.stars || 0;
+    }
+    return { got, max: LEVELS_PER_WORLD * 3 };
+  }
+
+  function hasPlayedGame(puzzle) {
+    const entry = save.ensurePuzzle(puzzle.id);
+    return PC.DIFFICULTIES.some((d) => entry.tiers[d] && entry.tiers[d].plays > 0);
+  }
 
   // Free Play filter chips. A puzzle's `category` must be one of the ids
   // below (except 'all' / 'favorites', which are virtual). A puzzle with no
@@ -406,15 +506,9 @@
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
-  function difficultyForLevel(level) {
-    const bucket = (level - 1) % LEVEL_COUNT;
-    if (bucket < 10) return 'easy';
-    if (bucket < 20) return 'medium';
-    return 'hard';
-  }
 
   let els = {};
-  let lastSpunPuzzleId = null;
+  let justReachedLevel = null; // set when a win advances the map, so the new node can pop in
   let currentGameUnmount = null;
   let currentGameHint = null;
   let currentRound = null; // { puzzle, def, difficulty, index, meta } while a game is mounted
@@ -423,7 +517,7 @@
   let timerStart = 0;
   let timerPausedAt = null; // set while the page is hidden so backgrounded time doesn't count
   // Bumped on every navigation (launch / exit). Async work (module loads,
-  // wheel spin, intro fade) checks it so a stale callback can't pop a game
+  // intro fade) checks it so a stale callback can't pop a game
   // onto the screen after the player already backed out.
   let navToken = 0;
   let ignoreNextPop = false;
@@ -540,6 +634,11 @@
       panelPath: byId('pc-panel-path'),
       panelFree: byId('pc-panel-free'),
       levelPath: byId('pc-level-path'),
+      mapPlay: byId('pc-map-play'),
+      app: document.querySelector('.pc-app'),
+      statStars: byId('pc-stat-stars'),
+      statStreak: byId('pc-stat-streak'),
+      statWorld: byId('pc-stat-world'),
     };
 
     document.addEventListener('pointerdown', () => sound.resume(), { once: true });
@@ -551,6 +650,7 @@
     els.tabPath.addEventListener('click', () => { sound.click(); switchTab('path'); });
     els.tabFree.addEventListener('click', () => { sound.click(); switchTab('free'); });
     if (els.continueBtn) els.continueBtn.addEventListener('click', continueLastPlayed);
+    if (els.mapPlay) els.mapPlay.addEventListener('click', () => { sound.click(); openLevelPreview(save.getCurrentLevel()); });
     if (els.search) {
       els.search.addEventListener('input', () => { gridFilter.q = els.search.value; applyGridFilter(); });
       els.search.addEventListener('keydown', (e) => { if (e.key === 'Enter') els.search.blur(); });
@@ -583,13 +683,16 @@
 
   /* -------------------- Back button / history -------------------- */
 
-  // Entering the game view (difficulty pick, intro, wheel, or a round)
+  // Entering the game view (difficulty pick, intro, or a round)
   // pushes one history entry, so the Android hardware back button (which
   // the Capacitor WebView maps to history.back() when it can) and the
   // browser back button return to the hub instead of leaving the app.
   function pushGameHistory() {
     try {
       if (history.state && history.state.pcView === 'game') return;
+      // Coming from a level preview: reuse its entry so one back press
+      // still lands on the map.
+      if (history.state && history.state.pcView === 'preview') { history.replaceState({ pcView: 'game' }, ''); return; }
       history.pushState({ pcView: 'game' }, '');
     } catch (e) { /* history unavailable - back button just won't be intercepted */ }
   }
@@ -667,6 +770,13 @@
     els.progressLabel.textContent = `${pct}% complete  •  ${total}/${max} ★`;
 
     renderGreeting();
+    if (els.app) els.app.classList.add('is-hub');
+
+    const current = save.getCurrentLevel();
+    const curWorld = Math.floor((current - 1) / LEVELS_PER_WORLD);
+    if (els.statStars) els.statStars.textContent = String(save.totalLevelStars());
+    if (els.statStreak) els.statStreak.textContent = String(save.getStreak().current || 0);
+    if (els.statWorld) els.statWorld.textContent = `${worldTheme(curWorld).icon} ${curWorld + 1}-${((current - 1) % LEVELS_PER_WORLD) + 1}`;
 
     const streak = save.getStreak();
     els.streakLabel.textContent = streak.current > 0
@@ -836,56 +946,218 @@
     if (clear) clear.addEventListener('click', () => { sound.click(); els.search.value = ''; gridFilter.q = ''; applyGridFilter(); });
   }
 
-  /* -------------------- Level Path -------------------- */
+  /* -------------------- Adventure map -------------------- */
+
+  const MAP_STEP = 100;      // vertical px between level nodes
+  const MAP_PAD_BOTTOM = 70; // space under a world's first node
+  const MAP_BANNER = 150;    // space above a world's last node for its sign
+
+  function nodeX(world, pos) {
+    return 50 + 27 * Math.sin(pos * 0.95 + world * 1.7);
+  }
+
+  // Smooth curve through points (Catmull-Rom -> cubic Bezier).
+  function smoothPath(pts) {
+    if (pts.length < 2) return '';
+    let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+      const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+      d += ` C ${c1[0].toFixed(2)} ${c1[1].toFixed(1)}, ${c2[0].toFixed(2)} ${c2[1].toFixed(1)}, ${p2[0].toFixed(2)} ${p2[1].toFixed(1)}`;
+    }
+    return d;
+  }
+
+  function starRow(stars, cls) {
+    return `<span class="${cls}">${[0, 1, 2].map((i) => `<span class="${i < stars ? 'is-lit' : ''}">★</span>`).join('')}</span>`;
+  }
+
+  function buildWorldSection(w, current) {
+    const theme = worldTheme(w);
+    const firstLevel = w * LEVELS_PER_WORLD + 1;
+    const H = MAP_PAD_BOTTOM + (LEVELS_PER_WORLD - 1) * MAP_STEP + MAP_BANNER;
+    const worldLocked = firstLevel > current;
+    const section = document.createElement('section');
+    section.className = 'pc-world' + (worldLocked ? ' pc-world--locked' : '');
+    section.style.height = H + 'px';
+    section.style.setProperty('--w1', theme.c1);
+    section.style.setProperty('--w2', theme.c2);
+    section.dataset.world = String(w);
+
+    const pts = [];
+    for (let i = 0; i < LEVELS_PER_WORLD; i++) pts.push([nodeX(w, i), H - MAP_PAD_BOTTOM - i * MAP_STEP]);
+    const full = [[50, H]].concat(pts, [[50, 0]]);
+    // Bright "travelled" stretch: from the bottom edge up to the current node (or the whole world if finished).
+    const reachedIdx = Math.min(LEVELS_PER_WORLD - 1, current - firstLevel);
+    const done = reachedIdx < 0 ? [] : [[50, H]].concat(pts.slice(0, reachedIdx + 1), current > firstLevel + LEVELS_PER_WORLD - 1 ? [[50, 0]] : []);
+
+    // Scenery: a few themed props scattered on the side away from the path.
+    const rand = seededRandom(5000 + w * 131);
+    let decor = '';
+    for (let k = 0; k < 9; k++) {
+      const y = MAP_PAD_BOTTOM * 0.4 + rand() * (H - MAP_BANNER * 0.6);
+      const i = Math.max(0, Math.min(LEVELS_PER_WORLD - 1, Math.round((H - MAP_PAD_BOTTOM - y) / MAP_STEP)));
+      const px = nodeX(w, i);
+      const x = px > 50 ? 6 + rand() * 16 : 78 + rand() * 16;
+      const size = 26 + Math.round(rand() * 18);
+      decor += `<span class="pc-decor" style="left:${x.toFixed(1)}%;top:${y.toFixed(0)}px;font-size:${size}px;animation-delay:${(rand() * -4).toFixed(2)}s" aria-hidden="true">${theme.decor[k % theme.decor.length]}</span>`;
+    }
+
+    const { got, max } = worldStars(w);
+    const banner = worldLocked
+      ? `<div class="pc-world-banner is-locked"><div class="pc-world-num">World ${w + 1}</div><div class="pc-world-name">🔒 ${escapeHtml(theme.name)}</div><div class="pc-world-sub">Finish World ${w} to open</div></div>`
+      : `<div class="pc-world-banner"><div class="pc-world-num">World ${w + 1}</div><div class="pc-world-name">${theme.icon} ${escapeHtml(theme.name)}</div><div class="pc-world-sub">⭐ ${got} / ${max}</div></div>`;
+
+    section.innerHTML = `
+      <svg class="pc-world-svg" viewBox="0 0 100 ${H}" preserveAspectRatio="none" aria-hidden="true">
+        <path class="pc-trail-shadow" d="${smoothPath(full)}" vector-effect="non-scaling-stroke"/>
+        <path class="pc-trail" d="${smoothPath(full)}" vector-effect="non-scaling-stroke"/>
+        ${done.length > 1 ? `<path class="pc-trail-done" d="${smoothPath(done)}" vector-effect="non-scaling-stroke"/>` : ''}
+        <path class="pc-trail-dots" d="${smoothPath(full)}" vector-effect="non-scaling-stroke"/>
+      </svg>
+      ${decor}
+      ${banner}`;
+
+    for (let i = 0; i < LEVELS_PER_WORLD; i++) {
+      const level = firstLevel + i;
+      const info = levelInfo(level);
+      const hist = save.getLevelHistory(level);
+      const node = document.createElement('button');
+      node.type = 'button';
+      let cls = 'pc-map-node';
+      if (level < current) cls += ' pc-map-node--done';
+      else if (level === current) cls += ' pc-map-node--current';
+      else cls += ' pc-map-node--locked';
+      if (info.difficulty === 'hard') cls += ' pc-map-node--hard';
+      if (info.finale) cls += ' pc-map-node--finale';
+      if (level === justReachedLevel) cls += ' is-new';
+      node.className = cls;
+      node.style.left = pts[i][0].toFixed(2) + '%';
+      node.style.top = pts[i][1] + 'px';
+      node.dataset.level = String(level);
+      const stars = hist ? hist.stars : 0;
+      node.innerHTML = `
+        ${level < current ? starRow(stars, 'pc-node-stars') : ''}
+        ${level === current ? `<span class="pc-avatar" aria-hidden="true">${escapeHtml((playerName()[0] || '🙂').toUpperCase())}</span>` : ''}
+        <span class="pc-node-num">${level}</span>
+        ${level <= current ? `<span class="pc-node-game" aria-hidden="true">${info.puzzle.icon}</span>` : ''}
+        ${info.finale ? '<span class="pc-node-badge" aria-hidden="true">👑</span>' : info.difficulty === 'hard' ? '<span class="pc-node-badge" aria-hidden="true">🔥</span>' : ''}`;
+      node.setAttribute('aria-label', level > current
+        ? `Level ${level}, locked`
+        : `Level ${level}: ${info.puzzle.name}, ${info.difficulty}${level < current ? `, ${stars} of 3 stars` : ', next to play'}`);
+      node.addEventListener('click', () => onMapNodeTap(level));
+      section.appendChild(node);
+    }
+    return section;
+  }
 
   function renderLevelPath() {
     const current = save.getCurrentLevel();
-    const displayCount = Math.max(LEVEL_COUNT, current + 4);
-    const container = els.levelPath;
-    container.innerHTML = '';
-    for (let lvl = 1; lvl <= displayCount; lvl++) {
-      const hist = save.getLevelHistory(lvl);
-      const row = document.createElement('div');
-      row.className = 'pc-level-row ' + (lvl % 2 === 0 ? 'is-right' : 'is-left');
-      const node = document.createElement('button');
-      let cls = 'pc-level-node';
-      let inner;
-      if (lvl < current) {
-        cls += ' pc-level-node--done';
-        const stars = hist ? hist.stars : 0;
-        inner = `<span class="pc-level-num">${lvl}</span><span class="pc-level-stars">${[0, 1, 2].map((i) => `<span class="${i < stars ? 'is-lit' : ''}">★</span>`).join('')}</span>`;
-      } else if (lvl === current) {
-        cls += ' pc-level-node--current';
-        inner = `<span class="pc-level-num">${lvl}</span><span class="pc-level-play">Play</span>`;
-      } else {
-        cls += ' pc-level-node--locked';
-        inner = `<span>🔒</span>`;
-      }
-      node.className = cls;
-      node.innerHTML = inner;
-      if (lvl === current) {
-        node.setAttribute('aria-label', `Play level ${lvl}`);
-        node.addEventListener('click', () => { sound.click(); launchLevel(lvl); });
-      } else {
-        node.disabled = true;
-        node.setAttribute('aria-label', lvl < current ? `Level ${lvl} cleared` : `Level ${lvl} locked`);
-      }
-      row.appendChild(node);
-      container.appendChild(row);
+    const curWorld = Math.floor((current - 1) / LEVELS_PER_WORLD);
+    const map = els.levelPath;
+    map.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    // Next world shows as a locked teaser at the top; level 1 is at the bottom, like a saga map.
+    for (let w = curWorld + 1; w >= 0; w--) frag.appendChild(buildWorldSection(w, current));
+    // Start pad under level 1: lets the first levels scroll clear of the floating Play button.
+    const foot = document.createElement('div');
+    foot.className = 'pc-map-foot';
+    foot.style.setProperty('--w1', worldTheme(0).c1);
+    foot.innerHTML = '<span class="pc-map-start">🏁 Start</span>';
+    frag.appendChild(foot);
+    map.appendChild(frag);
+    if (els.mapPlay) {
+      const info = levelInfo(current);
+      els.mapPlay.innerHTML = `<span class="pc-map-play-icon" aria-hidden="true">▶</span><span>Play Level ${current}</span><span class="pc-map-play-game" aria-hidden="true">${info.puzzle.icon}</span>`;
+      els.mapPlay.setAttribute('aria-label', `Play level ${current}: ${info.puzzle.name}`);
     }
-    requestAnimationFrame(centerCurrentLevel);
+    requestAnimationFrame(() => centerOnLevel(current));
+    justReachedLevel = null;
   }
 
-  // Scrolls only the path container (never the whole page) so the current
-  // level sits in the middle.
-  function centerCurrentLevel() {
-    const container = els.levelPath;
-    if (!container || els.panelPath.hidden || els.hub.hidden) return;
-    const currentEl = container.querySelector('.pc-level-node--current');
-    if (!currentEl) return;
-    const c = container.getBoundingClientRect();
-    const r = currentEl.getBoundingClientRect();
-    container.scrollTop += (r.top - c.top) - (c.height / 2 - r.height / 2);
+  function onMapNodeTap(level) {
+    const current = save.getCurrentLevel();
+    if (level > current) {
+      sound.error();
+      UI.toast(`🔒 Beat level ${current} to open this one`, { duration: 1400 });
+      return;
+    }
+    sound.click();
+    openLevelPreview(level);
+  }
+
+  // Scrolls only the map (never the whole page) so the given level sits a
+  // little below the middle, leaving room for the avatar above it.
+  function centerOnLevel(level, smooth) {
+    const map = els.levelPath;
+    if (!map || els.panelPath.hidden || els.hub.hidden) return;
+    const node = map.querySelector(`.pc-map-node[data-level="${level}"]`);
+    if (!node) return;
+    const c = map.getBoundingClientRect();
+    const r = node.getBoundingClientRect();
+    const top = map.scrollTop + (r.top - c.top) - (c.height * 0.55 - r.height / 2);
+    try { map.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' }); } catch (e) { map.scrollTop = top; }
+  }
+
+  function centerCurrentLevel() { centerOnLevel(save.getCurrentLevel()); }
+
+  /* -------------------- Level preview card -------------------- */
+
+  function openLevelPreview(level) {
+    const info = levelInfo(level);
+    const theme = worldTheme(info.world);
+    const current = save.getCurrentLevel();
+    const hist = save.getLevelHistory(level);
+    const best = hist ? hist.stars : 0;
+    const replay = level < current;
+    prefetchGame(info.puzzle, info.index);
+    const tags = [
+      `<span class="pc-lp-tag pc-lp-tag--${info.difficulty}">${DIFF_LABEL[info.difficulty]}</span>`,
+      info.finale ? '<span class="pc-lp-tag pc-lp-tag--finale">👑 World finale</span>' : '',
+      replay ? `<span class="pc-lp-tag">Best ${best}/3 ★</span>` : '',
+    ].join('');
+    const bodyHtml = `
+      <div class="pc-lp" style="--w1:${theme.c1};--w2:${theme.c2};--tile-color:${info.puzzle.color}">
+        <div class="pc-lp-world">${theme.icon} World ${info.world + 1} · ${escapeHtml(theme.name)}</div>
+        ${starRow(best, 'pc-lp-stars')}
+        <div class="pc-lp-game">
+          <div class="pc-lp-icon" aria-hidden="true">${info.puzzle.icon}</div>
+          <div class="pc-lp-text">
+            <div class="pc-lp-name">${escapeHtml(info.puzzle.name)}</div>
+            <div class="pc-lp-blurb">${escapeHtml(info.puzzle.blurb)}</div>
+          </div>
+        </div>
+        <div class="pc-lp-tags">${tags}</div>
+        <p class="pc-lp-goal">🎯 ${replay && best < 3 ? 'Win again to beat your best and collect more stars.' : replay ? 'You already have every star here - play again just for fun!' : 'Win this round to open the next level on the map.'}</p>
+        <details class="pc-lp-how">
+          <summary>👆 How to play</summary>
+          <p><b>Goal:</b> ${info.puzzle.goal}</p>
+          <p><b>How:</b> ${info.puzzle.controls}</p>
+          ${info.puzzle.example ? `<p><b>Example:</b> ${info.puzzle.example}</p>` : ''}
+        </details>
+      </div>`;
+    const ref = UI.modal({
+      title: `Level ${level}`,
+      bodyHtml,
+      buttons: [
+        { label: 'Not now', className: 'pc-btn--ghost pc-btn--ghost-dark', onClick: () => { sound.click(); popPreviewHistory(); } },
+        { label: replay ? '🔁 Play again' : '▶ Play', className: 'pc-btn--green pc-lp-play', onClick: () => launchLevel(level) },
+      ],
+    });
+    if (ref && ref.el) ref.el.classList.add('pc-modal--level');
+    pushPreviewHistory();
+  }
+
+  // The preview is a screen of its own for the back button: Android back
+  // closes it instead of leaving the app.
+  function pushPreviewHistory() {
+    try { history.pushState({ pcView: 'preview' }, ''); } catch (e) { /* ignore */ }
+  }
+  function popPreviewHistory() {
+    try {
+      if (history.state && history.state.pcView === 'preview') { ignoreNextPop = true; history.back(); }
+    } catch (e) { ignoreNextPop = false; }
   }
 
   /* -------------------- Entering / leaving the game view -------------------- */
@@ -903,6 +1175,7 @@
     els.header.hidden = true;
     els.hub.hidden = true;
     els.gameView.hidden = false;
+    if (els.app) els.app.classList.remove('is-hub');
     els.hintBtn.hidden = true;
     if (els.restartBtn) els.restartBtn.hidden = true;
     els.gameTimer.textContent = '0:00';
@@ -912,106 +1185,18 @@
   }
 
   function launchLevel(level) {
+    const info = levelInfo(level);
     enterGameView();
     els.difficultyBar.hidden = true;
     els.difficultyBar.innerHTML = '';
-    els.gameTitle.textContent = `Level ${level}`;
-    const token = navToken;
-
-    const onPicked = (puzzle, index) => {
-      if (token !== navToken) return;
-      const difficulty = difficultyForLevel(level);
-      const meta = { levelMode: true, level };
-      els.gameTitle.textContent = `Level ${level} · ${puzzle.name}`;
-      els.gameStage.style.setProperty('--tile-color', puzzle.color);
-      showIntro(puzzle, difficulty, () => withGame(puzzle, index, (def) => beginRound(puzzle, def, difficulty, index, meta)), meta);
-    };
-
-    const pool = unlockedPuzzles();
-    if (pool.length <= 1) {
-      // Nothing to actually spin for yet - skip the wheel theatrics and go
-      // straight to the one puzzle that's unlocked so far.
-      lastSpunPuzzleId = pool[0].p.id;
-      prefetchGame(pool[0].p, pool[0].i);
-      onPicked(pool[0].p, pool[0].i);
-    } else {
-      spinSlotWheel(level, onPicked);
-    }
-  }
-
-  function unlockedPuzzles() {
-    // One progression model, not two: the wheel only ever offers puzzles
-    // already unlocked via the normal clear-a-puzzle-to-unlock-the-next
-    // flow, same as the Free Play grid. Otherwise the wheel could hand
-    // someone a puzzle that still shows locked on the Free Play tab,
-    // which reads as a bug ("where did this extra one come from?").
-    return PUZZLES.map((p, i) => ({ p, i })).filter(({ p, i }) => save.isUnlocked(p.id, i));
-  }
-
-  function spinSlotWheel(level, onLanded) {
-    const token = navToken;
-    const pool = unlockedPuzzles();
-    // Never land on the same game twice in a row - drop last time's pick
-    // from the candidates when there's something else to offer instead.
-    const candidates = pool.length > 1 ? pool.filter(({ p }) => p.id !== lastSpunPuzzleId) : pool;
-    const pick = candidates[Math.floor(Math.random() * candidates.length)];
-    const chosen = pick.p;
-    const chosenIndex = pick.i;
-    lastSpunPuzzleId = chosen.id;
-    // Start downloading the chosen game while the reel spins.
-    prefetchGame(chosen, chosenIndex);
-
-    const wrap = document.createElement('div');
-    wrap.className = 'pc-slotwheel';
-    wrap.innerHTML = `
-      <div class="pc-slotwheel-title">Level ${level} - spinning for your game...</div>
-      <div class="pc-slotwheel-window">
-        <div class="pc-slotwheel-pointer">🔻</div>
-        <div class="pc-slotwheel-reel" id="pc-reel"></div>
-      </div>
-      <div class="pc-slotwheel-result" id="pc-slotwheel-result">&nbsp;</div>
-    `;
-    els.gameStage.appendChild(wrap);
-    const reel = wrap.querySelector('#pc-reel');
-    const resultEl = wrap.querySelector('#pc-slotwheel-result');
-    const CELL = 96;
-    const reduced = UI.prefersReducedMotion && UI.prefersReducedMotion();
-    const LOOPS = reduced ? 1 : (pool.length <= 2 ? 12 : 5); // keep the spin feeling substantial even with few unlocked games
-
-    const reelPool = pool.map(({ p }) => p);
-    const sequence = [];
-    for (let i = 0; i < LOOPS; i++) sequence.push(...reelPool);
-    sequence.push(chosen);
-    sequence.forEach((p) => {
-      const cell = document.createElement('div');
-      cell.className = 'pc-slotwheel-cell';
-      cell.innerHTML = `<span>${p.icon}</span><span class="pc-slotwheel-label">${p.name}</span>`;
-      reel.appendChild(cell);
-    });
-
-    const finalIndex = sequence.length - 1;
-    const targetX = -(finalIndex * CELL + CELL / 2);
-    const duration = reduced ? 600 : 2400;
-    const start = performance.now();
-    let lastTick = -1;
-    function ease(t) { return 1 - Math.pow(1 - t, 4); }
-    function frame(now) {
-      if (token !== navToken) return; // player left the wheel
-      const t = Math.min(1, (now - start) / duration);
-      const x = targetX * ease(t);
-      reel.style.transform = `translateX(${x}px)`;
-      const passed = Math.floor(-x / CELL);
-      if (passed !== lastTick) { lastTick = passed; sound.move(); }
-      if (t < 1) {
-        requestAnimationFrame(frame);
-      } else {
-        sound.win();
-        resultEl.textContent = `🎉 ${chosen.name}!`;
-        UI.burstFromElement(resultEl, { count: 20 });
-        setTimeout(() => { if (token === navToken) onLanded(chosen, chosenIndex); }, 700);
-      }
-    }
-    requestAnimationFrame(frame);
+    els.gameTitle.textContent = `Level ${level} · ${info.puzzle.name}`;
+    els.gameStage.style.setProperty('--tile-color', info.puzzle.color);
+    const meta = { levelMode: true, level };
+    const start = () => withGame(info.puzzle, info.index, (def) => beginRound(info.puzzle, def, info.difficulty, info.index, meta));
+    // First time with a game: show the full how-to-play card. After that,
+    // jump straight in (the preview card still has "How to play").
+    if (hasPlayedGame(info.puzzle)) start();
+    else showIntro(info.puzzle, info.difficulty, start, meta);
   }
 
   /* -------------------- Free play -------------------- */
@@ -1246,37 +1431,70 @@
     sound.win();
     UI.burst(window.innerWidth / 2, window.innerHeight / 2, { count: 60 });
 
-    const nextPuzzle = PUZZLES[index + 1];
-    let unlockedNext = false;
-    if (nextPuzzle) unlockedNext = save.unlock(nextPuzzle.id);
-
     let levelResult = null;
     if (meta.levelMode) levelResult = save.recordLevelResult(meta.level, puzzle.id, difficulty, stars, timeMs);
 
     const name = playerName();
+    const token = navToken;
+
+    if (meta.levelMode) {
+      const level = meta.level;
+      const advanced = levelResult && levelResult.advanced;
+      const worldDone = advanced && level % LEVELS_PER_WORLD === 0;
+      const w = Math.floor((level - 1) / LEVELS_PER_WORLD);
+      const nextLevel = Math.min(level + 1, save.getCurrentLevel());
+      if (advanced) justReachedLevel = level + 1;
+      const bodyHtml = `
+        <div class="pc-win-stars">${UI.starsMarkup(stars, 3, true)}</div>
+        <p class="pc-win-line pc-win-line--big">Level ${level} complete!</p>
+        <p class="pc-win-line">⏱ ${UI.formatTime(timeMs)}${improvedTime ? ' · new best time!' : ''}</p>
+        ${levelResult && levelResult.improved && !advanced ? '<p class="pc-win-line pc-win-line--good">⭐ New star record for this level!</p>' : ''}
+        ${worldDone ? `<div class="pc-win-world">🏆 World ${w + 1} complete!<br><span>Next stop: ${worldTheme(w + 1).icon} ${escapeHtml(worldTheme(w + 1).name)}</span></div>` : ''}
+        ${advanced && !worldDone ? `<p class="pc-win-line pc-win-line--good">🔓 Level ${level + 1} is open on the map</p>` : ''}`;
+      setTimeout(() => {
+        if (token !== navToken) return;
+        if (advanced) sound.unlock();
+        UI.modal({
+          title: `${pick(WIN_PHRASES)}, ${name}!`,
+          bodyHtml,
+          buttons: [
+            { label: '🗺️ Map', className: 'pc-btn--ghost pc-btn--ghost-dark', onClick: exitToHub },
+            { label: `▶ Level ${nextLevel}`, className: 'pc-btn--green', onClick: () => backToMapThenPreview(nextLevel) },
+          ],
+        });
+        if (worldDone) UI.burst(window.innerWidth / 2, window.innerHeight / 3, { count: 90 });
+      }, 350);
+      return;
+    }
+
     const bodyHtml = `
       <div style="margin:10px 0 4px">${UI.starsMarkup(stars, 3, true)}</div>
-      ${meta.levelMode ? `<p style="margin:4px 0;font-weight:800;color:var(--pc-orange);">Level ${meta.level} cleared!</p>` : ''}
       <p style="margin:6px 0;font-weight:800;color:var(--pc-purple)">Time: ${UI.formatTime(timeMs)} ${improvedTime ? '(new best!)' : ''}</p>
       ${improvedStars ? '<p style="color:var(--pc-green);font-weight:800;">New star record!</p>' : ''}
-      ${unlockedNext ? `<p style="margin-top:10px;font-weight:800;">🎉 Unlocked: ${nextPuzzle.name}!</p>` : ''}
     `;
 
-    const token = navToken;
     setTimeout(() => {
       if (token !== navToken) return; // player already left this round
-      if (unlockedNext) sound.unlock();
-      const buttons = meta.levelMode
-        ? [
-            { label: '▶ Next Level', className: 'pc-btn--blue', onClick: () => launchLevel(meta.level + 1) },
-            { label: '🗺️ Level Path', className: 'pc-btn--green', onClick: exitToHub },
-          ]
-        : [
-            { label: '🔁 Play Again', className: 'pc-btn--blue', onClick: () => beginRound(puzzle, Games.get(puzzle.id), difficulty, index) },
-            { label: '🏠 Back to Hub', className: 'pc-btn--green', onClick: exitToHub },
-          ];
-      UI.modal({ title: `${pick(WIN_PHRASES)}, ${name}!`, bodyHtml, buttons });
+      UI.modal({
+        title: `${pick(WIN_PHRASES)}, ${name}!`,
+        bodyHtml,
+        buttons: [
+          { label: '🔁 Play Again', className: 'pc-btn--blue', onClick: () => beginRound(puzzle, Games.get(puzzle.id), difficulty, index) },
+          { label: '🏠 Back to Hub', className: 'pc-btn--green', onClick: exitToHub },
+        ],
+      });
     }, 350);
+  }
+
+  // Win -> "Next": back on the map, glide to the next node, open its card.
+  function backToMapThenPreview(level) {
+    exitToHub();
+    switchTab('path');
+    setTimeout(() => {
+      if (els.hub.hidden) return;
+      centerOnLevel(level, true);
+      setTimeout(() => { if (!els.hub.hidden && !(UI.hasOpenModal && UI.hasOpenModal())) openLevelPreview(level); }, 450);
+    }, 120);
   }
 
   // On-screen back / win-modal "Back to Hub": tear down, then drop the

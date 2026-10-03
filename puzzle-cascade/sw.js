@@ -1,4 +1,4 @@
-const CACHE_NAME = 'josh-makes-puzzles-v9';
+const CACHE_NAME = 'josh-makes-puzzles-v10';
 
 // Game folders under games/, in PUZZLES order (folder NN-<id> holds
 // <id>.js + <id>.css). The app lazy-loads these on first launch; listing

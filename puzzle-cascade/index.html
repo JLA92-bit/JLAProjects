@@ -36,27 +36,34 @@
 
   <!-- ============================== HUB ============================== -->
   <section id="pc-hub">
-    <p class="pc-greeting" id="pc-greeting" hidden></p>
-    <div class="pc-progress-card">
-      <div class="pc-progress-row">
-        <span id="pc-progress-label">0% complete</span>
-        <span id="pc-streak-label">Play today to start a streak!</span>
+    <div class="pc-hub-top">
+      <p class="pc-greeting" id="pc-greeting" hidden></p>
+      <div class="pc-hub-stats">
+        <div class="pc-stat" title="Stars collected on the Adventure map"><span class="pc-stat-icon" aria-hidden="true">⭐</span><b id="pc-stat-stars">0</b><span class="pc-stat-label">stars</span></div>
+        <div class="pc-stat" title="Days in a row you've played"><span class="pc-stat-icon" aria-hidden="true">🔥</span><b id="pc-stat-streak">0</b><span class="pc-stat-label">day streak</span></div>
+        <div class="pc-stat" title="Your current world and level"><b id="pc-stat-world">1-1</b><span class="pc-stat-label">world</span></div>
       </div>
-      <div class="pc-progress-track"><div class="pc-progress-fill" id="pc-progress-fill"></div></div>
     </div>
-
-    <button class="pc-continue" id="pc-continue" type="button" hidden></button>
 
     <div class="pc-hub-tabs" role="tablist">
-      <button class="pc-hub-tab is-active" id="pc-tab-path" data-tab="path" role="tab" aria-selected="true">🗺️ Level Path</button>
-      <button class="pc-hub-tab" id="pc-tab-free" data-tab="free" role="tab" aria-selected="false">🎮 Free Play</button>
+      <button class="pc-hub-tab is-active" id="pc-tab-path" data-tab="path" type="button" role="tab" aria-selected="true">🗺️ Adventure</button>
+      <button class="pc-hub-tab" id="pc-tab-free" data-tab="free" type="button" role="tab" aria-selected="false">🎮 All Games</button>
     </div>
 
-    <div class="pc-hub-panel" id="pc-panel-path">
-      <div class="pc-level-path" id="pc-level-path"></div>
+    <div class="pc-hub-panel pc-hub-panel--map" id="pc-panel-path">
+      <div class="pc-map" id="pc-level-path"></div>
+      <button class="pc-map-play" id="pc-map-play" type="button">▶ Play</button>
     </div>
 
-    <div class="pc-hub-panel" id="pc-panel-free" hidden>
+    <div class="pc-hub-panel pc-hub-panel--free" id="pc-panel-free" hidden>
+      <div class="pc-progress-card">
+        <div class="pc-progress-row">
+          <span id="pc-progress-label">0% complete</span>
+          <span id="pc-streak-label">Play today to start a streak!</span>
+        </div>
+        <div class="pc-progress-track"><div class="pc-progress-fill" id="pc-progress-fill"></div></div>
+      </div>
+      <button class="pc-continue" id="pc-continue" type="button" hidden></button>
       <div class="pc-filter-bar">
         <input type="search" id="pc-search" class="pc-search" placeholder="🔍 Search games..." aria-label="Search games" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
         <div class="pc-chips" id="pc-filter-chips" aria-label="Filter by category"></div>

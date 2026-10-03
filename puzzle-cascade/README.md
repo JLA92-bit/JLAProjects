@@ -1,7 +1,8 @@
 # Josh Makes Puzzles
 
-A 50-game puzzle collection that unlocks one puzzle at a time as you clear
-each one - sliding tiles, memory match, match-3, a maze, Sokoban, word
+A 50-game puzzle collection with a Candy Crush-style Adventure map: themed
+worlds of 12 fixed levels you clear one by one for stars, while every game is
+also open from day one in the All Games tab - sliding tiles, memory match, match-3, a maze, Sokoban, word
 search, a 2048-style number merge, a jigsaw, a Simon-style pattern game, a
 Lights Out logic grid, Tic-Tac-Toe vs an AI, Whack-a-Mole, Connect Four vs
 an AI, Minesweeper, Tower of Hanoi, Peg Solitaire, Snake, Brick Breaker
