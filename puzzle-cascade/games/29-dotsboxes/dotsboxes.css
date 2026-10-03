@@ -7,3 +7,14 @@
 .db-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 .db-dot--you { background: #ff4d8d; }
 .db-dot--ai { background: #3f8efc; }
+.db-over {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: rgba(20,10,40,0.6); color: #fff; text-align: center; padding: 16px;
+  font-family: var(--pc-font-display); font-weight: 800; font-size: 1.15rem;
+}
+.db-over .pc-btn { min-height: 48px; }
+
+/* The canvas must not size its own box: positioned absolutely, it can never
+   push DOM controls below the fold - the flex layout decides its size. */
+#db-canvas > canvas { position: absolute; inset: 0; }

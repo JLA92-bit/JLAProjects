@@ -7,9 +7,11 @@ import * as THREE from 'three';
 import { createStage, makeTile, tween, popIn, Easing, PALETTE } from '../../shared/js/three-stage.js';
 
 const CONFIG = {
-  easy: { lanes: 3, travelMs: 1500, beatMs: 780, length: 18, windowMs: 260, targetAcc: 0.6 },
-  medium: { lanes: 4, travelMs: 1150, beatMs: 580, length: 26, windowMs: 210, targetAcc: 0.7 },
-  hard: { lanes: 4, travelMs: 900, beatMs: 440, length: 34, windowMs: 165, targetAcc: 0.8 },
+  // windowMs: how early a tap still counts; late taps get 1.3x that, since
+  // touch input always arrives a little after the finger lands.
+  easy: { lanes: 3, travelMs: 1600, beatMs: 800, length: 18, windowMs: 300, targetAcc: 0.6 },
+  medium: { lanes: 4, travelMs: 1250, beatMs: 600, length: 26, windowMs: 240, targetAcc: 0.65 },
+  hard: { lanes: 4, travelMs: 1000, beatMs: 460, length: 34, windowMs: 190, targetAcc: 0.75 },
 };
 
 const LANE_W = 0.95;
@@ -18,12 +20,47 @@ const TOP_Y = TRACK_LEN / 2;
 const HIT_Y = -TRACK_LEN / 2 + 0.9;
 const TILE_H = 0.55;
 
+const LEAD_IN_MS = 900;
+const LATE_FACTOR = 1.3;
+
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.04, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
   const lanes = cfg.lanes;
-  const notes = Array.from({ length: cfg.length }, (_, i) => ({ lane: Math.floor(Math.random() * lanes), spawnAt: i * cfg.beatMs, spawned: false, resolved: false, mesh: null, y: TOP_Y }));
+  // each note is judged by time: it reaches the line at hitAt (game ms)
+  const notes = Array.from({ length: cfg.length }, (_, i) => {
+    const spawnAt = LEAD_IN_MS + i * cfg.beatMs;
+    return { lane: Math.floor(Math.random() * lanes), spawnAt, hitAt: spawnAt + cfg.travelMs, spawned: false, resolved: false, mesh: null, y: TOP_Y };
+  });
   const worldSpeed = (TOP_Y - HIT_Y) / (cfg.travelMs / 1000);
-  const tolDist = (worldSpeed * cfg.windowMs) / 1000;
+  const earlyMs = cfg.windowMs, lateMs = cfg.windowMs * LATE_FACTOR;
 
   let hits = 0, misses = 0, combo = 0, maxCombo = 0, finished = false, elapsed = 0;
 
@@ -32,7 +69,7 @@ function mount(container, difficulty, api) {
   wrap.innerHTML = `
     <div class="rt-meta"><span>Combo: <span id="rt-combo">0</span></span><span>Hits: <span id="rt-hits">0</span>/${cfg.length}</span></div>
     <div class="pc-canvas3d" id="rt-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Tap a lane the instant a tile crosses the line</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Tap the lane as a tile reaches the yellow line</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -41,9 +78,8 @@ function mount(container, difficulty, api) {
   const hitsEl = wrap.querySelector('#rt-hits');
 
   const totalW = lanes * LANE_W, totalH = TRACK_LEN;
-  const halfW = totalW / 2 + 0.5, halfH = totalH / 2 + 0.5;
-  const distance = Math.max(halfH / 0.42, halfW / (0.42 * 0.5));
-  const stage = createStage(canvasHost, { distance });
+  const halfW = totalW / 2 + 0.2, halfH = totalH / 2 + 0.1;
+  const stage = createStage(canvasHost, fitView(canvasHost, halfW, halfH, { reserveBottom: 50 }));
 
   function laneX(l) { return (l - (lanes - 1) / 2) * LANE_W; }
 
@@ -56,6 +92,11 @@ function mount(container, difficulty, api) {
   const hitLine = new THREE.Mesh(new THREE.PlaneGeometry(totalW, 0.06), new THREE.MeshBasicMaterial({ color: 0xffd93d }));
   hitLine.position.set(0, HIT_Y, -0.05);
   stage.world.add(hitLine);
+  // soft band showing the whole "counts as a hit" zone around the line
+  const zoneTop = HIT_Y + (worldSpeed * earlyMs) / 1000, zoneBottom = HIT_Y - (worldSpeed * lateMs) / 1000;
+  const zone = new THREE.Mesh(new THREE.PlaneGeometry(totalW, zoneTop - zoneBottom), new THREE.MeshBasicMaterial({ color: 0xffd93d, transparent: true, opacity: 0.07, toneMapped: false }));
+  zone.position.set(0, (zoneTop + zoneBottom) / 2, -0.07);
+  stage.world.add(zone);
   const laneFlashes = [];
   for (let l = 0; l < lanes; l++) {
     const flash = new THREE.Mesh(new THREE.PlaneGeometry(LANE_W * 0.92, 0.5), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 }));
@@ -89,9 +130,16 @@ function mount(container, difficulty, api) {
     tween(f.material, { opacity: 0 }, 220, Easing.outCubic);
   }
 
-  function tapLane(l) {
+  function tapLane(l, tapMs) {
     if (finished) return;
-    const candidate = notes.find((n) => n.spawned && !n.resolved && n.lane === l && Math.abs(n.y - HIT_Y) <= tolDist);
+    // the closest unresolved note in this lane whose timing is in the window
+    let candidate = null, bestD = Infinity;
+    notes.forEach((n) => {
+      if (!n.spawned || n.resolved || n.lane !== l) return;
+      const d = tapMs - n.hitAt; // negative = early, positive = late
+      if (d < -earlyMs || d > lateMs) return;
+      if (Math.abs(d) < bestD) { bestD = Math.abs(d); candidate = n; }
+    });
     if (candidate) {
       candidate.resolved = true;
       hits++; combo++; maxCombo = Math.max(maxCombo, combo);
@@ -114,11 +162,15 @@ function mount(container, difficulty, api) {
   }
 
   function onTap(e) {
+    if (finished) return;
+    e.preventDefault();
+    // game time right now (between frames), not as of the last frame
+    const tapMs = elapsed + Math.min(50, performance.now() - lastTime);
     const world = stage.pickPlane(e.clientX, e.clientY, 0);
     if (!world) return;
     let best = 0, bestD = Infinity;
     for (let l = 0; l < lanes; l++) { const d = Math.abs(world.x - laneX(l)); if (d < bestD) { bestD = d; best = l; } }
-    tapLane(best);
+    tapLane(best, tapMs);
   }
   stage.renderer.domElement.addEventListener('pointerdown', onTap);
 
@@ -134,41 +186,52 @@ function mount(container, difficulty, api) {
       api.ui.burstFromElement(canvasHost);
       api.sound.win();
       const stars = acc >= 0.95 ? 3 : acc >= cfg.targetAcc + 0.1 ? 2 : 1;
-      setTimeout(() => api.win(stars, { accuracy: Math.round(acc * 100), maxCombo }), 300);
+      later(() => api.win(stars, { accuracy: Math.round(acc * 100), maxCombo }), 300);
     } else {
-      setTimeout(() => api.lose(`only ${Math.round(acc * 100)}% accuracy - needed ${Math.round(cfg.targetAcc * 100)}%.`), 250);
+      later(() => {
+        api.lose(`only ${Math.round(acc * 100)}% accuracy - needed ${Math.round(cfg.targetAcc * 100)}%.`);
+        const over = document.createElement('div');
+        over.className = 'rt-over';
+        over.innerHTML = `<div>You hit ${hits} of ${cfg.length}.<br>Need ${Math.ceil(cfg.targetAcc * cfg.length)} to win.</div><button class="pc-btn pc-btn--blue">Try again</button>`;
+        over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+        canvasHost.appendChild(over);
+      }, 250);
     }
   }
 
+  // Game clock advances by real frame time, clamped: if the app is paused
+  // or backgrounded the song simply pauses instead of skipping notes.
   let lastTime = performance.now();
   const unsubTick = stage.onTick(() => {
-    if (finished) return;
     const now = performance.now();
-    const dt = now - lastTime;
+    const dt = Math.min(50, Math.max(0, now - lastTime));
     lastTime = now;
+    if (finished) return;
     elapsed += dt;
 
     notes.forEach((n) => {
       if (!n.spawned && elapsed >= n.spawnAt) spawnNote(n);
       if (n.spawned && !n.resolved) {
-        n.y -= (worldSpeed * dt) / 1000;
+        n.y = HIT_Y + ((n.hitAt - elapsed) / 1000) * worldSpeed;
         n.mesh.position.y = n.y;
-        if (n.y < HIT_Y - tolDist) resolveMiss(n);
+        if (elapsed - n.hitAt > lateMs) resolveMiss(n);
       }
     });
   });
 
   function hint() {
     if (finished) return;
-    const next = notes.find((n) => n.spawned && !n.resolved);
+    const next = notes.find((n) => !n.resolved);
     if (!next) return;
     flashLane(next.lane, 0xffd93d);
-    api.ui.toast(`${api.playerName}, watch lane ${next.lane + 1}!`);
+    api.ui.toast(`${api.playerName}, tap when a tile sits inside the yellow band - not too early!`);
   }
 
   return {
     unmount: () => {
+      alive = false;
       finished = true;
+      timers.forEach(clearTimeout); timers.clear();
       unsubTick();
       stage.renderer.domElement.removeEventListener('pointerdown', onTap);
       stage.dispose();

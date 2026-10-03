@@ -18,8 +18,38 @@ const GOAL_HALF = 1.05;
 const PUCK_R = 0.24;
 const PADDLE_R = 0.5;
 
+const MAX_PUCK_SPEED = 11;
+
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.06, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
   let scorePlayer = 0, scoreAI = 0, finished = false;
 
   const wrap = document.createElement('div');
@@ -27,7 +57,7 @@ function mount(container, difficulty, api) {
   wrap.innerHTML = `
     <div class="ah-meta"><span>You: <span id="ah-you">0</span></span><span>Target: ${cfg.target}</span><span>AI: <span id="ah-ai">0</span></span></div>
     <div class="pc-canvas3d" id="ah-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Drag your paddle (bottom half) to hit the puck</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Slide your finger anywhere to move your blue paddle</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -35,9 +65,8 @@ function mount(container, difficulty, api) {
   const youEl = wrap.querySelector('#ah-you');
   const aiEl = wrap.querySelector('#ah-ai');
 
-  const halfWNeed = HALF_W + 0.5, halfHNeed = HALF_H + 0.5;
-  const distance = Math.max(halfHNeed / 0.42, halfWNeed / (0.42 * 0.5));
-  const stage = createStage(canvasHost, { distance });
+  const halfWNeed = HALF_W + 0.3, halfHNeed = HALF_H + 0.3;
+  const stage = createStage(canvasHost, fitView(canvasHost, halfWNeed, halfHNeed, { reserveBottom: 50 }));
 
   // table
   const tableMat = new THREE.MeshStandardMaterial({ color: 0x1c1044, roughness: 0.5 });
@@ -97,25 +126,45 @@ function mount(container, difficulty, api) {
     puck.serving = false;
     puckMesh.position.set(0, 0, 0.05);
   }
-  setTimeout(() => serve(Math.random() < 0.5), 500);
+  later(() => serve(Math.random() < 0.5), 700);
 
+  // Target position from the finger; the paddle chases it in the tick so
+  // its real velocity can be passed on to the puck.
+  let targetPX = px, targetPY = py;
+  let pvx = 0, pvy = 0;
   function movePlayerTo(x, y) {
-    px = Math.max(-HALF_W + PADDLE_R, Math.min(HALF_W - PADDLE_R, x));
-    py = Math.max(-HALF_H + PADDLE_R, Math.min(-0.15, y));
-    playerPaddle.position.set(px, py, 0.1);
+    targetPX = Math.max(-HALF_W + PADDLE_R, Math.min(HALF_W - PADDLE_R, x));
+    targetPY = Math.max(-HALF_H + PADDLE_R, Math.min(-0.15, y));
+  }
+  // Relative drag: the finger can be anywhere (it does not have to cover
+  // the paddle); the paddle moves by however far the finger moves.
+  let dragId = null, offX = 0, offY = 0;
+  const el = stage.renderer.domElement;
+  function onDown(e) {
+    if (finished) return;
+    const world = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (!world) return;
+    dragId = e.pointerId;
+    // touching on/near your own paddle grabs it directly; elsewhere drags relatively
+    if (Math.hypot(world.x - px, world.y - py) < PADDLE_R * 2.2) { offX = 0; offY = 0; movePlayerTo(world.x, world.y); }
+    else { offX = px - world.x; offY = py - world.y; }
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
   }
   function onMove(e) {
+    if (dragId !== e.pointerId) return;
     const world = stage.pickPlane(e.clientX, e.clientY, 0);
-    if (world) movePlayerTo(world.x, world.y);
+    if (world) movePlayerTo(world.x + offX, world.y + offY);
   }
-  let dragging = false;
-  const el = stage.renderer.domElement;
-  el.addEventListener('pointerdown', (e) => { dragging = true; onMove(e); });
-  el.addEventListener('pointermove', (e) => { if (dragging) onMove(e); });
-  window.addEventListener('pointerup', () => { dragging = false; });
+  function onUp(e) { if (dragId === e.pointerId) dragId = null; }
+  el.addEventListener('pointerdown', onDown);
+  el.addEventListener('pointermove', onMove);
+  el.addEventListener('pointerup', onUp);
+  el.addEventListener('pointercancel', onUp);
 
   function resetPositions() {
     px = 0; py = -HALF_H + 1.1; ax = 0; ay = HALF_H - 1.1;
+    targetPX = px; targetPY = py; pvx = 0; pvy = 0; offX = 0; offY = 0; dragId = null;
+    puckMesh.position.set(0, 0, 0.05);
     playerPaddle.position.set(px, py, 0.1);
     aiPaddle.position.set(ax, ay, 0.1);
   }
@@ -128,32 +177,61 @@ function mount(container, difficulty, api) {
     resetPositions();
     if (scorePlayer >= cfg.target) { winGame(); return; }
     if (scoreAI >= cfg.target) { loseGame(); return; }
-    setTimeout(() => serve(!byPlayer), 700);
+    later(() => serve(!byPlayer), 900);
   }
 
   function winGame() {
     finished = true;
     const margin = scorePlayer - scoreAI;
     const stars = margin >= 3 ? 3 : margin >= 1 ? 2 : 1;
-    setTimeout(() => api.win(stars, { scorePlayer, scoreAI }), 300);
+    later(() => api.win(stars, { scorePlayer, scoreAI }), 300);
   }
   function loseGame() {
     finished = true;
-    setTimeout(() => api.lose('the AI won this match! Try again.'), 300);
+    later(() => {
+      api.lose('the AI won this match! Try again.');
+      const over = document.createElement('div');
+      over.className = 'ah-over';
+      over.innerHTML = `<div>The AI won ${scoreAI} to ${scorePlayer}.</div><button class="pc-btn pc-btn--blue">Play again</button>`;
+      over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+      canvasHost.appendChild(over);
+    }, 300);
   }
 
-  let hintUntil = 0;
+  // Frame-rate independent: real elapsed time, clamped so a long pause
+  // (app in the background) never teleports anything, then split into
+  // small sub-steps so a fast puck cannot pass through a paddle.
+  let lastT = performance.now();
   const unsubTick = stage.onTick(() => {
-    if (finished) return;
-    const dt = 1 / 60;
+    const now = performance.now();
+    const frameDt = Math.min(0.05, Math.max(0, (now - lastT) / 1000));
+    lastT = now;
+    if (finished || frameDt <= 0) return;
+    const steps = Math.max(1, Math.ceil(frameDt / (1 / 120)));
+    for (let i = 0; i < steps && !finished; i++) step(frameDt / steps);
+  });
 
-    // AI moves toward the puck's predicted x, with a reaction lag
+  function step(dt) {
+    const k = dt * 60; // lerp factors were tuned per 60fps frame
+
+    // player paddle chases the finger quickly; its velocity is kept for hits
+    const nx = px + (targetPX - px) * Math.min(1, 0.6 * k);
+    const ny = py + (targetPY - py) * Math.min(1, 0.6 * k);
+    pvx = (nx - px) / dt; pvy = (ny - py) / dt;
+    px = nx; py = ny;
+    playerPaddle.position.set(px, py, 0.1);
+
+    // AI moves toward the puck, with a reaction lag and a top speed
     const targetX = Math.max(-HALF_W + PADDLE_R, Math.min(HALF_W - PADDLE_R, puck.x));
-    ax += (targetX - ax) * Math.min(1, cfg.aiReaction * 2);
-    ax = Math.max(-HALF_W + PADDLE_R, Math.min(HALF_W - PADDLE_R, ax));
     const targetY = puck.vy > 0 ? Math.max(0.5, Math.min(HALF_H - PADDLE_R, puck.y)) : HALF_H - 1.1;
-    ay += (targetY - ay) * cfg.aiReaction;
-    ay = Math.max(0.15, Math.min(HALF_H - PADDLE_R, ay));
+    let dax = (targetX - ax) * Math.min(1, cfg.aiReaction * 2 * k);
+    let day = (targetY - ay) * Math.min(1, cfg.aiReaction * k);
+    const maxStep = cfg.aiSpeed * dt;
+    const mag = Math.hypot(dax, day);
+    if (mag > maxStep) { dax *= maxStep / mag; day *= maxStep / mag; }
+    ax = Math.max(-HALF_W + PADDLE_R, Math.min(HALF_W - PADDLE_R, ax + dax));
+    ay = Math.max(0.15, Math.min(HALF_H - PADDLE_R, ay + day));
+    const avx = dax / dt, avy = day / dt;
     aiPaddle.position.set(ax, ay, 0.1);
 
     if (puck.serving) return;
@@ -166,30 +244,39 @@ function mount(container, difficulty, api) {
 
     // goal or wall bounce at top/bottom
     if (puck.y + PUCK_R > HALF_H) {
-      if (Math.abs(puck.x) < GOAL_HALF - PUCK_R) { goalScored(true); return; }
+      if (Math.abs(puck.x) < GOAL_HALF) { goalScored(true); return; }
       puck.y = HALF_H - PUCK_R; puck.vy *= -1;
     }
     if (puck.y - PUCK_R < -HALF_H) {
-      if (Math.abs(puck.x) < GOAL_HALF - PUCK_R) { goalScored(false); return; }
+      if (Math.abs(puck.x) < GOAL_HALF) { goalScored(false); return; }
       puck.y = -HALF_H + PUCK_R; puck.vy *= -1;
     }
 
     // paddle collisions (circle-circle)
-    [{ x: px, y: py, isPlayer: true }, { x: ax, y: ay, isPlayer: false }].forEach((p) => {
+    [{ x: px, y: py, vx: pvx, vy: pvy }, { x: ax, y: ay, vx: avx, vy: avy }].forEach((p) => {
       const dx = puck.x - p.x, dy = puck.y - p.y;
       const dist = Math.hypot(dx, dy);
       const minDist = PUCK_R + PADDLE_R;
       if (dist < minDist && dist > 0.001) {
         const nx = dx / dist, ny = dy / dist;
         puck.x = p.x + nx * minDist; puck.y = p.y + ny * minDist;
-        const speed = Math.max(Math.hypot(puck.vx, puck.vy), cfg.puckSpeed * 0.7) * 1.05;
+        // bounce off the paddle, plus a push from the paddle's own motion
+        const pushV = Math.max(0, p.vx * nx + p.vy * ny);
+        const speed = Math.max(Math.hypot(puck.vx, puck.vy), cfg.puckSpeed * 0.7) * 1.03 + pushV * 0.5;
         puck.vx = nx * speed; puck.vy = ny * speed;
+        if (Math.abs(puck.vy) < 0.8) puck.vy = (ny >= 0 ? 1 : -1) * 0.8; // never stall sideways
         api.sound.click();
       }
     });
 
+    // keep the puck gliding: never too slow (no stalls) or too fast
+    const sp = Math.hypot(puck.vx, puck.vy);
+    const minSp = cfg.puckSpeed * 0.45;
+    if (sp > MAX_PUCK_SPEED) { puck.vx *= MAX_PUCK_SPEED / sp; puck.vy *= MAX_PUCK_SPEED / sp; }
+    else if (sp < minSp && sp > 0.0001) { puck.vx *= minSp / sp; puck.vy *= minSp / sp; }
+
     puckMesh.position.set(puck.x, puck.y, 0.05);
-  });
+  }
 
   function hint() {
     if (finished) return;
@@ -200,9 +287,14 @@ function mount(container, difficulty, api) {
 
   return {
     unmount: () => {
+      alive = false;
       finished = true;
+      timers.forEach(clearTimeout); timers.clear();
       unsubTick();
-      window.removeEventListener('pointerup', () => { });
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
       stage.dispose();
       wrap.remove();
     },

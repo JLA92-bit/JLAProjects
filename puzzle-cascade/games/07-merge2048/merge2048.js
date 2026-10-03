@@ -6,9 +6,11 @@ import * as THREE from 'three';
 import { createStage, makeTile, applyLabel, tween, popIn, Easing } from '../../shared/js/three-stage.js';
 
 const CONFIG = {
-  easy: { size: 4, target: 128, moveStars: [60, 100] },
-  medium: { size: 4, target: 512, moveStars: [140, 220] },
-  hard: { size: 5, target: 2048, moveStars: [260, 420] },
+  // Reaching N takes at least ~N/2.3 moves (each move spawns a 2 or a 4),
+  // so star thresholds sit comfortably above that floor.
+  easy: { size: 4, target: 128, moveStars: [85, 130] },
+  medium: { size: 4, target: 512, moveStars: [300, 420] },
+  hard: { size: 5, target: 1024, moveStars: [600, 850] },
 };
 const SPACING = 1.08;
 const TILE_COLORS = {
@@ -17,13 +19,48 @@ const TILE_COLORS = {
 };
 function colorFor(v) { return TILE_COLORS[v] || 0x241436; }
 
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
+
 function starsForMoves(moveStars, moves) { if (moves <= moveStars[0]) return 3; if (moves <= moveStars[1]) return 2; return 1; }
 
 let uid = 1;
 
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
   const size = cfg.size;
+  const life = lifecycle();
   let board = Array.from({ length: size }, () => Array(size).fill(null));
   let moves = 0, busy = false, finished = false;
 
@@ -32,7 +69,7 @@ function mount(container, difficulty, api) {
   wrap.innerHTML = `
     <div class="n2-meta"><span>Moves: <span id="n2-moves">0</span></span><span>Target: ${cfg.target}</span></div>
     <div class="pc-canvas3d" id="n2-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Swipe or use arrow keys</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Swipe to slide every tile</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -40,6 +77,7 @@ function mount(container, difficulty, api) {
   const movesEl = wrap.querySelector('#n2-moves');
 
   const stage = createStage(canvasHost, { distance: size * 2.5 });
+  fitBoard(stage, canvasHost, (size - 1) * SPACING + 1, (size - 1) * SPACING + 1, { bottom: 50 });
   const half = (size - 1) / 2;
   function cellXY(r, c) { return { x: (c - half) * SPACING, y: (half - r) * SPACING }; }
 
@@ -55,6 +93,7 @@ function mount(container, difficulty, api) {
   function spawnTile(r, c, value) {
     const { x, y } = cellXY(r, c);
     const mesh = makeTile({ w: 0.94, h: 0.94, depth: 0.3, radius: 0.16, color: colorFor(value) });
+    mesh.material.envMapIntensity = 0.35; // pale low-value tiles otherwise bloom out
     mesh.position.set(x, y, 0);
     applyLabel(mesh, String(value), { size: 110, w: 0.6, h: 0.6, color: value <= 4 ? '#5b4636' : '#ffffff' });
     stage.world.add(mesh);
@@ -64,8 +103,13 @@ function mount(container, difficulty, api) {
     return tile;
   }
 
+  function disposeMesh(mesh) {
+    mesh.traverse((n) => { if (n.geometry) n.geometry.dispose(); if (n.material) { if (n.material.map) n.material.map.dispose(); n.material.dispose(); } });
+  }
+
   function relabel(tile) {
-    tile.mesh.remove(tile.mesh.children[0]);
+    const old = tile.mesh.children[0];
+    if (old) { tile.mesh.remove(old); disposeMesh(old); }
     applyLabel(tile.mesh, String(tile.value), { size: 110, w: 0.6, h: 0.6, color: tile.value <= 4 ? '#5b4636' : '#ffffff' });
     tile.mesh.material.color.set(colorFor(tile.value));
   }
@@ -125,7 +169,7 @@ function mount(container, difficulty, api) {
       });
     }
 
-    if (!moved) return;
+    if (!moved) { api.sound.error(); api.ui.shake(canvasHost); return; }
     api.sound.move();
     busy = true;
     board = Array.from({ length: size }, () => Array(size).fill(null));
@@ -134,6 +178,7 @@ function mount(container, difficulty, api) {
     arrivals.forEach(({ tile, r, c }) => {
       const target = cellXY(r, c);
       tween(tile.mesh.position, { x: target.x, y: target.y }, 130, Easing.outCubic, () => {
+        if (life.dead) return;
         pending--;
         if (pending === 0) finishMove(winners, arrivals, moves + 1);
       });
@@ -144,6 +189,7 @@ function mount(container, difficulty, api) {
     const droppedIds = new Set(winners.map((w) => w.drop.id));
     winners.forEach(({ keep, drop, value, r, c }) => {
       stage.world.remove(drop.mesh);
+      disposeMesh(drop.mesh);
       keep.value = value; keep.r = r; keep.c = c;
       relabel(keep);
       tween(keep.mesh.scale, { x: 1.25, y: 1.25, z: 1.25 }, 100, Easing.outCubic, () => tween(keep.mesh.scale, { x: 1, y: 1, z: 1 }, 120, Easing.outBack));
@@ -176,7 +222,7 @@ function mount(container, difficulty, api) {
       finished = true;
       const stars = starsForMoves(cfg.moveStars, moves);
       api.ui.burstFromElement(canvasHost);
-      setTimeout(() => api.win(stars, { moves }), 250);
+      life.later(() => api.win(stars, { moves }), 250);
       return;
     }
     const full = tiles.length === size * size;
@@ -188,11 +234,30 @@ function mount(container, difficulty, api) {
         if (c + 1 < size && board[r][c + 1] && board[r][c + 1].value === t.value) canMerge = true;
         if (r + 1 < size && board[r + 1][c] && board[r + 1][c].value === t.value) canMerge = true;
       }
-      if (!canMerge) {
-        finished = true;
-        api.lose('No more moves! Try again.');
-      }
+      if (!canMerge) clearSmallTiles();
     }
+  }
+
+  // Forgiving "game over": instead of ending the run, sweep away the
+  // smallest tiles so there is room to keep going.
+  function clearSmallTiles() {
+    busy = true;
+    api.sound.error();
+    api.ui.toast(`${api.playerName}, the board filled up - clearing the small tiles so you can keep going!`);
+    const values = [];
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) values.push(board[r][c].value);
+    values.sort((a, b) => a - b);
+    const cutoff = values[Math.min(values.length - 1, Math.floor(values.length / 3))];
+    life.later(() => {
+      for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) {
+        const t = board[r][c];
+        if (t && t.value <= cutoff && t.value < values[values.length - 1]) {
+          board[r][c] = null;
+          tween(t.mesh.scale, { x: 0.01, y: 0.01, z: 0.01 }, 200, Easing.inOutQuad, () => { stage.world.remove(t.mesh); disposeMesh(t.mesh); });
+        }
+      }
+      busy = false;
+    }, 700);
   }
 
   function onKey(e) {
@@ -201,18 +266,27 @@ function mount(container, difficulty, api) {
   }
   window.addEventListener('keydown', onKey);
 
+  // Swipe: the move fires as soon as the finger has travelled far enough,
+  // no need to lift first.
   let touchStart = null;
-  function onPointerDown(e) { touchStart = { x: e.clientX, y: e.clientY }; }
-  function onPointerUp(e) {
-    if (!touchStart) return;
+  const canvas = stage.renderer.domElement;
+  function onPointerDown(e) {
+    touchStart = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  }
+  function onPointerMove(e) {
+    if (!touchStart || e.pointerId !== touchStart.id) return;
     const dx = e.clientX - touchStart.x, dy = e.clientY - touchStart.y;
+    if (Math.abs(dx) < 28 && Math.abs(dy) < 28) return;
     touchStart = null;
-    if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;
     if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 'right' : 'left');
     else move(dy > 0 ? 'down' : 'up');
   }
-  stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
-  stage.renderer.domElement.addEventListener('pointerup', onPointerUp);
+  function onPointerUp() { touchStart = null; }
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
 
   function wouldMove(dir) {
     let moved = false;
@@ -241,24 +315,31 @@ function mount(container, difficulty, api) {
   }
 
   function hint() {
-    if (busy || finished) return;
+    if (finished) { api.ui.toast(`${api.playerName}, you reached ${cfg.target}!`); return; }
+    if (busy) return;
     const candidates = ['up', 'down', 'left', 'right'].filter(wouldMove);
-    if (!candidates.length) return;
+    if (!candidates.length) { api.ui.toast(`${api.playerName}, hang on - making room!`); return; }
     const best = candidates.find(causesMerge) || candidates[0];
     const arrow = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️' }[best];
     api.ui.toast(`${api.playerName}, swipe ${best}! ${arrow}`);
   }
 
-  return {
-    unmount: () => {
-      window.removeEventListener('keydown', onKey);
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      stage.renderer.domElement.removeEventListener('pointerup', onPointerUp);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    window.removeEventListener('keydown', onKey);
+    canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
+    canvas.removeEventListener('pointerup', onPointerUp);
+    canvas.removeEventListener('pointercancel', onPointerUp);
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('merge2048', { mount });

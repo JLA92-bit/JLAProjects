@@ -1,10 +1,11 @@
 .sk-meta { display: flex; gap: 18px; color: #fff; font-weight: 700; font-family: var(--pc-font-display); justify-content: center; margin-bottom: 4px; }
 .sk-dpad {
   display: grid;
-  grid-template-columns: repeat(3, 52px);
-  grid-template-rows: repeat(3, 52px);
-  gap: 6px;
-  margin: 10px auto 0;
+  grid-template-columns: repeat(3, 56px);
+  grid-template-rows: repeat(3, 56px);
+  gap: 4px;
+  margin: 4px auto 0;
+  flex: 0 0 auto;
   justify-content: center;
 }
 .sk-dbtn {
@@ -14,10 +15,38 @@
   display: flex; align-items: center; justify-content: center;
   font-size: 1.3rem;
   color: var(--pc-ink);
-  touch-action: manipulation;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
 }
 .sk-dbtn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
 .sk-dbtn--up { grid-column: 2; grid-row: 1; }
 .sk-dbtn--left { grid-column: 1; grid-row: 2; }
 .sk-dbtn--right { grid-column: 3; grid-row: 2; }
 .sk-dbtn--down { grid-column: 2; grid-row: 3; }
+
+.sk-controls {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  flex: 0 0 auto; width: 100%;
+}
+.sk-side {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-width: 64px; min-height: 56px; padding: 6px 8px;
+  border: none; border-radius: 14px; cursor: pointer;
+  background: rgba(255,255,255,0.22); color: #fff;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.35);
+  font-family: var(--pc-font-display); font-weight: 800; font-size: 1.1rem;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.sk-side span { font-size: 0.72rem; }
+.sk-side:active { transform: translateY(2px); }
+.sk-controls .sk-dpad { margin: 4px 0 0; }
+
+/* Keep the WebGL canvas out of layout so its pixel size can never push the
+   stage taller than the screen. */
+#sk-canvas > canvas { position: absolute; top: 0; left: 0; }

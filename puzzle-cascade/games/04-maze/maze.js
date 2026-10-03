@@ -32,7 +32,80 @@ function generateMaze(size) {
   return cells;
 }
 
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
+
+const DIR_KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right', W: 'up', S: 'down', A: 'left', D: 'right' };
+const ARROWS = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️' };
+
+// D-pad buttons: move on press, keep moving while held.
+function bindDpad(buttons, move, life) {
+  let repeatId = null, delayId = null;
+  const stop = () => { clearTimeout(delayId); clearInterval(repeatId); delayId = repeatId = null; };
+  buttons.forEach((btn) => {
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      stop();
+      const dir = btn.dataset.dir;
+      move(dir);
+      delayId = setTimeout(() => { repeatId = setInterval(() => { if (life.dead) stop(); else move(dir); }, 170); }, 320);
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => btn.addEventListener(t, stop));
+  });
+  return stop;
+}
+
+// Swipe anywhere on the canvas to move one step.
+function bindSwipe(el, move) {
+  let start = null;
+  const down = (e) => { start = { x: e.clientX, y: e.clientY, id: e.pointerId }; try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } };
+  const up = (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    start = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+    if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 'right' : 'left'); else move(dy > 0 ? 'down' : 'up');
+  };
+  const cancel = () => { start = null; };
+  el.addEventListener('pointerdown', down);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', cancel);
+  return () => { el.removeEventListener('pointerdown', down); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', cancel); };
+}
+
 function starsForTime(remainingMs, totalMs) {
+  if (remainingMs <= 0) return 1; // finished after the clock ran out
   const frac = remainingMs / totalMs;
   if (frac >= 0.55) return 3;
   if (frac >= 0.25) return 2;
@@ -40,27 +113,29 @@ function starsForTime(remainingMs, totalMs) {
 }
 
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
   const size = cfg.size;
+  const life = lifecycle();
   const maze = generateMaze(size);
   let pos = { r: 0, c: 0 };
   const goal = { r: size - 1, c: size - 1 };
   let finished = false;
   let remainingMs = cfg.timeLimitMs;
   let moving = false;
+  let queued = null; // one buffered step so quick taps aren't dropped
 
   const wrap = document.createElement('div');
   wrap.className = 'pc-stage-inner';
   wrap.innerHTML = `
     <div class="mz-meta"><span class="mz-time">Time left: <span id="mz-time">${Math.ceil(remainingMs / 1000)}s</span></span></div>
     <div class="pc-canvas3d" id="mz-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Arrows / WASD or the pad</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Swipe or use the arrows</span></div>
     </div>
     <div class="mz-dpad" id="mz-dpad">
-      <div class="mz-dbtn mz-dbtn--up" data-dir="up">⬆️</div>
-      <div class="mz-dbtn mz-dbtn--left" data-dir="left">⬅️</div>
-      <div class="mz-dbtn mz-dbtn--right" data-dir="right">➡️</div>
-      <div class="mz-dbtn mz-dbtn--down" data-dir="down">⬇️</div>
+      <button type="button" class="mz-dbtn mz-dbtn--up" data-dir="up" aria-label="Up">⬆️</button>
+      <button type="button" class="mz-dbtn mz-dbtn--left" data-dir="left" aria-label="Left">⬅️</button>
+      <button type="button" class="mz-dbtn mz-dbtn--right" data-dir="right" aria-label="Right">➡️</button>
+      <button type="button" class="mz-dbtn mz-dbtn--down" data-dir="down" aria-label="Down">⬇️</button>
     </div>
   `;
   container.appendChild(wrap);
@@ -69,6 +144,7 @@ function mount(container, difficulty, api) {
   const timeWrapEl = wrap.querySelector('.mz-time');
 
   const stage = createStage(canvasHost, { distance: size * 1.7, floorZ: -0.02 });
+  fitBoard(stage, canvasHost, size * CELL + 0.4, size * CELL + 0.4, { pad: 8, top: 8, bottom: 44 });
   const half = (size - 1) / 2;
   function cellXY(r, c) { return { x: (c - half) * CELL, y: (half - r) * CELL }; }
 
@@ -113,6 +189,10 @@ function mount(container, difficulty, api) {
   goalMesh.rotation.y = Math.PI / 4;
   goalMesh.castShadow = true;
   stage.world.add(goalMesh);
+  // glowing pad under the flag so the finish reads at a glance
+  const goalPad = new THREE.Mesh(new THREE.PlaneGeometry(CELL * 0.86, CELL * 0.86), new THREE.MeshBasicMaterial({ color: 0x23d18b, transparent: true, opacity: 0.45, toneMapped: false }));
+  goalPad.position.set(goalXY.x, goalXY.y, -0.01);
+  stage.world.add(goalPad);
   stage.onTick(() => { goalMesh.rotation.z += 0.02; goalMesh.position.z = 0.35 + Math.sin(performance.now() / 300) * 0.06; });
 
   // Player
@@ -127,45 +207,54 @@ function mount(container, difficulty, api) {
   popIn(playerMesh, { duration: 260 });
 
   function move(dir) {
-    if (finished || moving) return;
+    if (finished) return;
+    if (moving) { queued = dir; return; }
     const cell = maze[pos.r][pos.c];
     let nr = pos.r, nc = pos.c;
     if (dir === 'up' && !cell.N) nr--;
     else if (dir === 'down' && !cell.S) nr++;
     else if (dir === 'left' && !cell.W) nc--;
     else if (dir === 'right' && !cell.E) nc++;
-    else { api.sound.error(); api.ui.shake(canvasHost); return; }
+    else { queued = null; api.sound.error(); api.ui.shake(canvasHost); return; }
     pos = { r: nr, c: nc };
     api.sound.move();
     const target = cellXY(nr, nc);
     moving = true;
-    tween(playerMesh.position, { x: target.x, y: target.y }, 130, Easing.outCubic, () => {
+    tween(playerMesh.position, { x: target.x, y: target.y }, 120, Easing.outCubic, () => {
+      if (life.dead) return;
       moving = false;
       if (pos.r === goal.r && pos.c === goal.c) {
         finished = true;
+        queued = null;
         clearInterval(timerId);
         const stars = starsForTime(remainingMs, cfg.timeLimitMs);
         api.ui.burstFromElement(canvasHost);
-        setTimeout(() => api.win(stars, { remainingMs }), 250);
+        life.later(() => api.win(stars, { remainingMs }), 250);
+      } else if (queued) {
+        const next = queued;
+        queued = null;
+        move(next);
       }
     });
   }
 
   function onKey(e) {
-    const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right' };
-    if (map[e.key]) { e.preventDefault(); move(map[e.key]); }
+    const dir = DIR_KEYS[e.key];
+    if (dir) { e.preventDefault(); move(dir); }
   }
   window.addEventListener('keydown', onKey);
-  wrap.querySelectorAll('.mz-dbtn').forEach((btn) => btn.addEventListener('click', () => move(btn.dataset.dir)));
+  const stopDpad = bindDpad(wrap.querySelectorAll('.mz-dbtn'), move, life);
+  const unbindSwipe = bindSwipe(stage.renderer.domElement, move);
 
+  // Running out of time doesn't end the run - finishing late still earns a star.
   const timerId = setInterval(() => {
-    if (finished) return;
+    if (finished || life.dead) return;
     remainingMs -= 200;
     if (remainingMs <= 0) {
       remainingMs = 0; timeEl.textContent = '0s';
       clearInterval(timerId);
-      finished = true;
-      api.lose('Out of time! Try again.');
+      api.sound.error();
+      api.ui.toast(`${api.playerName}, time's up - keep going, you can still finish!`);
       return;
     }
     timeEl.textContent = Math.ceil(remainingMs / 1000) + 's';
@@ -173,7 +262,8 @@ function mount(container, difficulty, api) {
   }, 200);
 
   function hint() {
-    if (finished || moving) return;
+    if (finished) { api.ui.toast(`${api.playerName}, you made it out!`); return; }
+    if (moving) return;
     const start = pos.r * size + pos.c;
     const goalIdx = goal.r * size + goal.c;
     const prev = new Array(size * size).fill(-1);
@@ -197,20 +287,26 @@ function mount(container, difficulty, api) {
     while (prev[step] !== start && prev[step] !== -1) step = prev[step];
     const nr = Math.floor(step / size), nc = step % size;
     const dirWord = nr < pos.r ? 'up' : nr > pos.r ? 'down' : nc < pos.c ? 'left' : 'right';
-    const dirArrow = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️' }[dirWord];
+    const dirArrow = ARROWS[dirWord];
     tween(playerMesh.scale, { x: 1.5, y: 1.5, z: 1.5 }, 160, Easing.outBack, () => tween(playerMesh.scale, { x: 1, y: 1, z: 1 }, 200, Easing.outCubic));
     api.ui.toast(`${api.playerName}, head ${dirWord}! ${dirArrow}`);
   }
 
-  return {
-    unmount: () => {
-      window.removeEventListener('keydown', onKey);
-      clearInterval(timerId);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    window.removeEventListener('keydown', onKey);
+    clearInterval(timerId);
+    stopDpad();
+    unbindSwipe();
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('maze', { mount });

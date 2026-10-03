@@ -2,3 +2,8 @@
   color: #fff; font-weight: 700; font-family: var(--pc-font-display);
   text-align: center; font-size: 0.95rem;
 }
+
+.bl-actions { display: flex; justify-content: center; flex: 0 0 auto; }
+.bl-btn { min-height: 46px; padding: 8px 20px; font-size: 0.95rem; }
+.bl-btn--hint { animation: bl-pulse 0.4s infinite alternate; }
+@keyframes bl-pulse { from { transform: scale(1); } to { transform: scale(1.1); } }

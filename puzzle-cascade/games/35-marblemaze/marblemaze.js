@@ -75,15 +75,35 @@ function bfsPath(cells, rows, cols, start, goal, blocked) {
   return path.reverse();
 }
 
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.06, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
   const { rows, cols } = cfg;
   const cells = generateMaze(rows, cols);
   const start = [0, 0];
   const goal = [rows - 1, cols - 1];
 
-  // pick pit cells, avoiding start/goal and their immediate neighbors
-  const forbidden = new Set([start[0] * cols + start[1], goal[0] * cols + goal[1]]);
+  // Pick pit cells. The maze is "perfect" (exactly one route), so a pit on
+  // that route would make the level impossible - pits only go in side
+  // branches, never on the solution path or next to the start.
+  const forbidden = new Set([start[0] * cols + start[1], goal[0] * cols + goal[1], 0 * cols + 1, 1 * cols + 0]);
+  (bfsPath(cells, rows, cols, start, goal, new Set()) || []).forEach(([r, c]) => forbidden.add(r * cols + c));
   const candidates = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (!forbidden.has(r * cols + c)) candidates.push([r, c]);
   for (let i = candidates.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[candidates[i], candidates[j]] = [candidates[j], candidates[i]]; }
@@ -96,7 +116,7 @@ function mount(container, difficulty, api) {
   wrap.innerHTML = `
     <div class="mm-meta">Falls: <span id="mm-falls">0</span></div>
     <div class="pc-canvas3d" id="mm-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Drag to tilt the board and roll to the golden goal</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Drag to tilt - roll to the gold ring</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -104,9 +124,9 @@ function mount(container, difficulty, api) {
   const fallsEl = wrap.querySelector('#mm-falls');
 
   const totalW = cols * CELL, totalH = rows * CELL;
-  const halfW = totalW / 2 + 0.6, halfH = totalH / 2 + 0.6;
-  const distance = Math.max(halfH / 0.42, halfW / (0.42 * 0.5));
-  const stage = createStage(canvasHost, { distance });
+  const halfW = totalW / 2 + 0.25, halfH = totalH / 2 + 0.25;
+  const view = fitView(canvasHost, halfW, halfH, { reserveBottom: 52 });
+  const stage = createStage(canvasHost, view);
 
   function cellCenter(r, c) { return { x: (c - (cols - 1) / 2) * CELL, y: ((rows - 1) / 2 - r) * CELL }; }
 
@@ -168,16 +188,18 @@ function mount(container, difficulty, api) {
   tiltArrow.visible = false;
   stage.world.add(tiltArrow);
 
-  let tiltX = 0, tiltY = 0, dragging = false, dragStart = null;
+  let tiltX = 0, tiltY = 0, dragging = false, dragStart = null, dragId = null;
   const el = stage.renderer.domElement;
   function onDown(e) {
-    if (finished) return;
+    if (finished || dragging) return;
     dragging = true;
+    dragId = e.pointerId;
     dragStart = stage.pickPlane(e.clientX, e.clientY, 0);
     tiltArrow.visible = true;
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
   }
   function onMove(e) {
-    if (!dragging || !dragStart) return;
+    if (!dragging || !dragStart || e.pointerId !== dragId) return;
     const cur = stage.pickPlane(e.clientX, e.clientY, 0);
     if (!cur) return;
     let dx = cur.x - dragStart.x, dy = cur.y - dragStart.y;
@@ -188,10 +210,14 @@ function mount(container, difficulty, api) {
     tiltArrow.position.set(ball.x + tiltX * 0.6, ball.y + tiltY * 0.6, 0.2);
     tiltArrow.rotation.z = Math.atan2(tiltX, tiltY) * -1 + Math.PI;
   }
-  function onUp() { dragging = false; tiltX = 0; tiltY = 0; tiltArrow.visible = false; }
+  function onUp(e) {
+    if (e && dragId !== null && e.pointerId !== dragId) return;
+    dragging = false; dragId = null; tiltX = 0; tiltY = 0; tiltArrow.visible = false;
+  }
   el.addEventListener('pointerdown', onDown);
   el.addEventListener('pointermove', onMove);
-  window.addEventListener('pointerup', onUp);
+  el.addEventListener('pointerup', onUp);
+  el.addEventListener('pointercancel', onUp);
 
   function respawn() {
     mistakes++;
@@ -199,6 +225,9 @@ function mount(container, difficulty, api) {
     api.sound.error();
     api.ui.shake(canvasHost);
     ball.x = startPos.x; ball.y = startPos.y; ball.vx = 0; ball.vy = 0;
+    ballMesh.scale.set(0.01, 0.01, 0.01);
+    tween(ballMesh.scale, { x: 1, y: 1, z: 1 }, 260, Easing.outBack);
+    api.ui.toast(`${api.playerName}, oops - into a hole! Back to the start.`);
   }
 
   function winGame() {
@@ -206,15 +235,31 @@ function mount(container, difficulty, api) {
     api.ui.burstFromElement(canvasHost);
     const stars = mistakes === 0 ? 3 : mistakes <= 2 ? 2 : 1;
     api.sound.win();
-    setTimeout(() => api.win(stars, { falls: mistakes }), 300);
+    later(() => api.win(stars, { falls: mistakes }), 300);
   }
 
+  // Real frame time, clamped (a long pause such as the app going to the
+  // background must not fling the marble), split into sub-steps so the
+  // marble can never tunnel through a thin wall.
+  let lastT = performance.now();
   const unsubTick = stage.onTick(() => {
-    if (finished) return;
-    const dt = 1 / 60;
+    const now = performance.now();
+    const frameDt = Math.min(0.05, Math.max(0, (now - lastT) / 1000));
+    lastT = now;
+    if (finished || frameDt <= 0) return;
+    goalMesh.rotation.z += frameDt * 0.6;
+    const steps = Math.max(1, Math.ceil(frameDt / (1 / 120)));
+    for (let i = 0; i < steps && !finished; i++) { if (step(frameDt / steps)) break; }
+    ballMesh.position.set(ball.x, ball.y, BALL_R);
+    if (tiltArrow.visible) tiltArrow.position.set(ball.x + tiltX * 0.6, ball.y + tiltY * 0.6, 0.2);
+  });
+
+  // returns true when the step ended in a fall or the win
+  function step(dt) {
     ball.vx += tiltX * cfg.accel * dt;
     ball.vy -= tiltY * cfg.accel * dt;
-    ball.vx *= cfg.friction; ball.vy *= cfg.friction;
+    const fr = Math.pow(cfg.friction, dt * 60);
+    ball.vx *= fr; ball.vy *= fr;
     ball.x += ball.vx * dt; ball.y += ball.vy * dt;
 
     wallBoxes.forEach((wall) => {
@@ -237,20 +282,18 @@ function mount(container, difficulty, api) {
     ball.x = Math.max(-bw, Math.min(bw, ball.x));
     ball.y = Math.max(-bh, Math.min(bh, ball.y));
 
-    ballMesh.position.set(ball.x, ball.y, BALL_R);
-    if (tiltArrow.visible) tiltArrow.position.set(ball.x + tiltX * 0.6, ball.y + tiltY * 0.6, 0.2);
-    goalMesh.rotation.z += 0.01;
 
     // pit check
     const cr = Math.round((rows - 1) / 2 - ball.y / CELL);
     const cc = Math.round(ball.x / CELL + (cols - 1) / 2);
     if (cr >= 0 && cr < rows && cc >= 0 && cc < cols && pitSet.has(cr * cols + cc)) {
       const center = cellCenter(cr, cc);
-      if (Math.hypot(ball.x - center.x, ball.y - center.y) < 0.3) { respawn(); return; }
+      if (Math.hypot(ball.x - center.x, ball.y - center.y) < 0.3) { respawn(); return true; }
     }
 
-    if (Math.hypot(ball.x - goalPos.x, ball.y - goalPos.y) < 0.32) winGame();
-  });
+    if (Math.hypot(ball.x - goalPos.x, ball.y - goalPos.y) < 0.32) { winGame(); return true; }
+    return false;
+  }
 
   function hint() {
     if (finished) return;
@@ -262,16 +305,30 @@ function mount(container, difficulty, api) {
     const dx = next.x - ball.x, dy = next.y - ball.y;
     const dirLabel = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'up' : 'down');
     tween(ballMesh.material, { emissiveIntensity: 0.7 }, 150, Easing.outCubic, () => tween(ballMesh.material, { emissiveIntensity: 0 }, 400));
+    // light up the next few cells of the route
+    path.slice(1, 6).forEach((cell, i) => {
+      const pos = cellCenter(...cell);
+      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.12, 14), new THREE.MeshBasicMaterial({ color: 0xffd93d, transparent: true, opacity: 0.9, toneMapped: false }));
+      dot.position.set(pos.x, pos.y, -0.04);
+      stage.world.add(dot);
+      later(() => tween(dot.material, { opacity: 0 }, 500, Easing.outCubic, () => {
+        if (!alive) return;
+        stage.world.remove(dot); dot.geometry.dispose(); dot.material.dispose();
+      }), 1600 + i * 120);
+    });
     api.ui.toast(`${api.playerName}, tilt ${dirLabel} to head toward the goal!`);
   }
 
   return {
     unmount: () => {
+      alive = false;
       finished = true;
+      timers.forEach(clearTimeout); timers.clear();
       unsubTick();
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
       stage.dispose();
       wrap.remove();
     },

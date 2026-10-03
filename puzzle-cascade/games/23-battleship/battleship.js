@@ -86,6 +86,90 @@ function makeAIController(size) {
 
 function boardHalfExtent(size) { return size * CELL / 2 + CELL * 0.5; }
 
+/* ---------- lifecycle + framing helpers (kept local so this file stays self-contained) ---------- */
+
+// World half-height per unit of stage distance (matches three-stage.js).
+const VIEW_SCALE = 0.42;
+
+// Pick a camera distance that fits a board of the given world half-extents
+// into the canvas's real aspect ratio, with a safety margin so a later
+// resize (address bar, rotated phone, wrapped status text) never crops it.
+function fitDistance(host, halfW, halfH, margin = 1.08) {
+  const w = host.clientWidth || 340, h = host.clientHeight || 520;
+  const aspect = Math.max(0.35, Math.min(2.2, w / h));
+  return (Math.max(halfH, halfW / aspect) * margin) / VIEW_SCALE;
+}
+
+// Wraps a raw mount so nothing can call api.win/api.lose after unmount,
+// hint() never throws, and (optionally) a lost round offers an in-place
+// "Try again" button instead of leaving a dead board on screen.
+function guardMount(rawMount, { retry = false } = {}) {
+  return function mount(container, difficulty, api) {
+    let cur = null;
+    function start() {
+      const inst = { alive: true };
+      const safeApi = Object.assign({}, api, {
+        win: (...args) => { if (inst.alive) { inst.alive = false; api.win(...args); } },
+        lose: (msg) => {
+          if (!inst.alive) return;
+          inst.alive = false;
+          api.lose(msg);
+          if (retry) showRetry(inst);
+        },
+      });
+      const res = rawMount(container, difficulty, safeApi);
+      cur = {
+        inst,
+        el: container.lastElementChild,
+        unmount: typeof res === 'function' ? res : (res && res.unmount) || (() => {}),
+        hint: res && typeof res === 'object' ? res.hint : null,
+      };
+    }
+    function stop() {
+      if (!cur) return;
+      const c = cur;
+      cur = null;
+      c.inst.alive = false;
+      try { c.unmount(); } catch (e) { console.warn(e); }
+    }
+    function showRetry(inst) {
+      if (!cur || cur.inst !== inst || !cur.el) return;
+      const host = cur.el.querySelector('.pc-canvas3d') || cur.el;
+      const box = document.createElement('div');
+      box.style.cssText = 'position:absolute;left:0;right:0;bottom:56px;display:flex;justify-content:center;z-index:6;pointer-events:none;';
+      box.innerHTML = '<button type="button" class="pc-btn pc-btn--green" style="pointer-events:auto;min-height:48px;">\u{1F501} Try again</button>';
+      box.querySelector('button').addEventListener('click', () => {
+        if (!cur || cur.inst !== inst) return;
+        api.sound.click();
+        stop();
+        start();
+      });
+      host.appendChild(box);
+    }
+    start();
+    return {
+      unmount: () => stop(),
+      hint: () => {
+        if (!cur || !cur.hint) return;
+        try { cur.hint(); } catch (e) { console.warn(e); }
+      },
+    };
+  };
+}
+
+// setTimeout that is cancelled in bulk on unmount.
+function makeTimers() {
+  const ids = new Set();
+  return {
+    later(fn, ms) {
+      const id = setTimeout(() => { ids.delete(id); fn(); }, ms);
+      ids.add(id);
+      return id;
+    },
+    clear() { ids.forEach(clearTimeout); ids.clear(); },
+  };
+}
+
 function mount(container, difficulty, api) {
   const cfg = CONFIG[difficulty];
   const size = cfg.size;
@@ -94,6 +178,7 @@ function mount(container, difficulty, api) {
   const enemyShotsAt = new Set(); // cells the player has fired at
   const ownShotsAt = new Set(); // cells the AI has fired at
   let finished = false, aiThinking = false, shots = 0;
+  const timers = makeTimers();
   const ai = makeAIController(size);
 
   const wrap = document.createElement('div');
@@ -103,9 +188,7 @@ function mount(container, difficulty, api) {
       <span id="bs-status">Your turn - fire at the enemy grid</span>
       <span class="bs-fleets">Enemy ships left: <span id="bs-enemy-left">${cfg.ships.length}</span> &middot; Your ships left: <span id="bs-own-left">${cfg.ships.length}</span></span>
     </div>
-    <div class="pc-canvas3d" id="bs-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Top grid = enemy waters. Bottom grid = your fleet.</span></div>
-    </div>
+    <div class="pc-canvas3d" id="bs-canvas"></div>
   `;
   container.appendChild(wrap);
   const canvasHost = wrap.querySelector('#bs-canvas');
@@ -114,14 +197,8 @@ function mount(container, difficulty, api) {
   const ownLeftEl = wrap.querySelector('#bs-own-left');
 
   const halfExt = boardHalfExtent(size);
-  const boardHalfHeight = size * CELL;
-  const totalHalfH = boardHalfHeight + GAP / 2 + 0.6;
-  const aspectMin = 0.46;
-  const distW = (halfExt + 0.6) / (0.42 * aspectMin);
-  const distH = totalHalfH / 0.42;
-  const distance = Math.max(distW, distH) * 1.05;
-
-  const stage = createStage(canvasHost, { distance });
+  const totalHalfH = size * CELL + GAP / 2 + 0.25;
+  const stage = createStage(canvasHost, { distance: fitDistance(canvasHost, halfExt, totalHalfH) });
 
   const enemyCenterY = (size * CELL) / 2 + GAP / 2;
   const ownCenterY = -((size * CELL) / 2 + GAP / 2);
@@ -148,6 +225,29 @@ function mount(container, difficulty, api) {
     }
     return cells;
   }
+
+  // Two labels in the gap between the grids say which grid is which.
+  function textPlane(text, color, w, h) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = Math.round(1024 * h / w);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = color;
+    let px = Math.round(canvas.height * 0.82);
+    ctx.font = `800 ${px}px 'Baloo 2', sans-serif`;
+    const tw = ctx.measureText(text).width;
+    if (tw > canvas.width * 0.96) { px = Math.floor(px * canvas.width * 0.96 / tw); ctx.font = `800 ${px}px 'Baloo 2', sans-serif`; }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2 + canvas.height * 0.04);
+    const tex = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }));
+    stage.world.add(plane);
+    return plane;
+  }
+  const labelW = size * CELL, labelH = Math.min(size * CELL / 9, GAP * 0.36);
+  textPlane('\u25B2 Enemy waters - tap to fire \u25B2', '#ffd93d', labelW, labelH).position.set(0, GAP * 0.24, 0.05);
+  textPlane('\u25BC Your fleet \u25BC', '#bfe3ff', labelW, labelH).position.set(0, -GAP * 0.24, 0.05);
 
   const enemyCells = buildBoard(enemyCenterY, false);
   const ownCells = buildBoard(ownCenterY, true);
@@ -198,10 +298,10 @@ function mount(container, difficulty, api) {
         statusEl.textContent = 'You sank the enemy fleet - victory!';
         api.ui.burstFromElement(canvasHost);
         const stars = shots <= size * 2.2 ? 3 : shots <= size * 3.2 ? 2 : 1;
-        setTimeout(() => api.win(stars, { shots }), 350);
+        timers.later(() => api.win(stars, { shots }), 350);
       } else {
         statusEl.textContent = 'Your fleet has been sunk.';
-        setTimeout(() => api.lose('the AI sank your whole fleet. Try again.'), 350);
+        timers.later(() => api.lose('the computer sank your whole fleet. Try again!'), 350);
       }
       return true;
     }
@@ -210,36 +310,53 @@ function mount(container, difficulty, api) {
 
   function aiTurn() {
     aiThinking = true;
-    statusEl.textContent = "AI is firing...";
-    setTimeout(() => {
+    statusEl.textContent = 'The computer is firing...';
+    timers.later(() => {
+      if (finished) return;
       const [r, c] = ai.nextShot();
       const result = fire(own, ownCells, r, c, ownShotsAt);
       ai.report(r, c, result.hit);
       api.sound[result.hit ? 'error' : 'move']();
       if (checkEnd()) { aiThinking = false; return; }
       aiThinking = false;
-      statusEl.textContent = result.hit ? 'The AI hit your ship! Your turn.' : 'The AI missed. Your turn.';
+      statusEl.textContent = result.sunk ? 'The computer sank one of your ships! Your turn.' : result.hit ? 'The computer hit your ship! Your turn.' : 'The computer missed. Your turn.';
     }, 550);
   }
 
+  // Map a tap to a cell on either grid (nearest cell, so gaps still count).
+  function cellAt(clientX, clientY) {
+    const p = stage.pickPlane(clientX, clientY, 0);
+    if (!p) return null;
+    const half = (size - 1) / 2;
+    const c = Math.round(p.x / CELL + half);
+    for (const [centerY, isOwn] of [[enemyCenterY, false], [ownCenterY, true]]) {
+      const r = Math.round(half - (p.y - centerY) / CELL);
+      if (r >= 0 && r < size && c >= 0 && c < size) return { r, c, isOwn };
+    }
+    return null;
+  }
+
   function onPointerDown(e) {
-    if (finished || aiThinking) return;
-    const hit = stage.pick(e.clientX, e.clientY, enemyCells.flat());
-    if (!hit) return;
-    const { r, c } = hit.object.userData;
-    if (enemyShotsAt.has(key(r, c))) { api.sound.error(); api.ui.shake(canvasHost); return; }
+    if (finished) return;
+    const cell = cellAt(e.clientX, e.clientY);
+    if (!cell) return;
+    if (aiThinking) { api.ui.toast('Hold on - the computer is firing.'); return; }
+    const { r, c, isOwn } = cell;
+    if (isOwn) { api.sound.error(); api.ui.toast('That is your fleet - fire at the top grid!'); return; }
+    if (enemyShotsAt.has(key(r, c))) { api.sound.error(); api.ui.shake(canvasHost); api.ui.toast('You already fired there - pick a new square.'); return; }
     shots++;
     const result = fire(enemy, enemyCells, r, c, enemyShotsAt);
     api.sound[result.hit ? 'match' : 'click']();
     if (result.sunk) api.ui.burstFromElement(canvasHost, { count: 16 });
     if (checkEnd()) return;
-    statusEl.textContent = result.hit ? 'Direct hit! AI is up next.' : 'Miss. AI is up next.';
+    statusEl.textContent = result.sunk ? 'You sank a ship!' : result.hit ? 'Direct hit!' : 'Miss.';
     aiTurn();
   }
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
   function hint() {
-    if (finished || aiThinking) return;
+    if (finished) return;
+    if (aiThinking) { api.ui.toast(`${api.playerName}, wait for the computer's shot first.`); return; }
     // deduce: prefer a cell adjacent to an existing unresolved hit on the enemy board
     let target = null;
     for (const ship of enemy.ships) {
@@ -263,6 +380,8 @@ function mount(container, difficulty, api) {
 
   return {
     unmount: () => {
+      finished = true;
+      timers.clear();
       stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       stage.dispose();
       wrap.remove();
@@ -271,4 +390,4 @@ function mount(container, difficulty, api) {
   };
 }
 
-PC.Games.register('battleship', { mount });
+PC.Games.register('battleship', { mount: guardMount(mount, { retry: true }) });

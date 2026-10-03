@@ -35,8 +35,36 @@ function buildPath(cols, rows) {
   return path;
 }
 
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.04, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
   const { cols, rows } = cfg;
   const path = buildPath(cols, rows);
   const pathSet = new Set(path.map(([r, c]) => r * cols + c));
@@ -55,7 +83,8 @@ function mount(container, difficulty, api) {
       <span>Wave <span id="td-wave">0</span>/${cfg.waves}</span>
     </div>
     <div class="pc-canvas3d" id="td-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Tap an open cell near the path to build (cost ${cfg.towerCost})</span></div>
+      <div class="pc-overlay-top"><span class="pc-chip td-banner" id="td-banner" hidden></span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Tap a dark square to build a tower (💰${cfg.towerCost})</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -63,11 +92,19 @@ function mount(container, difficulty, api) {
   const livesEl = wrap.querySelector('#td-lives');
   const budgetEl = wrap.querySelector('#td-budget');
   const waveEl = wrap.querySelector('#td-wave');
+  const bannerEl = wrap.querySelector('#td-banner');
+  // In-board messages (instead of page toasts, which sit over the header)
+  let bannerTimer = null;
+  function say(msg, ms = 1600) {
+    bannerEl.textContent = msg;
+    bannerEl.hidden = false;
+    if (bannerTimer) clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => { bannerTimer = null; if (alive) bannerEl.hidden = true; }, ms);
+  }
 
   const totalW = cols * CELL, totalH = rows * CELL;
-  const halfW = totalW / 2 + 0.6, halfH = totalH / 2 + 0.6;
-  const distance = Math.max(halfH / 0.42, halfW / (0.42 * 0.5));
-  const stage = createStage(canvasHost, { distance });
+  const halfW = totalW / 2 + 0.15, halfH = totalH / 2 + 0.15;
+  const stage = createStage(canvasHost, fitView(canvasHost, halfW, halfH, { reserveTop: 44, reserveBottom: 52 }));
 
   function cellPos(r, c) { return { x: (c - (cols - 1) / 2) * CELL, y: ((rows - 1) / 2 - r) * CELL }; }
 
@@ -85,8 +122,9 @@ function mount(container, difficulty, api) {
 
   function buildTower(r, c) {
     const key = r * cols + c;
-    if (pathSet.has(key) || towers.has(key)) return;
-    if (budget < cfg.towerCost) { api.ui.toast(`${api.playerName}, not enough coins yet!`); return; }
+    if (pathSet.has(key)) { api.sound.error(); api.ui.shake(canvasHost); say('Enemies walk there - pick a dark square'); return; }
+    if (towers.has(key)) { api.sound.error(); say('There is already a tower there'); return; }
+    if (budget < cfg.towerCost) { api.sound.error(); api.ui.shake(canvasHost); say(`Not enough coins yet - each tower costs ${cfg.towerCost}`); return; }
     budget -= cfg.towerCost;
     budgetEl.textContent = budget;
     const { x, y } = cellPos(r, c);
@@ -125,27 +163,35 @@ function mount(container, difficulty, api) {
     waveActive = true;
     enemiesToSpawn = 4 + wave;
     spawnTimer = 0;
-    api.ui.toast(`Wave ${wave} incoming!`);
+    say(`Wave ${wave} of ${cfg.waves} is coming!`);
   }
-  setTimeout(startWave, 900);
+  say('Build towers next to the path!', 2400);
+  later(startWave, 2600);
 
   function winGame() {
     finished = true;
     api.ui.burstFromElement(canvasHost);
     const stars = lives >= cfg.lives * 0.8 ? 3 : lives >= cfg.lives * 0.4 ? 2 : 1;
     api.sound.win();
-    setTimeout(() => api.win(stars, { lives }), 300);
+    later(() => api.win(stars, { lives }), 300);
   }
   function loseGame() {
     finished = true;
-    setTimeout(() => api.lose('your base was overrun! Try again.'), 250);
+    later(() => {
+      api.lose('your base was overrun! Try again.');
+      const over = document.createElement('div');
+      over.className = 'td-over';
+      over.innerHTML = `<div>Too many got through on wave ${wave}.</div><button class="pc-btn pc-btn--blue">Try again</button>`;
+      over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+      canvasHost.appendChild(over);
+    }, 250);
   }
 
   let lastTime = performance.now();
   const unsubTick = stage.onTick(() => {
     if (finished) return;
     const now = performance.now();
-    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
     lastTime = now;
 
     if (waveActive && enemiesToSpawn > 0) {
@@ -204,32 +250,39 @@ function mount(container, difficulty, api) {
       budget += 2;
       budgetEl.textContent = budget;
       if (wave >= cfg.waves) { winGame(); return; }
-      setTimeout(startWave, 1400);
+      say(wave + 1 < cfg.waves ? 'Wave cleared! +2 coins' : 'Last wave next! +2 coins');
+      later(startWave, 1800);
     }
   });
 
+  // Hint: the free square whose tower would cover the most path squares.
   function hint() {
     if (finished) return;
-    // find first path cell without an adjacent tower, suggest an open neighbor
-    for (const [r, c] of path) {
-      const neighbors = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
-      for (const [nr, nc] of neighbors) {
-        if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-        const key = nr * cols + nc;
-        if (!pathSet.has(key) && !towers.has(key)) {
-          const mesh = cellMeshes.get(key);
-          tween(mesh.material, { emissiveIntensity: 0.7 }, 150, Easing.outCubic, () => tween(mesh.material, { emissiveIntensity: 0 }, 500));
-          api.ui.toast(`${api.playerName}, that glowing cell covers the path well!`);
-          return;
-        }
-      }
+    let best = null, bestCover = 0;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const key = r * cols + c;
+      if (pathSet.has(key) || towers.has(key)) continue;
+      const { x, y } = cellPos(r, c);
+      const cover = pathWorld.filter((p) => Math.hypot(p.x - x, p.y - y) <= TOWER_RANGE).length;
+      if (cover > bestCover) { bestCover = cover; best = { r, c, x, y }; }
     }
-    api.ui.toast(`${api.playerName}, you've covered the path nicely already!`);
+    if (!best) { say('Every good square already has a tower!'); return; }
+    const mesh = cellMeshes.get(best.r * cols + best.c);
+    mesh.material.emissive.set(0xffd93d);
+    tween(mesh.material, { emissiveIntensity: 0.8 }, 150, Easing.outCubic, () => tween(mesh.material, { emissiveIntensity: 0 }, 900));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(TOWER_RANGE - 0.05, TOWER_RANGE, 40), new THREE.MeshBasicMaterial({ color: 0xffd93d, transparent: true, opacity: 0.7, toneMapped: false }));
+    ring.position.set(best.x, best.y, 0.12);
+    stage.world.add(ring);
+    tween(ring.material, { opacity: 0 }, 1600, Easing.inOutQuad, () => { if (!alive) return; stage.world.remove(ring); ring.geometry.dispose(); ring.material.dispose(); });
+    say(budget >= cfg.towerCost ? 'Build on the glowing square - it guards lots of path' : `Save up ${cfg.towerCost} coins, then build on the glowing square`, 2200);
   }
 
   return {
     unmount: () => {
+      alive = false;
       finished = true;
+      timers.forEach(clearTimeout); timers.clear();
+      if (bannerTimer) clearTimeout(bannerTimer);
       unsubTick();
       stage.renderer.domElement.removeEventListener('pointerdown', onCanvasTap);
       stage.dispose();

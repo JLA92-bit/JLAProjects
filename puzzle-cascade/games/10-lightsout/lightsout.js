@@ -13,10 +13,47 @@ const CONFIG = {
 const CELL = 0.98;
 const ON_COLOR = 0xffd93d;
 const OFF_COLOR = 0x2b0f5c;
+const ON_GLOW = 0.2;
+
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
+
 
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
   const size = cfg.size;
+  const life = lifecycle();
   let lights = Array.from({ length: size }, () => Array(size).fill(false));
   let moves = 0, finished = false;
 
@@ -25,7 +62,7 @@ function mount(container, difficulty, api) {
   wrap.innerHTML = `
     <div class="lo-meta">Moves: <span id="lo-moves">0</span></div>
     <div class="pc-canvas3d" id="lo-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Tap a light - it flips itself and its neighbors</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Tap to flip a light and its neighbors</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -33,6 +70,7 @@ function mount(container, difficulty, api) {
   const movesEl = wrap.querySelector('#lo-moves');
 
   const stage = createStage(canvasHost, { distance: size * 1.9 });
+  fitBoard(stage, canvasHost, size * CELL, size * CELL, { bottom: 50 });
   const half = (size - 1) / 2;
   function cellXY(r, c) { return { x: (c - half) * CELL, y: (half - r) * CELL }; }
 
@@ -42,6 +80,7 @@ function mount(container, difficulty, api) {
     for (let c = 0; c < size; c++) {
       const { x, y } = cellXY(r, c);
       const mesh = makeTile({ w: 0.86, h: 0.86, depth: 0.22, radius: 0.16, color: OFF_COLOR, emissive: OFF_COLOR, emissiveIntensity: 0 });
+      mesh.material.envMapIntensity = 0.35;
       mesh.position.set(x, y, 0);
       mesh.userData = { r, c };
       stage.world.add(mesh);
@@ -57,11 +96,12 @@ function mount(container, difficulty, api) {
     const mesh = meshes[r][c];
     const on = lights[r][c];
     mesh.material.color.set(on ? ON_COLOR : OFF_COLOR);
+    mesh.material.emissive.set(on ? ON_COLOR : OFF_COLOR);
     if (animate) {
-      tween(mesh.material, { emissiveIntensity: on ? 0.85 : 0 }, 160, Easing.outCubic);
+      tween(mesh.material, { emissiveIntensity: on ? ON_GLOW : 0 }, 160, Easing.outCubic);
       tween(mesh.scale, { x: on ? 1.06 : 1, y: on ? 1.06 : 1, z: on ? 1.06 : 1 }, 160, Easing.outBack);
     } else {
-      mesh.material.emissiveIntensity = on ? 0.85 : 0;
+      mesh.material.emissiveIntensity = on ? ON_GLOW : 0;
     }
   }
 
@@ -79,34 +119,42 @@ function mount(container, difficulty, api) {
     }
   }
 
-  // scramble from an all-off board using real presses so it's always solvable
-  for (let i = 0; i < cfg.scramble; i++) {
-    press(Math.floor(Math.random() * size), Math.floor(Math.random() * size), false);
-  }
-  // sync visuals without animation for the initial state
+  // Scramble from an all-off board using real presses on distinct cells, so
+  // it's always solvable in at most cfg.scramble taps.
+  do {
+    lights = Array.from({ length: size }, () => Array(size).fill(false));
+    const cells = Array.from({ length: size * size }, (_, i) => i).sort(() => Math.random() - 0.5).slice(0, cfg.scramble);
+    cells.forEach((i) => {
+      const r = Math.floor(i / size), c = i % size;
+      [[r, c], [r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].forEach(([rr, cc]) => {
+        if (rr >= 0 && rr < size && cc >= 0 && cc < size) lights[rr][cc] = !lights[rr][cc];
+      });
+    });
+  } while (lights.every((row) => row.every((v) => !v)));
   for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) {
     const on = lights[r][c];
     meshes[r][c].material.color.set(on ? ON_COLOR : OFF_COLOR);
-    meshes[r][c].material.emissiveIntensity = on ? 0.85 : 0;
+    meshes[r][c].material.emissive.set(on ? ON_COLOR : OFF_COLOR);
+    meshes[r][c].material.emissiveIntensity = on ? ON_GLOW : 0;
   }
 
   function checkWin() {
     const allOff = lights.every((row) => row.every((v) => !v));
     if (allOff) {
       finished = true;
-      const threshold3 = cfg.scramble * 1.2, threshold2 = cfg.scramble * 2;
+      const threshold3 = Math.ceil(cfg.scramble * 1.5), threshold2 = cfg.scramble * 3;
       const stars = moves <= threshold3 ? 3 : moves <= threshold2 ? 2 : 1;
       api.ui.burstFromElement(canvasHost);
-      setTimeout(() => api.win(stars, { moves }), 250);
+      life.later(() => api.win(stars, { moves }), 250);
     }
   }
 
   function onPointerDown(e) {
     if (finished) return;
-    const flat = meshes.flat();
-    const hit = stage.pick(e.clientX, e.clientY, flat);
-    if (!hit) return;
-    const { r, c } = hit.object.userData;
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (!pt) return;
+    const c = Math.round(pt.x / CELL + half), r = Math.round(half - pt.y / CELL);
+    if (r < 0 || r >= size || c < 0 || c >= size) return;
     press(r, c, true);
   }
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
@@ -149,7 +197,7 @@ function mount(container, difficulty, api) {
   }
 
   function hint() {
-    if (finished) return;
+    if (finished) { api.ui.toast(`${api.playerName}, every light is off!`); return; }
     const x = solve();
     const idx = x.findIndex((v) => v === 1);
     if (idx === -1) return;
@@ -160,14 +208,18 @@ function mount(container, difficulty, api) {
     api.ui.toast(`${api.playerName}, try that glowing light!`);
   }
 
-  return {
-    unmount: () => {
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('lightsout', { mount });

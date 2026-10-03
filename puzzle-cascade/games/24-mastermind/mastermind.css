@@ -1,24 +1,31 @@
 .mm-meta {
   color: #fff; font-weight: 700; font-family: var(--pc-font-display);
-  text-align: center; font-size: 0.95rem;
+  text-align: center; font-size: 0.9rem; flex: 0 0 auto;
+  min-height: 2.5em; display: flex; align-items: center; justify-content: center;
+  flex-wrap: wrap; gap: 0 4px; line-height: 1.25;
+}
+.mm-dot {
+  display: inline-block; width: 16px; height: 16px; border-radius: 50%;
+  margin: 0 2px; vertical-align: middle; box-shadow: 0 0 0 2px rgba(255,255,255,0.7);
 }
 .mm-palette {
-  display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
-  flex: 0 0 auto; padding: 4px 0;
+  display: grid; gap: 6px 8px; justify-content: center;
+  flex: 0 0 auto; padding: 2px 0;
 }
 .mm-swatch {
-  width: 38px; height: 38px; border-radius: 50%;
+  width: 46px; height: 46px; border-radius: 50%; padding: 0;
   border: 3px solid rgba(255,255,255,0.35);
   box-shadow: 0 3px 0 rgba(0,0,0,0.2);
   transition: transform 0.1s ease;
 }
 .mm-swatch.is-selected {
   border-color: #fff;
-  transform: scale(1.15);
   box-shadow: 0 0 0 3px rgba(255,255,255,0.5), 0 3px 0 rgba(0,0,0,0.2);
 }
+.mm-swatch:active { transform: scale(0.92); }
 .mm-submit {
   flex: 0 0 auto;
   align-self: center;
+  min-height: 48px; padding: 8px 24px; margin-bottom: 8px;
 }
-.mm-submit:disabled { opacity: 0.5; }
+.mm-submit:disabled { opacity: 0.45; }

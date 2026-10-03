@@ -1,9 +1,11 @@
 .rv-meta {
   display: flex; gap: 16px; align-items: center; justify-content: center;
   color: #fff; font-weight: 700; font-family: var(--pc-font-display);
-  flex-wrap: wrap; text-align: center;
+  flex-wrap: wrap; text-align: center; min-height: 1.6em; flex: 0 0 auto;
 }
 .rv-score { display: flex; align-items: center; gap: 6px; }
 .rv-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-.rv-dot--you { background: #241436; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); }
-.rv-dot--ai { background: #fffaf2; }
+.rv-dot--you { background: #fffaf2; }
+.rv-dot--ai { background: #241436; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); }
+.rv-meta { gap: 2px 18px; }
+#rv-status { order: 3; flex-basis: 100%; font-size: 0.9rem; color: #ffd93d; }

@@ -19,8 +19,36 @@ const VIEW_LEN = 10;
 const PLAYER_Y = -VIEW_LEN / 2 + 1.4;
 const SPAWN_Y = VIEW_LEN / 2 + 0.6;
 
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.04, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
   let lane = 1, distance = 0, lives = cfg.lives, finished = false, invuln = 0;
 
   const wrap = document.createElement('div');
@@ -28,11 +56,11 @@ function mount(container, difficulty, api) {
   wrap.innerHTML = `
     <div class="rn-meta"><span>Lives: <span id="rn-lives">${lives}</span></span><span>Dist: <span id="rn-dist">0</span>/${cfg.targetDistance}m</span></div>
     <div class="pc-canvas3d" id="rn-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Tap left/right (or buttons) to switch lanes</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Tap left or right side to change lanes</span></div>
     </div>
     <div class="rn-controls">
-      <div class="rn-btn" data-dir="-1">⬅️</div>
-      <div class="rn-btn" data-dir="1">➡️</div>
+      <div class="rn-btn" role="button" aria-label="Left lane" data-dir="-1">⬅️</div>
+      <div class="rn-btn" role="button" aria-label="Right lane" data-dir="1">➡️</div>
     </div>
   `;
   container.appendChild(wrap);
@@ -41,9 +69,8 @@ function mount(container, difficulty, api) {
   const distEl = wrap.querySelector('#rn-dist');
 
   const totalW = LANE_W * 3, totalH = VIEW_LEN;
-  const halfW = totalW / 2 + 0.6, halfH = totalH / 2 + 0.6;
-  const distanceCam = Math.max(halfH / 0.42, halfW / (0.42 * 0.5));
-  const stage = createStage(canvasHost, { distance: distanceCam });
+  const halfW = totalW / 2 + 0.35, halfH = totalH / 2 + 0.1;
+  const stage = createStage(canvasHost, fitView(canvasHost, halfW, halfH, { reserveBottom: 46 }));
 
   // track
   const trackMat = new THREE.MeshStandardMaterial({ color: 0x24123f, roughness: 0.7 });
@@ -84,7 +111,9 @@ function mount(container, difficulty, api) {
 
   function moveLane(d) {
     if (finished) return;
-    lane = Math.max(0, Math.min(2, lane + d));
+    const next = Math.max(0, Math.min(2, lane + d));
+    if (next === lane) { tween(playerMesh.position, { x: LANES[lane] + d * 0.15 }, 70, Easing.outCubic, () => tween(playerMesh.position, { x: LANES[lane] }, 90, Easing.outCubic)); return; }
+    lane = next;
     tween(playerMesh.position, { x: LANES[lane] }, 140, Easing.outCubic);
     api.sound.move();
   }
@@ -94,6 +123,7 @@ function mount(container, difficulty, api) {
   const el = stage.renderer.domElement;
   function onTap(e) {
     if (finished) return;
+    e.preventDefault();
     const rect = el.getBoundingClientRect();
     const relX = (e.clientX - rect.left) / rect.width;
     moveLane(relX < 0.5 ? -1 : 1);
@@ -114,7 +144,14 @@ function mount(container, difficulty, api) {
     tween(playerMesh.material, { emissiveIntensity: 0.9 }, 100, Easing.outCubic, () => tween(playerMesh.material, { emissiveIntensity: 0.15 }, 400));
     if (lives <= 0) {
       finished = true;
-      setTimeout(() => api.lose('you crashed! Try again.'), 250);
+      later(() => {
+        api.lose('you crashed! Try again.');
+        const over = document.createElement('div');
+        over.className = 'rn-over';
+        over.innerHTML = `<div>Out of lives!<br>You ran ${Math.floor(distance)}m of ${cfg.targetDistance}m.</div><button class="pc-btn pc-btn--blue">Try again</button>`;
+        over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+        canvasHost.appendChild(over);
+      }, 250);
     }
   }
 
@@ -123,15 +160,16 @@ function mount(container, difficulty, api) {
     api.ui.burstFromElement(canvasHost);
     const stars = lives >= cfg.lives ? 3 : lives >= Math.ceil(cfg.lives / 2) ? 2 : 1;
     api.sound.win();
-    setTimeout(() => api.win(stars, { lives }), 300);
+    later(() => api.win(stars, { lives }), 300);
   }
 
+  // real frame time, clamped so a long pause never jumps obstacles forward
   let lastTime = performance.now();
   const unsubTick = stage.onTick(() => {
-    if (finished) return;
     const now = performance.now();
-    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
     lastTime = now;
+    if (finished) return;
     if (invuln > 0) invuln -= dt * 1000;
 
     distance += cfg.speed * dt * 4;
@@ -168,13 +206,20 @@ function mount(container, difficulty, api) {
     const dangerLanes = new Set(upcoming.slice(0, 2).map((o) => o.lane));
     const safeLane = [0, 1, 2].find((l) => !dangerLanes.has(l));
     if (safeLane === undefined) { api.ui.toast(`${api.playerName}, all lanes are tight - time it carefully!`); return; }
-    api.ui.toast(`${api.playerName}, head to lane ${safeLane + 1} to stay safe!`);
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(LANE_W * 0.95, VIEW_LEN), new THREE.MeshBasicMaterial({ color: 0x23d18b, transparent: true, opacity: 0.35, toneMapped: false }));
+    glow.position.set(LANES[safeLane], 0, -0.12);
+    stage.world.add(glow);
+    tween(glow.material, { opacity: 0 }, 1400, Easing.inOutQuad, () => { if (!alive) return; stage.world.remove(glow); glow.geometry.dispose(); glow.material.dispose(); });
+    const where = safeLane === lane ? 'stay in your lane - the green one is safe' : `move ${safeLane < lane ? 'left' : 'right'} to the green lane`;
+    api.ui.toast(`${api.playerName}, ${where}!`);
     tween(playerMesh.material, { emissiveIntensity: 0.8 }, 150, Easing.outCubic, () => tween(playerMesh.material, { emissiveIntensity: 0.15 }, 500));
   }
 
   return {
     unmount: () => {
+      alive = false;
       finished = true;
+      timers.forEach(clearTimeout); timers.clear();
       unsubTick();
       el.removeEventListener('pointerdown', onTap);
       window.removeEventListener('keydown', onKey);

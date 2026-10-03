@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { createStage, makeTile, tween, popIn, Easing, PALETTE } from '../../shared/js/three-stage.js';
 
 const CONFIG = {
-  easy: { rows: 3, cols: 6, speed: 3.6, paddleW: 1.7, lives: 4 },
+  easy: { rows: 3, cols: 6, speed: 3.4, paddleW: 1.8, lives: 5 },
   medium: { rows: 4, cols: 7, speed: 4.6, paddleW: 1.4, lives: 3 },
   hard: { rows: 5, cols: 8, speed: 5.8, paddleW: 1.1, lives: 3 },
 };
@@ -17,30 +17,116 @@ const BALL_R = 0.16;
 const PADDLE_H = 0.32;
 const BRICK_TOP = HALF_H - 0.8;
 
+/* ---------- lifecycle + framing helpers (kept local so this file stays self-contained) ---------- */
+
+// World half-height per unit of stage distance (matches three-stage.js).
+const VIEW_SCALE = 0.42;
+
+// Pick a camera distance that fits a board of the given world half-extents
+// into the canvas's real aspect ratio, with a safety margin so a later
+// resize (address bar, rotated phone, wrapped status text) never crops it.
+function fitDistance(host, halfW, halfH, margin = 1.08) {
+  const w = host.clientWidth || 340, h = host.clientHeight || 520;
+  const aspect = Math.max(0.35, Math.min(2.2, w / h));
+  return (Math.max(halfH, halfW / aspect) * margin) / VIEW_SCALE;
+}
+
+// Wraps a raw mount so nothing can call api.win/api.lose after unmount,
+// hint() never throws, and (optionally) a lost round offers an in-place
+// "Try again" button instead of leaving a dead board on screen.
+function guardMount(rawMount, { retry = false } = {}) {
+  return function mount(container, difficulty, api) {
+    let cur = null;
+    function start() {
+      const inst = { alive: true };
+      const safeApi = Object.assign({}, api, {
+        win: (...args) => { if (inst.alive) { inst.alive = false; api.win(...args); } },
+        lose: (msg) => {
+          if (!inst.alive) return;
+          inst.alive = false;
+          api.lose(msg);
+          if (retry) showRetry(inst);
+        },
+      });
+      const res = rawMount(container, difficulty, safeApi);
+      cur = {
+        inst,
+        el: container.lastElementChild,
+        unmount: typeof res === 'function' ? res : (res && res.unmount) || (() => {}),
+        hint: res && typeof res === 'object' ? res.hint : null,
+      };
+    }
+    function stop() {
+      if (!cur) return;
+      const c = cur;
+      cur = null;
+      c.inst.alive = false;
+      try { c.unmount(); } catch (e) { console.warn(e); }
+    }
+    function showRetry(inst) {
+      if (!cur || cur.inst !== inst || !cur.el) return;
+      const host = cur.el.querySelector('.pc-canvas3d') || cur.el;
+      const box = document.createElement('div');
+      box.style.cssText = 'position:absolute;left:0;right:0;bottom:56px;display:flex;justify-content:center;z-index:6;pointer-events:none;';
+      box.innerHTML = '<button type="button" class="pc-btn pc-btn--green" style="pointer-events:auto;min-height:48px;">\u{1F501} Try again</button>';
+      box.querySelector('button').addEventListener('click', () => {
+        if (!cur || cur.inst !== inst) return;
+        api.sound.click();
+        stop();
+        start();
+      });
+      host.appendChild(box);
+    }
+    start();
+    return {
+      unmount: () => stop(),
+      hint: () => {
+        if (!cur || !cur.hint) return;
+        try { cur.hint(); } catch (e) { console.warn(e); }
+      },
+    };
+  };
+}
+
+// setTimeout that is cancelled in bulk on unmount.
+function makeTimers() {
+  const ids = new Set();
+  return {
+    later(fn, ms) {
+      const id = setTimeout(() => { ids.delete(id); fn(); }, ms);
+      ids.add(id);
+      return id;
+    },
+    clear() { ids.forEach(clearTimeout); ids.clear(); },
+  };
+}
+
 function mount(container, difficulty, api) {
   const cfg = CONFIG[difficulty];
   let lives = cfg.lives, finished = false, launched = false;
   let bricksLeft = cfg.rows * cfg.cols;
   const totalBricks = bricksLeft;
+  const timers = makeTimers();
 
   const wrap = document.createElement('div');
   wrap.className = 'pc-stage-inner';
   wrap.innerHTML = `
     <div class="bo-meta"><span>Lives: <span id="bo-lives">${lives}</span></span><span>Bricks: <span id="bo-bricks">${bricksLeft}</span></span></div>
     <div class="pc-canvas3d" id="bo-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Drag the paddle, or use arrows - tap to launch</span></div>
+      <div class="bo-tip" id="bo-tip"><span class="pc-chip">Tap to launch, then drag to move the paddle</span></div>
     </div>
     <div class="bo-controls" id="bo-controls">
-      <div class="bo-btn bo-btn--left" data-dir="-1">⬅️</div>
-      <div class="bo-btn bo-btn--right" data-dir="1">➡️</div>
+      <button type="button" class="bo-btn bo-btn--left" data-dir="-1" aria-label="Left">\u2B05\uFE0F</button>
+      <button type="button" class="bo-btn bo-btn--right" data-dir="1" aria-label="Right">\u27A1\uFE0F</button>
     </div>
   `;
   container.appendChild(wrap);
   const canvasHost = wrap.querySelector('#bo-canvas');
   const livesEl = wrap.querySelector('#bo-lives');
   const bricksEl = wrap.querySelector('#bo-bricks');
+  const tipEl = wrap.querySelector('#bo-tip');
 
-  const stage = createStage(canvasHost, { distance: HALF_H / 0.42 });
+  const stage = createStage(canvasHost, { distance: fitDistance(canvasHost, HALF_W + 0.35, HALF_H + 0.35, 1.04) });
 
   // side walls (visual)
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x3f2a7c, roughness: 0.6 });
@@ -95,6 +181,7 @@ function mount(container, difficulty, api) {
   function launchBall() {
     if (launched || finished) return;
     launched = true;
+    tipEl.hidden = true;
     const angle = (Math.random() * 0.5 - 0.25) + Math.PI / 2; // mostly upward
     ball.vx = Math.cos(angle) * cfg.speed * 0.6;
     ball.vy = Math.sin(angle) * cfg.speed;
@@ -111,15 +198,23 @@ function mount(container, difficulty, api) {
     const world = stage.pickPlane(e.clientX, e.clientY, 0);
     if (world) movePaddleTo(world.x);
   }
-  let dragging = false;
-  stage.renderer.domElement.addEventListener('pointerdown', (e) => {
-    dragging = true;
+  // The paddle follows your finger anywhere on the board (pointer capture
+  // keeps the drag alive even if the finger slides off the canvas).
+  const canvas = stage.renderer.domElement;
+  let dragId = null;
+  function onDown(e) {
+    if (finished) return;
+    dragId = e.pointerId;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     onPointerMove(e);
     if (!launched) launchBall();
-  });
-  stage.renderer.domElement.addEventListener('pointermove', (e) => { if (dragging) onPointerMove(e); });
-  function onPointerUp() { dragging = false; }
-  window.addEventListener('pointerup', onPointerUp);
+  }
+  function onMove(e) { if (dragId === e.pointerId && !finished) onPointerMove(e); }
+  function onPointerUp(e) { if (e.pointerId === dragId) dragId = null; }
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
 
   let keyDir = 0;
   function onKey(e) {
@@ -135,9 +230,16 @@ function mount(container, difficulty, api) {
 
   wrap.querySelectorAll('.bo-btn').forEach((btn) => {
     const dir = Number(btn.dataset.dir);
-    btn.addEventListener('pointerdown', () => { keyDir = dir; if (!launched) launchBall(); });
-    btn.addEventListener('pointerup', () => { keyDir = 0; });
-    btn.addEventListener('pointerleave', () => { keyDir = 0; });
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      keyDir = dir;
+      try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      if (!launched) launchBall();
+    });
+    const stop = () => { if (keyDir === dir) keyDir = 0; };
+    btn.addEventListener('pointerup', stop);
+    btn.addEventListener('pointercancel', stop);
+    btn.addEventListener('lostpointercapture', stop);
   });
 
   let lastTime = performance.now();
@@ -160,9 +262,9 @@ function mount(container, difficulty, api) {
 
     // paddle collision
     if (ball.vy < 0 && ball.y - BALL_R < PADDLE_Y + PADDLE_H / 2 && ball.y + BALL_R > PADDLE_Y - PADDLE_H / 2 &&
-        ball.x > paddleX - cfg.paddleW / 2 - BALL_R && ball.x < paddleX + cfg.paddleW / 2 + BALL_R) {
+        ball.x > paddleX - cfg.paddleW / 2 - BALL_R - 0.08 && ball.x < paddleX + cfg.paddleW / 2 + BALL_R + 0.08) {
       ball.y = PADDLE_Y + PADDLE_H / 2 + BALL_R;
-      const offset = (ball.x - paddleX) / (cfg.paddleW / 2);
+      const offset = Math.max(-1, Math.min(1, (ball.x - paddleX) / (cfg.paddleW / 2)));
       const speed = Math.hypot(ball.vx, ball.vy);
       const angle = Math.PI / 2 + offset * 0.9;
       ball.vx = Math.cos(angle) * speed;
@@ -197,6 +299,8 @@ function mount(container, difficulty, api) {
       api.ui.shake(canvasHost);
       if (lives <= 0) { loseGame(); return; }
       resetBall(true);
+      tipEl.hidden = false;
+      tipEl.firstElementChild.textContent = lives === 1 ? 'Last ball! Tap to launch' : `${lives} balls left - tap to launch`;
       return;
     }
 
@@ -208,11 +312,11 @@ function mount(container, difficulty, api) {
     finished = true;
     api.ui.burstFromElement(canvasHost);
     const stars = lives >= cfg.lives ? 3 : lives >= Math.ceil(cfg.lives / 2) ? 2 : 1;
-    setTimeout(() => api.win(stars, { lives }), 300);
+    timers.later(() => api.win(stars, { lives }), 300);
   }
   function loseGame() {
     finished = true;
-    setTimeout(() => api.lose('you ran out of lives! Try again.'), 250);
+    timers.later(() => api.lose('you ran out of lives! Try again.'), 250);
   }
 
   function hint() {
@@ -236,9 +340,13 @@ function mount(container, difficulty, api) {
     unmount: () => {
       finished = true;
       unsubTick();
+      timers.clear();
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
       stage.dispose();
       wrap.remove();
     },
@@ -246,4 +354,4 @@ function mount(container, difficulty, api) {
   };
 }
 
-PC.Games.register('breakout', { mount });
+PC.Games.register('breakout', { mount: guardMount(mount, { retry: true }) });

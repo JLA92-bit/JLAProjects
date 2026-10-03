@@ -36,8 +36,41 @@ function pickWords(cfg) {
   return shuffle(candidates).slice(0, cfg.wordCount);
 }
 
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.08, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
+// Long words split their loose letters over two rows so every letter tile
+// stays big enough to tap comfortably.
+function lettersPerRow(len) { return len <= 5 ? len : Math.ceil(len / 2); }
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
+  const startTime = performance.now();
   const words = pickWords(cfg);
   let wordIdx = 0, mistakes = 0, finished = false;
   const maxLen = Math.max(...words.map((w) => w.length));
@@ -51,9 +84,9 @@ function mount(container, difficulty, api) {
       <span>Mistakes: <span id="an-mistakes">0</span></span>
     </div>
     <div class="pc-canvas3d" id="an-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Tap letters in order to spell the word</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Tap letters in order. Tap a placed letter to undo.</span></div>
     </div>
-    <div class="an-clue" id="an-clue"></div>
+    <div class="an-clue" id="an-clue">&nbsp;</div>
   `;
   container.appendChild(wrap);
   const canvasHost = wrap.querySelector('#an-canvas');
@@ -62,17 +95,17 @@ function mount(container, difficulty, api) {
   const timerEl = wrap.querySelector('#an-timer');
   const clueEl = wrap.querySelector('#an-clue');
 
-  const TILE = 0.86, GAP = 0.14;
-  const totalWidthUnits = maxLen * (TILE + GAP);
-  // Two stacked rows (answer slots + scrambled letters) centered on y=0:
-  // each row is TILE tall, offset +/-0.95, so the content's vertical
-  // half-extent is 0.95 + TILE/2. Fit both width and height so the board
-  // fills the canvas without being cropped on a narrow phone viewport.
-  const aspectMin = 0.46;
-  const halfContentW = totalWidthUnits / 2 + 0.5;
-  const halfContentH = 0.95 + TILE / 2 + 0.3;
-  const distance = Math.max(halfContentW / (0.42 * aspectMin), halfContentH / 0.42) * 1.1;
-  const stage = createStage(canvasHost, { distance: Math.max(distance, 6) });
+  const TILE = 1.0, GAP = 0.14;   // loose letter tiles
+  const SLOT = 0.74, SLOT_GAP = 0.08; // answer slots (smaller: display + undo)
+  const SLOT_Y = 1.05;
+  const LETTER_TOP_Y = -0.35;
+  const maxRows = Math.ceil(maxLen / lettersPerRow(maxLen));
+  const halfContentW = Math.max(maxLen * (SLOT + SLOT_GAP), lettersPerRow(maxLen) * (TILE + GAP)) / 2 + 0.2;
+  const contentTop = SLOT_Y + SLOT / 2;
+  const contentBottom = LETTER_TOP_Y - (maxRows - 1) * (TILE + GAP) - TILE / 2;
+  const halfContentH = Math.max(contentTop, -contentBottom) + 0.3;
+  const view = fitView(canvasHost, halfContentW, halfContentH, { reserveBottom: 50 });
+  const stage = createStage(canvasHost, { ...view, distance: Math.max(view.distance, 6) });
 
   const slotGroup = new THREE.Group();
   const letterGroup = new THREE.Group();
@@ -88,16 +121,27 @@ function mount(container, difficulty, api) {
   function clearGroup(group) {
     while (group.children.length) {
       const c = group.children.pop();
-      c.geometry && c.geometry.dispose();
-      c.material && c.material.dispose();
+      c.traverse((n) => {
+        if (n.geometry) n.geometry.dispose();
+        if (n.material) { if (n.material.map) n.material.map.dispose(); n.material.dispose(); }
+      });
       group.remove(c);
     }
   }
 
-  function layoutRow(count, y) {
-    const w = count * (TILE + GAP) - GAP;
-    const startX = -w / 2 + TILE / 2;
-    return Array.from({ length: count }, (_, i) => ({ x: startX + i * (TILE + GAP), y }));
+  function layoutRow(count, y, size, gap) {
+    const w = count * (size + gap) - gap;
+    const startX = -w / 2 + size / 2;
+    return Array.from({ length: count }, (_, i) => ({ x: startX + i * (size + gap), y }));
+  }
+  function layoutLetters(count) {
+    const per = lettersPerRow(count);
+    const out = [];
+    for (let r = 0; r * per < count; r++) {
+      const n = Math.min(per, count - r * per);
+      out.push(...layoutRow(n, LETTER_TOP_Y - r * (TILE + GAP), TILE, GAP));
+    }
+    return out;
   }
 
   function loadWord() {
@@ -107,16 +151,16 @@ function mount(container, difficulty, api) {
     answer = [];
     clueEl.textContent = `${currentWord.length}-letter word`;
 
-    const slotPos = layoutRow(currentWord.length, 0.95);
+    const slotPos = layoutRow(currentWord.length, SLOT_Y, SLOT, SLOT_GAP);
     slotMeshes = slotPos.map((p) => {
-      const mesh = makeTile({ w: TILE, h: TILE, depth: 0.2, radius: 0.14, color: 0x2b0f5c, emissive: 0x2b0f5c, emissiveIntensity: 0 });
+      const mesh = makeTile({ w: SLOT, h: SLOT, depth: 0.16, radius: 0.12, color: 0x2b0f5c, emissive: 0x23d18b, emissiveIntensity: 0 });
       mesh.position.set(p.x, p.y, 0);
       slotGroup.add(mesh);
       popIn(mesh, { duration: 200 });
       return { mesh, filled: null };
     });
 
-    const letterPos = layoutRow(scrambled.length, -0.95);
+    const letterPos = layoutLetters(scrambled.length);
     letterMeshes = scrambled.map((ch, i) => {
       const mesh = makeTile({ w: TILE, h: TILE, depth: 0.24, radius: 0.16, color: PALETTE[i % PALETTE.length] });
       mesh.position.set(letterPos[i].x, letterPos[i].y, 0);
@@ -144,11 +188,13 @@ function mount(container, difficulty, api) {
     answer.push(i);
     const slot = slotMeshes[slotIdx];
     slot.filled = i;
-    tween(mesh.position, { x: slot.mesh.position.x, y: slot.mesh.position.y, z: 0.05 }, 220, Easing.outCubic);
-    tween(mesh.scale, { x: 0.82, y: 0.82, z: 0.82 }, 220, Easing.outCubic);
+    const k = (SLOT * 0.96) / TILE;
+    tween(mesh.position, { x: slot.mesh.position.x, y: slot.mesh.position.y, z: 0.12 }, 220, Easing.outCubic);
+    tween(mesh.scale, { x: k, y: k, z: k }, 220, Easing.outCubic);
     api.sound.click();
     if (answer.length === currentWord.length) {
-      setTimeout(checkWord, 260);
+      checking = true;
+      later(checkWord, 260);
     }
   }
 
@@ -163,7 +209,9 @@ function mount(container, difficulty, api) {
     slotMeshes.forEach((s) => { s.filled = null; });
   }
 
+  let checking = false;
   function checkWord() {
+    checking = false;
     const spelled = answer.map((i) => scrambled[i]).join('');
     if (spelled === currentWord) {
       api.sound.win();
@@ -173,35 +221,24 @@ function mount(container, difficulty, api) {
       api.ui.burstFromElement(canvasHost);
       wordIdx++;
       updateHud();
+      checking = true; // block taps until the next word is in
       if (wordIdx >= words.length) {
-        setTimeout(winGame, 400);
+        later(winGame, 400);
       } else {
-        setTimeout(loadWord, 500);
+        later(() => { checking = false; loadWord(); }, 500);
       }
     } else {
       mistakes++;
       updateHud();
       api.sound.error();
       api.ui.shake(canvasHost);
-      setTimeout(resetAnswer, 280);
+      checking = true;
+      later(() => { checking = false; resetAnswer(); }, 280);
     }
   }
 
-  function onPointerDown(e) {
-    const hit = stage.pick(e.clientX, e.clientY, letterMeshes);
-    if (!hit) return;
-    const idx = hit.object.userData.i;
-    tapLetter(idx);
-  }
-  stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
-
-  // also let tapping a filled slot pop its letter back out (undo last only, simplest: undo most recent)
-  function onSlotTap(e) {
-    const hit = stage.pick(e.clientX, e.clientY, slotMeshes.map((s) => s.mesh));
-    if (!hit) return;
-    // undo everything back to (and including) this slot
-    const slotIdx = slotMeshes.findIndex((s) => s.mesh === hit.object);
-    if (slotIdx === -1 || slotMeshes[slotIdx].filled === null) return;
+  // undo every letter from slot `slotIdx` onward
+  function undoFrom(slotIdx) {
     while (answer.length > slotIdx) {
       const i = answer.pop();
       const mesh = letterMeshes[i];
@@ -210,33 +247,66 @@ function mount(container, difficulty, api) {
       tween(mesh.scale, { x: 1, y: 1, z: 1 }, 200, Easing.outCubic);
       slotMeshes[answer.length].filled = null;
     }
+  }
+
+  function onPointerDown(e) {
+    if (finished || checking) return;
+    const hit = stage.pick(e.clientX, e.clientY, [...letterMeshes, ...slotMeshes.map((sl) => sl.mesh)]);
+    if (!hit) return;
+    // the hit may be a letter's text label (a child mesh) - walk up
+    let obj = hit.object;
+    while (obj && !letterMeshes.includes(obj) && !slotMeshes.some((sl) => sl.mesh === obj)) obj = obj.parent;
+    if (!obj) return;
+    let slotIdx = slotMeshes.findIndex((sl) => sl.mesh === obj);
+    if (slotIdx === -1) {
+      const li = letterMeshes.indexOf(obj);
+      if (!obj.userData.used) { tapLetter(li); return; }
+      slotIdx = answer.indexOf(li);
+    }
+    if (slotIdx === -1 || slotMeshes[slotIdx].filled === null) return;
+    undoFrom(slotIdx);
     api.sound.click();
   }
-  stage.renderer.domElement.addEventListener('pointerdown', onSlotTap);
+  stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
   let timeUp = false;
   const unsubTick = cfg.timeLimitMs ? stage.onTick(() => {
     if (finished || timeUp) return;
-    const remain = cfg.timeLimitMs - api.elapsedMs();
+    const remain = cfg.timeLimitMs - (performance.now() - startTime);
     if (remain <= 0) {
       timeUp = true;
       finished = true;
       timerEl.textContent = 'Time: 0:00';
-      setTimeout(() => api.lose("time's up! Try again."), 200);
+      later(() => {
+        api.lose("time's up! Try again.");
+        showRetry("Time's up!");
+      }, 200);
       return;
     }
     const secs = Math.ceil(remain / 1000);
     timerEl.textContent = `Time: ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
   }) : null;
 
+  function showRetry(msg) {
+    const over = document.createElement('div');
+    over.className = 'an-over';
+    over.innerHTML = `<div class="an-over-msg"></div><button class="pc-btn pc-btn--blue">Try again</button>`;
+    over.querySelector('.an-over-msg').textContent = msg;
+    over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+    canvasHost.appendChild(over);
+  }
+
   function winGame() {
     finished = true;
     const stars = mistakes === 0 ? 3 : mistakes <= 2 ? 2 : 1;
-    setTimeout(() => api.win(stars, { mistakes }), 200);
+    later(() => api.win(stars, { mistakes }), 200);
   }
 
   function hint() {
-    if (finished) return;
+    if (finished || checking) return;
+    // take back any wrong letters first, so the hint always helps
+    const wrongAt = answer.findIndex((li, k) => scrambled[li] !== currentWord[k]);
+    if (wrongAt !== -1) undoFrom(wrongAt);
     const slotIdx = answer.length;
     if (slotIdx >= currentWord.length) return;
     const neededChar = currentWord[slotIdx];
@@ -248,10 +318,11 @@ function mount(container, difficulty, api) {
 
   return {
     unmount: () => {
+      alive = false;
       finished = true;
+      timers.forEach(clearTimeout); timers.clear();
       if (unsubTick) unsubTick();
       stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      stage.renderer.domElement.removeEventListener('pointerdown', onSlotTap);
       stage.dispose();
       wrap.remove();
     },

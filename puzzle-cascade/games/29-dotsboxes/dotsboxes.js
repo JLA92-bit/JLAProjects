@@ -15,8 +15,36 @@ const CELL = 1.0;
 const HUMAN = 1, AI = 2;
 const HUMAN_COLOR = 0xff4d8d, AI_COLOR = 0x3f8efc;
 
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.08, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
   const size = cfg.size;
   // H[r][c]: horizontal edge above box (r,c), r in 0..size, c in 0..size-1
   // V[r][c]: vertical edge left of box (r,c), r in 0..size-1, c in 0..size
@@ -90,10 +118,8 @@ function mount(container, difficulty, api) {
   const youEl = wrap.querySelector('#db-you');
   const aiEl = wrap.querySelector('#db-ai');
 
-  const halfExt = size * CELL / 2 + 0.6;
-  const aspectMin = 0.46;
-  const distance = Math.max(halfExt / (0.42 * aspectMin), halfExt / 0.42) * 1.05;
-  const stage = createStage(canvasHost, { distance });
+  const halfExt = size * CELL / 2 + 0.35;
+  const stage = createStage(canvasHost, fitView(canvasHost, halfExt, halfExt, { reserveBottom: 50 }));
 
   const half = size / 2;
   function dotXY(r, c) { return { x: (c - half) * CELL, y: (half - r) * CELL }; }
@@ -158,16 +184,19 @@ function mount(container, difficulty, api) {
   function checkEnd() {
     if (scoreHuman + scoreAI === size * size) {
       finished = true;
-      if (scoreHuman === scoreAI) { statusEl.textContent = "It's a tie!"; setTimeout(() => api.win(2, { scoreHuman, scoreAI }), 300); return true; }
+      if (scoreHuman === scoreAI) { statusEl.textContent = "It's a tie!"; later(() => api.win(2, { scoreHuman, scoreAI }), 300); return true; }
       if (scoreHuman > scoreAI) {
         statusEl.textContent = 'You win!';
         api.ui.burstFromElement(canvasHost);
         const margin = scoreHuman - scoreAI;
         const stars = margin >= size ? 3 : margin >= Math.ceil(size / 2) ? 2 : 1;
-        setTimeout(() => api.win(stars, { scoreHuman, scoreAI }), 300);
+        later(() => api.win(stars, { scoreHuman, scoreAI }), 300);
       } else {
         statusEl.textContent = 'The AI wins.';
-        setTimeout(() => api.lose(`the AI finished with ${scoreAI} boxes to your ${scoreHuman}.`), 300);
+        later(() => {
+          api.lose(`the AI finished with ${scoreAI} boxes to your ${scoreHuman}.`);
+          showRetry(`The AI got ${scoreAI} boxes, you got ${scoreHuman}.`);
+        }, 300);
       }
       return true;
     }
@@ -178,7 +207,7 @@ function mount(container, difficulty, api) {
     if (finished) return;
     aiThinking = true;
     statusEl.textContent = "AI's turn...";
-    setTimeout(() => {
+    later(() => {
       const edge = chooseAIEdge(cfg.level);
       if (!edge) { aiThinking = false; checkEnd(); return; }
       const claimed = claimEdge(...edge, AI);
@@ -191,12 +220,37 @@ function mount(container, difficulty, api) {
     }, 480);
   }
 
+  function showRetry(msg) {
+    const over = document.createElement('div');
+    over.className = 'db-over';
+    over.innerHTML = `<div class="db-over-msg"></div><button class="pc-btn pc-btn--blue">Play again</button>`;
+    over.querySelector('.db-over-msg').textContent = msg;
+    over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+    canvasHost.appendChild(over);
+  }
+
+  // Lines are thin, so pick the nearest line to the finger instead of
+  // requiring an exact hit on the mesh.
+  function nearestEdge(x, y) {
+    let best = null, bestD = Infinity;
+    Object.values(edgeMeshes).forEach((m) => {
+      const { type } = m.userData;
+      const along = type === 'H' ? Math.abs(x - m.position.x) : Math.abs(y - m.position.y);
+      const across = type === 'H' ? Math.abs(y - m.position.y) : Math.abs(x - m.position.x);
+      const d = across + Math.max(0, along - CELL * 0.3) * 1.5;
+      if (d < bestD) { bestD = d; best = m; }
+    });
+    return bestD <= CELL * 0.45 ? best : null;
+  }
+
   function onPointerDown(e) {
-    if (finished || aiThinking || turn !== HUMAN) return;
-    const hit = stage.pick(e.clientX, e.clientY, Object.values(edgeMeshes));
-    if (!hit) return;
-    const { type, r, c } = hit.object.userData;
-    if (edgeVal(type, r, c)) { api.sound.error(); return; }
+    if (finished) return;
+    if (aiThinking || turn !== HUMAN) { statusEl.textContent = "Wait - it's the AI's turn"; return; }
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0);
+    const hitMesh = pt ? nearestEdge(pt.x, pt.y) : null;
+    if (!hitMesh) return;
+    const { type, r, c } = hitMesh.userData;
+    if (edgeVal(type, r, c)) { api.sound.error(); api.ui.shake(canvasHost); return; }
     const claimed = claimEdge(type, r, c, HUMAN);
     api.sound[claimed ? 'match' : 'click']();
     if (checkEnd()) return;
@@ -211,12 +265,17 @@ function mount(container, difficulty, api) {
     const edge = chooseAIEdge('smart');
     if (!edge) return;
     const mesh = edgeMeshes[edgeMeshKey(...edge)];
+    mesh.material.color.set(0xffd93d);
+    later(() => { if (!edgeVal(...edge)) mesh.material.color.set(0x3d2e63); }, 1400);
     tween(mesh.scale, { x: 1.4, y: 1.4, z: 1.4 }, 180, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 220, Easing.outCubic));
-    api.ui.toast(`${api.playerName}, try the glowing line!`);
+    api.ui.toast(wouldCompleteBox(...edge) ? `${api.playerName}, the yellow line wins you a box!` : `${api.playerName}, the yellow line is a safe move!`);
   }
 
   return {
     unmount: () => {
+      alive = false;
+      finished = true;
+      timers.forEach(clearTimeout); timers.clear();
       stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       stage.dispose();
       wrap.remove();

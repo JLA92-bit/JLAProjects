@@ -4,7 +4,13 @@
 }
 .ms-flagtoggle {
   border: none; cursor: pointer; font-family: var(--pc-font-body);
+  min-height: 44px; padding: 8px 16px; font-size: 0.9rem;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
 .ms-flagtoggle.is-active {
   background: var(--pc-orange, #ff9f43); color: #241436;
 }
+
+/* Keep the WebGL canvas out of layout so its pixel size can never push the
+   stage taller than the screen. */
+#ms-canvas > canvas { position: absolute; top: 0; left: 0; }

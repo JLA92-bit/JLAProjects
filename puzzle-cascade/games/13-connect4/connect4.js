@@ -17,6 +17,51 @@ const HUMAN_COLOR = 0xff4d8d;
 const AI_COLOR = 0xffd93d;
 const HUMAN = 1, AI = 2;
 
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
+
+// In-canvas "Try again" button shown after a loss.
+function showRetry(host, onRetry) {
+  host.querySelectorAll('.pc-overlay-bottom').forEach((el) => { el.hidden = true; });
+  const bar = document.createElement('div');
+  bar.className = 'pc-overlay-bottom';
+  bar.innerHTML = '<button class="pc-btn pc-btn--blue" type="button">🔁 Try again</button>';
+  bar.querySelector('button').addEventListener('click', onRetry, { once: true });
+  host.appendChild(bar);
+}
+
+
 function cellXY(col, row) {
   const halfC = (COLS - 1) / 2, halfR = (ROWS - 1) / 2;
   return { x: (col - halfC) * CELL, y: (row - halfR) * CELL };
@@ -123,9 +168,20 @@ function aiChoose(grid, depth, who, opp) {
 }
 
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let round = null;
+  const start = () => { round = mountRound(container, difficulty, api, restart); };
+  const restart = () => { api.sound.click(); if (round) round.unmount(); start(); };
+  start();
+  return { unmount: () => round && round.unmount(), hint: () => round && round.hint() };
+}
+
+function mountRound(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  const life = lifecycle();
   let grid = Array.from({ length: COLS }, () => []);
-  let finished = false, aiThinking = false, moves = 0;
+  // busy covers the whole turn: the player's disc falling, the AI thinking
+  // and the AI's disc falling - so a quick double tap can't drop two discs.
+  let finished = false, aiThinking = false, busy = false, moves = 0;
 
   const wrap = document.createElement('div');
   wrap.className = 'pc-stage-inner';
@@ -139,7 +195,10 @@ function mount(container, difficulty, api) {
   const canvasHost = wrap.querySelector('#c4-canvas');
   const statusEl = wrap.querySelector('#c4-status');
 
+  // The 7.5-unit-wide board is wider than tall, so on a portrait phone the
+  // width is what has to fit - fitBoard frames it with a margin either side.
   const stage = createStage(canvasHost, { distance: 7.2 });
+  fitBoard(stage, canvasHost, COLS * CELL + 0.6, ROWS * CELL + 0.6, { pad: 8, top: 12, bottom: 50 });
 
   const boardMat = new THREE.MeshStandardMaterial({ color: 0x3f2a7c, roughness: 0.55, metalness: 0.1 });
   const boardMesh = new THREE.Mesh(new THREE.BoxGeometry(COLS * CELL + 0.5, ROWS * CELL + 0.5, 0.3), boardMat);
@@ -161,21 +220,12 @@ function mount(container, difficulty, api) {
     holeMeshes.push(colArr);
   }
 
-  // Column tap zones (invisible tall tiles above the board)
-  const colZones = [];
-  for (let c = 0; c < COLS; c++) {
-    const { x } = cellXY(c, 0);
-    const zone = new THREE.Mesh(new THREE.BoxGeometry(CELL * 0.9, ROWS * CELL + 1, 0.5), new THREE.MeshBasicMaterial({ visible: false }));
-    zone.position.set(x, 0, 0.3);
-    zone.userData = { col: c };
-    stage.world.add(zone);
-    colZones.push(zone);
-  }
   popIn(boardMesh, { duration: 260 });
 
   const discMeshes = [];
 
   function dropDisc(col, who, isPlayer) {
+    busy = true;
     const row = drop(grid, col, who);
     moves++;
     const color = who === HUMAN ? HUMAN_COLOR : AI_COLOR;
@@ -187,7 +237,8 @@ function mount(container, difficulty, api) {
     stage.world.add(disc);
     discMeshes.push(disc);
     api.sound.move();
-    tween(disc.position, { y: target.y }, 260 + row * 40, Easing.outCubic, () => {
+    tween(disc.position, { y: target.y }, 260 + (ROWS - row) * 40, Easing.outCubic, () => {
+      if (life.dead) return;
       api.sound.click();
       const won = checkWinAt(grid, col, row, who);
       if (won) {
@@ -196,18 +247,22 @@ function mount(container, difficulty, api) {
         if (who === HUMAN) {
           statusEl.textContent = 'You win!';
           api.ui.burstFromElement(canvasHost);
-          setTimeout(() => api.win(difficulty === 'hard' ? 3 : 3, { moves }), 350);
+          life.later(() => api.win(3, { moves }), 350);
         } else {
-          statusEl.textContent = 'The computer wins.';
-          setTimeout(() => api.lose('the computer connected four! Try again.'), 350);
+          statusEl.textContent = 'The computer wins this time.';
+          life.later(() => {
+            api.lose('the computer connected four! Try again.');
+            showRetry(canvasHost, restart);
+          }, 500);
         }
       } else if (boardFull(grid)) {
         finished = true;
         statusEl.textContent = "It's a draw!";
-        setTimeout(() => api.win(2, { moves, result: 'draw' }), 300);
+        life.later(() => api.win(2, { moves, result: 'draw' }), 300);
       } else if (isPlayer) {
         aiTurn();
       } else {
+        busy = false;
         statusEl.textContent = 'Your turn - tap a column';
       }
     });
@@ -222,7 +277,13 @@ function mount(container, difficulty, api) {
       if (line.length >= 4) {
         line.forEach(([c, r], i) => {
           const disc = discMeshes.find((d) => Math.abs(d.position.x - cellXY(c, r).x) < 0.01 && Math.abs(d.position.y - cellXY(c, r).y) < 0.01);
-          if (disc) setTimeout(() => tween(disc.scale, { x: 1.2, y: 1.2, z: 1.2 }, 200, Easing.outBack), i * 60);
+          if (disc) {
+            disc.material.emissive.set(disc.material.color);
+            life.later(() => {
+              tween(disc.material, { emissiveIntensity: 0.6 }, 200, Easing.outCubic);
+              tween(disc.scale, { x: 1.2, y: 1.2, z: 1.2 }, 200, Easing.outBack);
+            }, i * 80);
+          }
         });
         return;
       }
@@ -232,7 +293,7 @@ function mount(container, difficulty, api) {
   function aiTurn() {
     aiThinking = true;
     statusEl.textContent = "Computer's turn...";
-    setTimeout(() => {
+    life.later(() => {
       const col = aiChoose(grid, cfg.depth, AI, HUMAN);
       aiThinking = false;
       dropDisc(col, AI, false);
@@ -240,31 +301,50 @@ function mount(container, difficulty, api) {
   }
 
   function onPointerDown(e) {
-    if (finished || aiThinking) return;
-    const hit = stage.pick(e.clientX, e.clientY, colZones);
-    if (!hit) return;
-    const col = hit.object.userData.col;
-    if (grid[col].length >= ROWS) { api.sound.error(); api.ui.shake(canvasHost); return; }
+    if (finished || aiThinking || busy) return;
+    // Any touch above, on or below the board picks the nearest column.
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (!pt) return;
+    const col = Math.round(pt.x / CELL + (COLS - 1) / 2);
+    if (col < 0 || col >= COLS) return;
+    if (grid[col].length >= ROWS) { api.sound.error(); api.ui.shake(canvasHost); api.ui.toast('That column is full!'); return; }
     dropDisc(col, HUMAN, true);
   }
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
+  // Hint shows a pulsing ghost disc where the suggested move would land.
+  let ghost = null;
   function hint() {
-    if (finished || aiThinking) return;
+    if (finished) { api.ui.toast(`${api.playerName}, this game is over!`); return; }
+    if (aiThinking || busy) return;
     const col = aiChoose(grid, Math.max(cfg.depth, 3), HUMAN, AI);
+    if (col === undefined) return;
     api.ui.toast(`${api.playerName}, try dropping in column ${col + 1}!`);
-    const marker = holeMeshes[col][grid[col].length] || holeMeshes[col][ROWS - 1];
-    tween(marker.scale, { x: 1.4, y: 1.4, z: 1.4 }, 180, Easing.outBack, () => tween(marker.scale, { x: 1, y: 1, z: 1 }, 200, Easing.outCubic));
+    if (ghost) { stage.world.remove(ghost); ghost.geometry.dispose(); ghost.material.dispose(); }
+    const { x, y } = cellXY(col, grid[col].length);
+    const g = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.25, 24), new THREE.MeshBasicMaterial({ color: HUMAN_COLOR, transparent: true, opacity: 0.75, toneMapped: false }));
+    g.rotation.x = Math.PI / 2;
+    g.position.set(x, y, 0.05);
+    stage.world.add(g);
+    ghost = g;
+    tween(g.material, { opacity: 0 }, 1600, Easing.inOutQuad, () => {
+      if (ghost !== g) return;
+      stage.world.remove(g); g.geometry.dispose(); g.material.dispose(); ghost = null;
+    });
   }
 
-  return {
-    unmount: () => {
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('connect4', { mount });

@@ -11,17 +11,55 @@ const CONFIG = {
   hard: { pads: 6, targetRounds: 16, baseDelay: 480, minDelay: 240, decrement: 18 },
 };
 const PAD_COLORS = [0xff4d8d, 0xff9f43, 0xffd93d, 0x23d18b, 0x3f8efc, 0xa259ff];
-const PAD_SIZE = 0.9;
+const PAD_SIZE = 1.2;
+const RING_RADIUS = 1.75;
 
-function starsForRound(round, target) {
-  if (round >= target) return 3;
-  if (round >= target * 0.6) return 2;
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
+
+// A wrong tap just replays the pattern, so stars count the slips.
+function starsForMistakes(mistakes) {
+  if (mistakes === 0) return 3;
+  if (mistakes <= 2) return 2;
   return 1;
 }
 
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
   const n = cfg.pads;
+  const life = lifecycle();
+  let mistakes = 0;
   let sequence = [];
   let inputIndex = 0;
   let round = 0;
@@ -43,7 +81,9 @@ function mount(container, difficulty, api) {
   const statusEl = wrap.querySelector('#sm-status');
 
   const stage = createStage(canvasHost, { distance: 5.4 });
-  const radius = 1.7;
+  const extent = (RING_RADIUS + PAD_SIZE / 2) * 2 + 0.3;
+  fitBoard(stage, canvasHost, extent, extent, { top: 50, bottom: 16 });
+  const radius = RING_RADIUS;
 
   const pads = [];
   for (let i = 0; i < n; i++) {
@@ -79,9 +119,9 @@ function mount(container, difficulty, api) {
       litUp(pad, 0.9, 1.18, delay * 0.55);
       api.sound.select();
       i++;
-      setTimeout(step, delay);
+      life.later(step, delay);
     }
-    setTimeout(step, 400);
+    life.later(step, 500);
   }
 
   function nextRound() {
@@ -94,7 +134,7 @@ function mount(container, difficulty, api) {
   function onPad(i) {
     if (!accepting || finished) return;
     litUp(i, 0.9, 1.15, 90);
-    setTimeout(() => litDown(i), 140);
+    life.later(() => litDown(i), 160);
     api.sound.select();
     if (sequence[inputIndex] === i) {
       inputIndex++;
@@ -104,47 +144,60 @@ function mount(container, difficulty, api) {
         api.ui.burstFromElement(canvasHost, { count: 12 });
         if (round >= cfg.targetRounds) {
           finished = true;
-          const stars = starsForRound(round, cfg.targetRounds);
-          setTimeout(() => api.win(stars, { round }), 350);
+          statusEl.textContent = 'You did it!';
+          const stars = starsForMistakes(mistakes);
+          life.later(() => api.win(stars, { round, mistakes }), 350);
         } else {
-          setTimeout(nextRound, 500);
+          statusEl.textContent = 'Nice! Next round...';
+          life.later(nextRound, 600);
         }
       }
     } else {
+      // Forgiving: no game over - show the same pattern again.
       accepting = false;
-      finished = true;
+      mistakes++;
       api.sound.error();
       api.ui.shake(canvasHost);
-      statusEl.textContent = 'Wrong pad! Try again.';
-      api.lose('Sequence broken - try again!');
+      statusEl.textContent = 'Oops! Watch again...';
+      api.ui.toast(`${api.playerName}, not quite - watch the pattern once more!`);
+      life.later(playSequence, 900);
     }
   }
 
   function onPointerDown(e) {
-    const hit = stage.pick(e.clientX, e.clientY, pads);
-    if (!hit) return;
-    onPad(pads.indexOf(hit.object));
+    if (!accepting || finished) return;
+    // nearest pad within reach - more forgiving than an exact raycast
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (!pt) return;
+    let best = -1, bestD = PAD_SIZE * 0.9;
+    pads.forEach((m, i) => { const d = Math.hypot(m.position.x - pt.x, m.position.y - pt.y); if (d < bestD) { bestD = d; best = i; } });
+    if (best >= 0) onPad(best);
   }
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
   nextRound();
 
   function hint() {
-    if (!accepting || finished) return;
+    if (finished) { api.ui.toast(`${api.playerName}, you finished every round!`); return; }
+    if (!accepting) { api.ui.toast(`${api.playerName}, watch the pads light up first!`); return; }
     const nextPad = sequence[inputIndex];
     litUp(nextPad, 0.9, 1.3, 260);
-    setTimeout(() => litDown(nextPad), 550);
+    life.later(() => litDown(nextPad), 550);
     api.ui.toast(`${api.playerName}, that glowing pad is next!`);
   }
 
-  return {
-    unmount: () => {
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('simon', { mount });

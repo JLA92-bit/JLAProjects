@@ -63,12 +63,97 @@ function solveNextMove(pegs, disks) {
   return null;
 }
 
+/* ---------- lifecycle + framing helpers (kept local so this file stays self-contained) ---------- */
+
+// World half-height per unit of stage distance (matches three-stage.js).
+const VIEW_SCALE = 0.42;
+
+// Pick a camera distance that fits a board of the given world half-extents
+// into the canvas's real aspect ratio, with a safety margin so a later
+// resize (address bar, rotated phone, wrapped status text) never crops it.
+function fitDistance(host, halfW, halfH, margin = 1.08) {
+  const w = host.clientWidth || 340, h = host.clientHeight || 520;
+  const aspect = Math.max(0.35, Math.min(2.2, w / h));
+  return (Math.max(halfH, halfW / aspect) * margin) / VIEW_SCALE;
+}
+
+// Wraps a raw mount so nothing can call api.win/api.lose after unmount,
+// hint() never throws, and (optionally) a lost round offers an in-place
+// "Try again" button instead of leaving a dead board on screen.
+function guardMount(rawMount, { retry = false } = {}) {
+  return function mount(container, difficulty, api) {
+    let cur = null;
+    function start() {
+      const inst = { alive: true };
+      const safeApi = Object.assign({}, api, {
+        win: (...args) => { if (inst.alive) { inst.alive = false; api.win(...args); } },
+        lose: (msg) => {
+          if (!inst.alive) return;
+          inst.alive = false;
+          api.lose(msg);
+          if (retry) showRetry(inst);
+        },
+      });
+      const res = rawMount(container, difficulty, safeApi);
+      cur = {
+        inst,
+        el: container.lastElementChild,
+        unmount: typeof res === 'function' ? res : (res && res.unmount) || (() => {}),
+        hint: res && typeof res === 'object' ? res.hint : null,
+      };
+    }
+    function stop() {
+      if (!cur) return;
+      const c = cur;
+      cur = null;
+      c.inst.alive = false;
+      try { c.unmount(); } catch (e) { console.warn(e); }
+    }
+    function showRetry(inst) {
+      if (!cur || cur.inst !== inst || !cur.el) return;
+      const host = cur.el.querySelector('.pc-canvas3d') || cur.el;
+      const box = document.createElement('div');
+      box.style.cssText = 'position:absolute;left:0;right:0;bottom:56px;display:flex;justify-content:center;z-index:6;pointer-events:none;';
+      box.innerHTML = '<button type="button" class="pc-btn pc-btn--green" style="pointer-events:auto;min-height:48px;">\u{1F501} Try again</button>';
+      box.querySelector('button').addEventListener('click', () => {
+        if (!cur || cur.inst !== inst) return;
+        api.sound.click();
+        stop();
+        start();
+      });
+      host.appendChild(box);
+    }
+    start();
+    return {
+      unmount: () => stop(),
+      hint: () => {
+        if (!cur || !cur.hint) return;
+        try { cur.hint(); } catch (e) { console.warn(e); }
+      },
+    };
+  };
+}
+
+// setTimeout that is cancelled in bulk on unmount.
+function makeTimers() {
+  const ids = new Set();
+  return {
+    later(fn, ms) {
+      const id = setTimeout(() => { ids.delete(id); fn(); }, ms);
+      ids.add(id);
+      return id;
+    },
+    clear() { ids.forEach(clearTimeout); ids.clear(); },
+  };
+}
+
 function mount(container, difficulty, api) {
   const cfg = CONFIG[difficulty];
   const disks = cfg.disks;
   let pegs = [Array.from({ length: disks }, (_, i) => disks - i), [], []];
   let selected = null; // peg index
   let moves = 0, finished = false, busy = false;
+  const timers = makeTimers();
   const optimal = Math.pow(2, disks) - 1;
 
   const wrap = document.createElement('div');
@@ -83,7 +168,7 @@ function mount(container, difficulty, api) {
   const canvasHost = wrap.querySelector('#hn-canvas');
   const movesEl = wrap.querySelector('#hn-moves');
 
-  const stage = createStage(canvasHost, { distance: 11 });
+  const stage = createStage(canvasHost, { distance: fitDistance(canvasHost, PEG_SPACING + MAX_W / 2 + 0.1, MAX_W / 2 + 0.3) });
 
   const pegX = (i) => (i - 1) * PEG_SPACING;
   const baseZ = 0;
@@ -103,9 +188,10 @@ function mount(container, difficulty, api) {
     pole.castShadow = true;
     stage.world.add(pole);
     pegMeshes.push(pole);
-    // invisible wide tap zone covering the whole peg column
-    const zone = new THREE.Mesh(new THREE.BoxGeometry(PEG_SPACING * 0.92, PEG_H + 0.6, 1.9), new THREE.MeshBasicMaterial({ visible: false }));
-    zone.position.set(x, 0, PEG_H / 2);
+    // invisible tap zone covering the whole peg column, top to bottom of
+    // the canvas, so a tap anywhere near a peg counts
+    const zone = new THREE.Mesh(new THREE.BoxGeometry(i === 1 ? PEG_SPACING : PEG_SPACING * 2, 60, 1.9), new THREE.MeshBasicMaterial({ visible: false }));
+    zone.position.set(i === 0 ? x - PEG_SPACING / 2 : i === 2 ? x + PEG_SPACING / 2 : x, 0, PEG_H / 2);
     zone.userData = { peg: i };
     stage.world.add(zone);
     zoneMeshes.push(zone);
@@ -141,6 +227,14 @@ function mount(container, difficulty, api) {
     tween(pole.scale, { x: on ? 1.3 : 1, y: on ? 1.3 : 1 }, 140, Easing.outBack);
     pole.material.emissive.set(on ? 0xffd93d : 0x000000);
     pole.material.emissiveIntensity = on ? 0.6 : 0;
+    // make the disk you're holding glow too, so it's obvious what moves
+    const stack = pegs[pegIdx];
+    const top = stack.length ? diskMeshes[stack[stack.length - 1]] : null;
+    if (top) {
+      top.material.emissive.set(on ? 0xffffff : 0x000000);
+      top.material.emissiveIntensity = on ? 0.35 : 0;
+      tween(top.scale, { x: on ? 1.1 : 1, y: on ? 1.1 : 1 }, 140, Easing.outBack);
+    }
   }
 
   function tryMove(from, to) {
@@ -167,13 +261,15 @@ function mount(container, difficulty, api) {
     if (selected === pegIdx) {
       highlightPeg(pegIdx, false);
       selected = null;
+      api.sound.click();
       return;
     }
-    const ok = tryMove(selected, pegIdx);
     highlightPeg(selected, false);
+    const ok = tryMove(selected, pegIdx);
     if (!ok) {
       api.sound.error();
       api.ui.shake(canvasHost);
+      api.ui.toast('A bigger disk can\'t go on a smaller one!');
       selected = null;
       return;
     }
@@ -183,7 +279,7 @@ function mount(container, difficulty, api) {
     api.sound.move();
     busy = true;
     layoutPegs(true);
-    setTimeout(() => { busy = false; checkWin(); }, 240);
+    timers.later(() => { busy = false; checkWin(); }, 240);
   }
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
@@ -192,7 +288,7 @@ function mount(container, difficulty, api) {
       finished = true;
       api.ui.burstFromElement(canvasHost);
       const stars = moves <= optimal ? 3 : moves <= optimal * 1.5 ? 2 : 1;
-      setTimeout(() => api.win(stars, { moves, optimal }), 250);
+      timers.later(() => api.win(stars, { moves, optimal }), 250);
     }
   }
 
@@ -201,13 +297,18 @@ function mount(container, difficulty, api) {
     const move = solveNextMove(pegs, disks);
     if (!move) return;
     const [from, to] = move;
-    highlightPeg(from, true);
-    setTimeout(() => highlightPeg(from, false), 900);
-    api.ui.toast(`${api.playerName}, move a disk from peg ${from + 1} to peg ${to + 1}!`);
+    if (selected !== null && selected !== from) { highlightPeg(selected, false); selected = null; }
+    if (selected === null) {
+      highlightPeg(from, true);
+      timers.later(() => { if (selected !== from) highlightPeg(from, false); }, 900);
+    }
+    api.ui.toast(`${api.playerName}, move a disk from the ${['left', 'middle', 'right'][from]} peg to the ${['left', 'middle', 'right'][to]} peg!`);
   }
 
   return {
     unmount: () => {
+      finished = true;
+      timers.clear();
       stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       stage.dispose();
       wrap.remove();
@@ -216,4 +317,4 @@ function mount(container, difficulty, api) {
   };
 }
 
-PC.Games.register('hanoi', { mount });
+PC.Games.register('hanoi', { mount: guardMount(mount) });

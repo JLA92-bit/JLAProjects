@@ -29,3 +29,12 @@
   .ws-wrap .pc-canvas3d { flex: 1 1 auto; max-width: none; min-height: 0; }
   .ws-words { flex: 0 0 auto; max-width: none; flex-direction: row; flex-wrap: wrap; gap: 6px 14px; justify-content: center; padding-top: 4px; }
 }
+
+/* Keep the WebGL canvas out of layout so its pixel size can never push the
+   stage taller than the screen (the board is framed to whatever room the
+   word list leaves). */
+#ws-canvas > canvas { position: absolute; top: 0; left: 0; }
+@media (max-width: 700px) {
+  .ws-wrap { gap: 6px; }
+  .ws-words { font-size: 0.95rem; gap: 2px 12px; }
+}

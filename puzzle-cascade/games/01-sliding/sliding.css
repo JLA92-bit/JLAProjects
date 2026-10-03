@@ -1,3 +1,7 @@
 .sl-meta {
   display: flex; gap: 18px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
 }
+
+/* Keep the WebGL canvas out of layout so its pixel size can never push the
+   stage taller than the screen. */
+#sl-canvas > canvas { position: absolute; top: 0; left: 0; }

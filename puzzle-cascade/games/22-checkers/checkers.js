@@ -6,14 +6,15 @@
  * with the same piece.
  */
 import * as THREE from 'three';
-import { createStage, makeTile, tween, popIn, Easing } from '../../shared/js/three-stage.js';
+import { createStage, makeTile, tween, popIn, Easing, disposeObject } from '../../shared/js/three-stage.js';
 
 const SIZE = 8;
 const CELL = 1.0;
 const HUMAN = 1, AI = 2;
 const MAN_H = 1, KING_H = 2, MAN_AI = 3, KING_AI = 4;
 const DARK = 0x3a2a1e, LIGHT = 0xd8b98a;
-const HUMAN_COLOR = 0xff4d8d, AI_COLOR = 0x241436;
+// Computer pieces are cream so they stand out on the dark squares they sit on.
+const HUMAN_COLOR = 0xff4d8d, AI_COLOR = 0xf4efe6;
 
 const CONFIG = {
   easy: { level: 'random' },
@@ -184,10 +185,95 @@ function cellXY(r, c) {
   return { x: (c - half) * CELL, y: (half - r) * CELL };
 }
 
+/* ---------- lifecycle + framing helpers (kept local so this file stays self-contained) ---------- */
+
+// World half-height per unit of stage distance (matches three-stage.js).
+const VIEW_SCALE = 0.42;
+
+// Pick a camera distance that fits a board of the given world half-extents
+// into the canvas's real aspect ratio, with a safety margin so a later
+// resize (address bar, rotated phone, wrapped status text) never crops it.
+function fitDistance(host, halfW, halfH, margin = 1.08) {
+  const w = host.clientWidth || 340, h = host.clientHeight || 520;
+  const aspect = Math.max(0.35, Math.min(2.2, w / h));
+  return (Math.max(halfH, halfW / aspect) * margin) / VIEW_SCALE;
+}
+
+// Wraps a raw mount so nothing can call api.win/api.lose after unmount,
+// hint() never throws, and (optionally) a lost round offers an in-place
+// "Try again" button instead of leaving a dead board on screen.
+function guardMount(rawMount, { retry = false } = {}) {
+  return function mount(container, difficulty, api) {
+    let cur = null;
+    function start() {
+      const inst = { alive: true };
+      const safeApi = Object.assign({}, api, {
+        win: (...args) => { if (inst.alive) { inst.alive = false; api.win(...args); } },
+        lose: (msg) => {
+          if (!inst.alive) return;
+          inst.alive = false;
+          api.lose(msg);
+          if (retry) showRetry(inst);
+        },
+      });
+      const res = rawMount(container, difficulty, safeApi);
+      cur = {
+        inst,
+        el: container.lastElementChild,
+        unmount: typeof res === 'function' ? res : (res && res.unmount) || (() => {}),
+        hint: res && typeof res === 'object' ? res.hint : null,
+      };
+    }
+    function stop() {
+      if (!cur) return;
+      const c = cur;
+      cur = null;
+      c.inst.alive = false;
+      try { c.unmount(); } catch (e) { console.warn(e); }
+    }
+    function showRetry(inst) {
+      if (!cur || cur.inst !== inst || !cur.el) return;
+      const host = cur.el.querySelector('.pc-canvas3d') || cur.el;
+      const box = document.createElement('div');
+      box.style.cssText = 'position:absolute;left:0;right:0;bottom:56px;display:flex;justify-content:center;z-index:6;pointer-events:none;';
+      box.innerHTML = '<button type="button" class="pc-btn pc-btn--green" style="pointer-events:auto;min-height:48px;">\u{1F501} Try again</button>';
+      box.querySelector('button').addEventListener('click', () => {
+        if (!cur || cur.inst !== inst) return;
+        api.sound.click();
+        stop();
+        start();
+      });
+      host.appendChild(box);
+    }
+    start();
+    return {
+      unmount: () => stop(),
+      hint: () => {
+        if (!cur || !cur.hint) return;
+        try { cur.hint(); } catch (e) { console.warn(e); }
+      },
+    };
+  };
+}
+
+// setTimeout that is cancelled in bulk on unmount.
+function makeTimers() {
+  const ids = new Set();
+  return {
+    later(fn, ms) {
+      const id = setTimeout(() => { ids.delete(id); fn(); }, ms);
+      ids.add(id);
+      return id;
+    },
+    clear() { ids.forEach(clearTimeout); ids.clear(); },
+  };
+}
+
 function mount(container, difficulty, api) {
   const cfg = CONFIG[difficulty];
   let board = initialBoard();
-  let finished = false, aiThinking = false, moves = 0;
+  let finished = false, aiThinking = false, busy = false, moves = 0;
+  const timers = makeTimers();
   let selected = null; // {r,c}
   let forcedContinue = null; // {r,c} must continue capturing with this piece
 
@@ -197,10 +283,10 @@ function mount(container, difficulty, api) {
     <div class="ck-meta">
       <span class="ck-score"><span class="ck-dot ck-dot--you"></span> You: <span id="ck-you">12</span></span>
       <span id="ck-status">Your turn</span>
-      <span class="ck-score"><span class="ck-dot ck-dot--ai"></span> AI: <span id="ck-ai">12</span></span>
+      <span class="ck-score"><span class="ck-dot ck-dot--ai"></span> Computer: <span id="ck-ai">12</span></span>
     </div>
     <div class="pc-canvas3d" id="ck-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Tap a piece, then a highlighted square</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">You are pink - tap a glowing piece, then a yellow square</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -209,7 +295,8 @@ function mount(container, difficulty, api) {
   const youEl = wrap.querySelector('#ck-you');
   const aiEl = wrap.querySelector('#ck-ai');
 
-  const stage = createStage(canvasHost, { distance: 26 });
+  const boardHalf = (SIZE * CELL) / 2 + 0.3;
+  const stage = createStage(canvasHost, { distance: fitDistance(canvasHost, boardHalf, boardHalf + 0.6) });
 
   const boardMesh = new THREE.Mesh(new THREE.BoxGeometry(SIZE * CELL + 0.4, SIZE * CELL + 0.4, 0.3), new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.7 }));
   boardMesh.position.z = -0.22;
@@ -252,7 +339,7 @@ function mount(container, difficulty, api) {
     for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
       const v = board[r][c];
       const existing = pieceMeshes[r][c];
-      if (!v) { if (existing) { stage.world.remove(existing); pieceMeshes[r][c] = null; } continue; }
+      if (!v) { if (existing) { stage.world.remove(existing); disposeObject(existing); pieceMeshes[r][c] = null; } continue; }
       const { x, y } = cellXY(r, c);
       if (!existing) {
         const mesh = makePieceMesh(v);
@@ -266,6 +353,7 @@ function mount(container, difficulty, api) {
         const hasCrown = existing.children.length > 1;
         if (wantsKing !== hasCrown) {
           stage.world.remove(existing);
+          disposeObject(existing);
           const mesh = makePieceMesh(v);
           mesh.position.set(x, y, 0.11);
           stage.world.add(mesh);
@@ -330,7 +418,7 @@ function mount(container, difficulty, api) {
       tween(mesh.position, { x: target.x, y: target.y }, 220, Easing.outCubic, () => {
         if (step.mid) {
           const cap = pieceMeshes[step.mid[0]][step.mid[1]];
-          if (cap) { tween(cap.scale, { x: 0.01, y: 0.01, z: 0.01 }, 180, Easing.inOutQuad, () => { stage.world.remove(cap); }); }
+          if (cap) { tween(cap.scale, { x: 0.01, y: 0.01, z: 0.01 }, 180, Easing.inOutQuad, () => { stage.world.remove(cap); disposeObject(cap); }); }
           pieceMeshes[step.mid[0]][step.mid[1]] = null;
           api.sound.match();
         } else {
@@ -343,49 +431,52 @@ function mount(container, difficulty, api) {
     nextStep();
   }
 
-  function checkGameEnd() {
+  // `toMove` is the side whose turn it is next: if it has no pieces or no
+  // legal move, it loses (standard checkers rule).
+  function checkGameEnd(toMove) {
+    if (generateMoves(board, toMove).length > 0) return false;
+    finished = true;
+    clearHighlights();
     const { h, a } = countPieces(board);
-    if (h <= 0 || a <= 0 || generateMoves(board, HUMAN).length === 0 || generateMoves(board, AI).length === 0) {
-      finished = true;
-      clearHighlights();
-      if (h > a || (a <= 0 && h > 0) || generateMoves(board, AI).length === 0) {
-        statusEl.textContent = 'You win!';
-        api.ui.burstFromElement(canvasHost);
-        const margin = h - a;
-        const stars = margin >= 6 ? 3 : margin >= 2 ? 2 : 1;
-        setTimeout(() => api.win(stars, { moves }), 300);
-      } else {
-        statusEl.textContent = 'The AI wins.';
-        setTimeout(() => api.lose('the AI cleared your pieces. Try again.'), 300);
-      }
-      return true;
+    if (toMove === AI) {
+      statusEl.textContent = 'You win!';
+      api.ui.burstFromElement(canvasHost);
+      const margin = h - a;
+      const stars = margin >= 6 ? 3 : margin >= 2 ? 2 : 1;
+      timers.later(() => api.win(stars, { moves }), 300);
+    } else {
+      statusEl.textContent = 'The computer wins.';
+      timers.later(() => api.lose(h > 0 ? 'your pieces are trapped with no moves left. Try again!' : 'the computer captured all your pieces. Try again!'), 300);
     }
-    return false;
+    return true;
   }
 
   function endHumanTurn() {
     selected = null; forcedContinue = null;
+    busy = false;
     syncCounts();
-    if (checkGameEnd()) return;
+    if (checkGameEnd(AI)) return;
     aiTurn();
   }
 
   function aiTurn() {
     aiThinking = true;
     clearHighlights();
-    statusEl.textContent = "AI's turn...";
-    setTimeout(() => {
+    statusEl.textContent = 'Computer is thinking...';
+    timers.later(() => {
+      if (finished) return;
       const move = chooseMove(board, cfg.level, AI, HUMAN, cfg.depth);
-      if (!move) { aiThinking = false; checkGameEnd(); return; }
+      if (!move) { aiThinking = false; checkGameEnd(AI); return; }
       const fromRC = move.from;
       animateMove(fromRC, move.steps, () => {
+        if (finished) return;
         applyFullMove(board, move);
         refreshPieces();
         moves++;
         syncCounts();
         aiThinking = false;
-        if (!checkGameEnd()) {
-          statusEl.textContent = 'Your turn';
+        if (!checkGameEnd(HUMAN)) {
+          statusEl.textContent = humanMandatoryCaptures().length ? 'Your turn - you must jump!' : 'Your turn';
           refreshSelectableHighlight();
         }
       });
@@ -397,7 +488,10 @@ function mount(container, difficulty, api) {
     const steps = captureStepsFrom(board, from.r, from.c).filter((s) => s.to[0] === dest[0] && s.to[1] === dest[1]);
     if (!steps.length) return false;
     const step = steps[0];
+    busy = true;
+    clearHighlights();
     animateMove([from.r, from.c], [step], () => {
+      if (finished) return;
       const piece = board[from.r][from.c];
       board[from.r][from.c] = 0;
       board[step.mid[0]][step.mid[1]] = 0;
@@ -409,6 +503,7 @@ function mount(container, difficulty, api) {
       if (more.length) {
         forcedContinue = { r: step.to[0], c: step.to[1] };
         selected = null;
+        busy = false;
         statusEl.textContent = 'Keep jumping with that piece!';
         refreshSelectableHighlight();
       } else {
@@ -418,14 +513,22 @@ function mount(container, difficulty, api) {
     return true;
   }
 
+  function invalid(msg) {
+    api.sound.error();
+    api.ui.shake(canvasHost);
+    if (msg) api.ui.toast(msg);
+  }
+
   function onPointerDown(e) {
-    if (finished || aiThinking) return;
-    const hit = stage.pick(e.clientX, e.clientY, cellMeshes.flat());
-    if (!hit) return;
-    const { r, c } = hit.object.userData;
+    if (finished || aiThinking || busy) return;
+    const p = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (!p) return;
+    const half = (SIZE - 1) / 2;
+    const r = Math.round(half - p.y / CELL), c = Math.round(p.x / CELL + half);
+    if (!inBounds(r, c)) return;
 
     if (forcedContinue) {
-      if (!tryHumanCapture(r, c, [r, c])) { api.sound.error(); api.ui.shake(canvasHost); }
+      if (!tryHumanCapture(r, c, [r, c])) invalid('Keep jumping with the same piece - tap a yellow square.');
       return;
     }
 
@@ -436,9 +539,13 @@ function mount(container, difficulty, api) {
       } else {
         const legalDest = simpleMovesFrom(board, selected.r, selected.c).find((m) => m.steps[0].to[0] === r && m.steps[0].to[1] === c);
         if (legalDest) {
-          animateMove([selected.r, selected.c], legalDest.steps, () => {
-            const piece = board[selected.r][selected.c];
-            board[selected.r][selected.c] = 0;
+          const from = selected;
+          busy = true;
+          clearHighlights();
+          animateMove([from.r, from.c], legalDest.steps, () => {
+            if (finished) return;
+            const piece = board[from.r][from.c];
+            board[from.r][from.c] = 0;
             board[r][c] = promoteIfNeeded(piece, [r, c]);
             refreshPieces();
             moves++;
@@ -448,20 +555,26 @@ function mount(container, difficulty, api) {
         }
       }
       // reselect or invalid
-      if (pieceOwner(board[r][c]) === HUMAN) { selected = { r, c }; api.sound.click(); refreshSelectableHighlight(); highlightSelected(); return; }
-      api.sound.error(); api.ui.shake(canvasHost);
+      if (selected.r === r && selected.c === c) { selected = null; api.sound.click(); refreshSelectableHighlight(); return; }
+      if (pieceOwner(board[r][c]) === HUMAN) { selectPiece(r, c, caps); return; }
+      invalid(caps.length ? 'You have a jump available - you must take it!' : 'Pieces move one square diagonally forward - tap a yellow square.');
       selected = null; refreshSelectableHighlight();
       return;
     }
 
-    if (pieceOwner(board[r][c]) === HUMAN) {
-      const ownCaps = caps.filter((m) => m.from[0] === r && m.from[1] === c);
-      if (caps.length && !ownCaps.length) { api.sound.error(); api.ui.shake(canvasHost); return; }
-      selected = { r, c };
-      api.sound.click();
-      refreshSelectableHighlight();
-      highlightSelected();
-    }
+    if (pieceOwner(board[r][c]) === HUMAN) { selectPiece(r, c, caps); return; }
+    if (board[r][c]) invalid('That is one of the computer\'s pieces - tap one of your pink ones.');
+    else invalid('Tap one of your glowing pieces first.');
+  }
+
+  function selectPiece(r, c, caps) {
+    const ownCaps = caps.filter((m) => m.from[0] === r && m.from[1] === c);
+    if (caps.length && !ownCaps.length) { invalid('You have a jump available - you must take it! Try a glowing piece.'); selected = null; refreshSelectableHighlight(); return; }
+    if (!caps.length && !simpleMovesFrom(board, r, c).length) { invalid('That piece is blocked - try a glowing one.'); selected = null; refreshSelectableHighlight(); return; }
+    selected = { r, c };
+    api.sound.click();
+    refreshSelectableHighlight();
+    highlightSelected();
   }
 
   function highlightSelected() {
@@ -483,20 +596,32 @@ function mount(container, difficulty, api) {
   refreshSelectableHighlight();
 
   function hint() {
-    if (finished || aiThinking) return;
+    if (finished) return;
+    if (aiThinking || busy) { api.ui.toast(`${api.playerName}, wait for the computer to finish its move.`); return; }
+    if (forcedContinue) {
+      const steps = captureStepsFrom(board, forcedContinue.r, forcedContinue.c);
+      if (steps.length) {
+        highlightDests(steps.map((st) => st.to));
+        api.ui.toast(`${api.playerName}, keep jumping - tap a yellow square!`);
+      }
+      return;
+    }
     const move = chooseMove(board, 'minimax', HUMAN, AI, 4);
     if (!move) return;
+    selected = null;
     clearHighlights();
     cellMeshes[move.from[0]][move.from[1]].material.emissive.set(0xff4d8d);
     cellMeshes[move.from[0]][move.from[1]].material.emissiveIntensity = 0.5;
     cellMeshes[move.steps[0].to[0]][move.steps[0].to[1]].material.emissive.set(0xffd93d);
     cellMeshes[move.steps[0].to[0]][move.steps[0].to[1]].material.emissiveIntensity = 0.5;
     api.ui.toast(`${api.playerName}, try moving the glowing piece!`);
-    setTimeout(() => { if (!selected && !forcedContinue) refreshSelectableHighlight(); }, 1400);
+    timers.later(() => { if (!selected && !forcedContinue && !finished && !aiThinking && !busy) refreshSelectableHighlight(); }, 1400);
   }
 
   return {
     unmount: () => {
+      finished = true;
+      timers.clear();
       stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       stage.dispose();
       wrap.remove();
@@ -505,4 +630,4 @@ function mount(container, difficulty, api) {
   };
 }
 
-PC.Games.register('checkers', { mount });
+PC.Games.register('checkers', { mount: guardMount(mount, { retry: true }) });

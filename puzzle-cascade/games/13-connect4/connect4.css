@@ -2,3 +2,7 @@
   display: flex; justify-content: center; color: #fff; font-weight: 700;
   font-family: var(--pc-font-display); margin-bottom: 4px; text-align: center;
 }
+
+/* Keep the WebGL canvas out of layout so its pixel size can never push the
+   stage taller than the screen. */
+#c4-canvas > canvas { position: absolute; top: 0; left: 0; }

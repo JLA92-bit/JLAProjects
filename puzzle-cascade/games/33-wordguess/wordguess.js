@@ -43,8 +43,37 @@ function evaluateGuess(guess, secret) {
   return result;
 }
 
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.06, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
+  let revealing = false;
   const pool = POOL[cfg.len];
   const secret = pool[Math.floor(Math.random() * pool.length)];
   let row = 0, col = 0, finished = false;
@@ -62,13 +91,14 @@ function mount(container, difficulty, api) {
   const canvasHost = wrap.querySelector('#wg-canvas');
   const rowEl = wrap.querySelector('#wg-row');
   const kbEl = wrap.querySelector('#wg-keyboard');
+  // build the keyboard first so the canvas is measured with it in place
+  buildKeyboard();
 
   const TILE = 0.86, GAP = 0.12;
   const totalW = cfg.len * (TILE + GAP) - GAP;
   const totalH = cfg.guesses * (TILE + GAP) - GAP;
-  const halfW = totalW / 2 + 0.6, halfH = totalH / 2 + 0.6;
-  const distance = Math.max(halfH / 0.42, halfW / (0.42 * 0.5));
-  const stage = createStage(canvasHost, { distance });
+  const halfW = totalW / 2 + 0.2, halfH = totalH / 2 + 0.2;
+  const stage = createStage(canvasHost, fitView(canvasHost, halfW, halfH));
 
   const grid = [];
   const startY = (totalH - TILE) / 2;
@@ -115,7 +145,6 @@ function mount(container, difficulty, api) {
       kbEl.appendChild(rowDiv);
     });
   }
-  buildKeyboard();
 
   function refreshKeyboardColors() {
     kbEl.querySelectorAll('.wg-key').forEach((btn) => {
@@ -127,13 +156,13 @@ function mount(container, difficulty, api) {
   }
 
   function pressKey(k) {
-    if (finished) return;
+    if (finished || revealing) return;
     if (k === 'BACK') {
-      if (col > 0) { col--; guesses[row][col] = ''; setLetter(row, col, ''); }
+      if (col > 0) { col--; guesses[row][col] = ''; setLetter(row, col, ''); api.sound.click(); }
       return;
     }
     if (k === 'ENTER') { submitRow(); return; }
-    if (col >= cfg.len) return;
+    if (col >= cfg.len) { api.sound.error(); api.ui.shake(canvasHost); return; }
     guesses[row][col] = k;
     setLetter(row, col, k);
     api.sound.click();
@@ -141,12 +170,18 @@ function mount(container, difficulty, api) {
   }
 
   function submitRow() {
-    if (col < cfg.len) { api.ui.shake(canvasHost); api.sound.error(); return; }
+    if (col < cfg.len || guesses[row].some((ch) => !ch)) {
+      api.ui.shake(canvasHost); api.sound.error();
+      api.ui.toast(`${api.playerName}, fill all ${cfg.len} letters first!`);
+      return;
+    }
+    revealing = true;
+    api.sound.move();
     const guess = guesses[row].join('');
     const results = evaluateGuess(guess, secret);
     results.forEach((res, c) => {
       const cell = grid[row][c];
-      setTimeout(() => {
+      later(() => {
         tween(cell.mesh.material, { emissiveIntensity: 0.6 }, 120, Easing.outCubic, () => tween(cell.mesh.material, { emissiveIntensity: 0 }, 250));
         cell.mesh.material.color.set(colorForResult(res));
         const ch = guess[c];
@@ -154,28 +189,41 @@ function mount(container, difficulty, api) {
         if (!keyState[ch] || rank[res] > rank[keyState[ch]]) keyState[ch] = res;
       }, c * 100);
     });
-    setTimeout(() => {
+    later(() => {
+      revealing = false;
       refreshKeyboardColors();
       if (guess === secret) {
         api.ui.burstFromElement(canvasHost);
         api.sound.win();
         finished = true;
         const stars = row <= 1 ? 3 : row <= Math.ceil(cfg.guesses / 2) ? 2 : 1;
-        setTimeout(() => api.win(stars, { guesses: row + 1 }), 350);
+        later(() => api.win(stars, { guesses: row + 1 }), 350);
       } else {
         row++;
         col = 0;
         rowEl.textContent = Math.min(row + 1, cfg.guesses);
         if (row >= cfg.guesses) {
           finished = true;
-          setTimeout(() => api.lose(`out of guesses! The word was ${secret}.`), 350);
+          later(() => {
+            api.lose(`out of guesses! The word was ${secret}.`);
+            showRetry(`The word was ${secret}.`);
+          }, 350);
         }
       }
     }, cfg.len * 100 + 150);
   }
 
+  function showRetry(msg) {
+    const over = document.createElement('div');
+    over.className = 'wg-over';
+    over.innerHTML = `<div class="wg-over-msg"></div><button class="pc-btn pc-btn--blue">New word</button>`;
+    over.querySelector('.wg-over-msg').textContent = msg;
+    over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+    canvasHost.appendChild(over);
+  }
+
   function onKeydown(e) {
-    if (finished) return;
+    if (finished || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toUpperCase();
     if (k === 'ENTER') pressKey('ENTER');
     else if (k === 'BACKSPACE') pressKey('BACK');
@@ -184,13 +232,18 @@ function mount(container, difficulty, api) {
   window.addEventListener('keydown', onKeydown);
 
   function hint() {
-    if (finished) return;
+    if (finished || revealing) return;
     // reveal one correct letter not yet placed in the current row's inputs
     for (let c = 0; c < cfg.len; c++) {
       if (guesses[row][c] !== secret[c]) {
         guesses[row][c] = secret[c];
         setLetter(row, c, secret[c]);
-        col = Math.max(col, c + 1);
+        if (c >= col) {
+          // typing continues after the revealed letter; any gap before it
+          // is filled with the right letters too so the row stays valid
+          for (let g = col; g < c; g++) { guesses[row][g] = secret[g]; setLetter(row, g, secret[g]); }
+          col = c + 1;
+        }
         api.ui.toast(`${api.playerName}, letter ${c + 1} revealed!`);
         return;
       }
@@ -200,7 +253,9 @@ function mount(container, difficulty, api) {
 
   return {
     unmount: () => {
+      alive = false;
       finished = true;
+      timers.forEach(clearTimeout); timers.clear();
       window.removeEventListener('keydown', onKeydown);
       stage.dispose();
       wrap.remove();

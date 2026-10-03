@@ -15,3 +15,9 @@
   touch-action: manipulation; user-select: none;
 }
 .bo-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+.bo-controls { flex: 0 0 auto; margin-top: 2px; }
+.bo-btn { width: 84px; height: 52px; padding: 0; touch-action: none; }
+.bo-tip {
+  position: absolute; left: 0; right: 0; top: 52%;
+  display: flex; justify-content: center; pointer-events: none; z-index: 2;
+}

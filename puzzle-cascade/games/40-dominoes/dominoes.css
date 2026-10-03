@@ -2,3 +2,7 @@
   display: flex; gap: 12px; color: #fff; font-weight: 700; font-family: var(--pc-font-display);
   justify-content: center; margin-bottom: 4px; font-size: 0.85rem; flex-wrap: wrap;
 }
+
+/* The canvas must not size its own box: positioned absolutely, it can never
+   push DOM controls below the fold - the flex layout decides its size. */
+#dm-canvas > canvas { position: absolute; inset: 0; }

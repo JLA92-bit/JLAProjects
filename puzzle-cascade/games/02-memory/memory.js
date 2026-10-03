@@ -9,15 +9,58 @@ import { createStage, makeTile, makeTextSprite, tween, popIn, Easing, PALETTE } 
 const CONFIG = {
   easy: { pairs: 6, cols: 4 },
   medium: { pairs: 8, cols: 4 },
-  hard: { pairs: 12, cols: 6 },
+  hard: { pairs: 12, cols: 4 }, // 4x6 - portrait phones
 };
 const ICON_POOL = ['🍎', '🍌', '🍇', '🍉', '🍓', '🍑', '🍍', '🥝', '🍒', '🫐', '🍐', '🍬', '🍩', '🍭', '🍪', '🥭', '🍮', '🍡'];
 const CARD_SIZE = 0.92;
 const SPACING = 1.02;
 
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
+
+function glow(mesh, color = 0xffffff) {
+  if (!mesh || !mesh.material || !mesh.material.emissive) return;
+  mesh.material.emissive.set(color);
+  mesh.material.emissiveIntensity = 0.7;
+  tween(mesh.material, { emissiveIntensity: 0 }, 900, Easing.inOutQuad);
+  tween(mesh.scale, { x: 1.18, y: 1.18, z: 1.18 }, 160, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 220, Easing.outCubic));
+}
+
 function starsForAttempts(pairs, attempts) {
-  const perfect = pairs + 1;
-  const good = Math.round(pairs * 1.6);
+  // A player with perfect recall still averages ~1.6 attempts per pair.
+  const perfect = Math.round(pairs * 1.6);
+  const good = Math.round(pairs * 2.5);
   if (attempts <= perfect) return 3;
   if (attempts <= good) return 2;
   return 1;
@@ -35,7 +78,8 @@ function mount(container, difficulty, api) {
   const icons = shuffle(ICON_POOL).slice(0, cfg.pairs);
   const deck = shuffle(icons.concat(icons)).map((icon, i) => ({ id: i, icon, flipped: false, matched: false }));
 
-  let attempts = 0, matchedPairs = 0, lock = false, firstPick = null;
+  const life = lifecycle();
+  let attempts = 0, matchedPairs = 0, lock = false, firstPick = null, finished = false;
 
   const wrap = document.createElement('div');
   wrap.className = 'pc-stage-inner';
@@ -49,6 +93,7 @@ function mount(container, difficulty, api) {
   const pairsEl = wrap.querySelector('#mm-pairs');
 
   const stage = createStage(canvasHost, { distance: Math.max(cfg.cols, rows) * 2.3 });
+  fitBoard(stage, canvasHost, (cfg.cols - 1) * SPACING + CARD_SIZE, (rows - 1) * SPACING + CARD_SIZE);
 
   function cellXY(idx) {
     const row = Math.floor(idx / cfg.cols), col = idx % cfg.cols;
@@ -60,6 +105,7 @@ function mount(container, difficulty, api) {
   deck.forEach((card, idx) => {
     const { x, y } = cellXY(idx);
     const mesh = makeTile({ w: CARD_SIZE, h: CARD_SIZE, depth: 0.16, radius: 0.14, color: 0x6a2dd6 });
+    mesh.material.envMapIntensity = 0.35; // keeps the pale card faces from blooming out
     mesh.position.set(x, y, 0);
     const label = makeFaceLabel(mesh, '?', 0xfff);
     mesh.userData = { id: card.id, label };
@@ -80,16 +126,17 @@ function mount(container, difficulty, api) {
     return { plane, setText: (t) => { plane.material.map.dispose(); const nt = makeTextSprite(t, { size: 160, color: '#ffffff' }); nt.generateMipmaps = false; plane.material.map = nt; plane.material.needsUpdate = true; } };
   }
 
-  function flipVisual(mesh, showIcon, iconText) {
+  function flipVisual(mesh, showIcon, iconText, faceColor = 0xfffaf2) {
     tween(mesh.scale, { x: 0.03 }, 110, Easing.inOutQuad, () => {
+      if (life.dead) return;
       mesh.userData.label.setText(showIcon ? iconText : '?');
-      mesh.material.color.set(showIcon ? 0xfffaf2 : 0x6a2dd6);
+      mesh.material.color.set(showIcon ? faceColor : 0x6a2dd6);
       tween(mesh.scale, { x: 1 }, 160, Easing.outBack);
     });
   }
 
   function onPointerDown(e) {
-    if (lock) return;
+    if (lock || finished) return;
     const hit = stage.pick(e.clientX, e.clientY, meshes);
     if (!hit) return;
     onPick(hit.object);
@@ -116,17 +163,20 @@ function mount(container, difficulty, api) {
       matchedPairs++;
       pairsEl.textContent = matchedPairs;
       api.sound.match();
-      setTimeout(() => {
+      life.later(() => {
+        // matched pairs settle on a soft mint face so they read as "done"
+        [first.mesh, mesh].forEach((m) => { m.material.color.set(0xc9f7df); });
         api.ui.burstFromElement(canvasHost, { count: 16 });
         lock = false;
         if (matchedPairs === cfg.pairs) {
+          finished = true;
           const stars = starsForAttempts(cfg.pairs, attempts);
-          setTimeout(() => api.win(stars, { attempts }), 250);
+          life.later(() => api.win(stars, { attempts }), 250);
         }
-      }, 120);
+      }, 300);
     } else {
       api.sound.error();
-      setTimeout(() => {
+      life.later(() => {
         first.card.flipped = false; card.flipped = false;
         flipVisual(first.mesh, false); flipVisual(mesh, false);
         lock = false;
@@ -135,6 +185,7 @@ function mount(container, difficulty, api) {
   }
 
   function hint() {
+    if (finished) { api.ui.toast(`${api.playerName}, you found them all!`); return; }
     if (lock) return;
     const candidates = deck.filter((c) => !c.matched && !c.flipped && (!firstPick || c.id !== firstPick.card.id));
     const byIcon = {};
@@ -147,20 +198,24 @@ function mount(container, difficulty, api) {
     flipVisual(meshA, true, a.icon);
     flipVisual(meshB, true, b.icon);
     api.ui.toast(`${api.playerName}, remember these two!`);
-    setTimeout(() => {
+    life.later(() => {
       if (!a.matched && !a.flipped) flipVisual(meshA, false);
       if (!b.matched && !b.flipped) flipVisual(meshB, false);
     }, 1000);
   }
 
-  return {
-    unmount: () => {
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('memory', { mount });

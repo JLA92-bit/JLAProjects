@@ -16,13 +16,73 @@ const HOLE_COLOR = 0x1a0c30;
 const MOLE_COLOR = 0x8a5a2b;
 const BOMB_COLOR = 0xff5c5c;
 
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
+
+// In-canvas "Try again" button shown after a loss.
+function showRetry(host, onRetry) {
+  host.querySelectorAll('.pc-overlay-bottom').forEach((el) => { el.hidden = true; });
+  const bar = document.createElement('div');
+  bar.className = 'pc-overlay-bottom';
+  bar.innerHTML = '<button class="pc-btn pc-btn--blue" type="button">🔁 Try again</button>';
+  bar.querySelector('button').addEventListener('click', onRetry, { once: true });
+  host.appendChild(bar);
+}
+
+// The round ends as soon as the target is hit, so stars reward speed.
+function starsForTimeLeft(remainingMs, totalMs) {
+  if (remainingMs >= totalMs * 0.3) return 3;
+  if (remainingMs >= totalMs * 0.12) return 2;
+  return 1;
+}
+
 function cellXY(r, c, size) {
   const half = (size - 1) / 2;
   return { x: (c - half) * CELL, y: (half - r) * CELL };
 }
 
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let round = null;
+  const start = () => { round = mountRound(container, difficulty, api, restart); };
+  const restart = () => { api.sound.click(); if (round) round.unmount(); start(); };
+  start();
+  return { unmount: () => round && round.unmount(), hint: () => round && round.hint() };
+}
+
+function mountRound(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  const life = lifecycle();
   const size = cfg.size;
   let score = 0, remainingMs = cfg.timeMs, finished = false;
   const active = new Map(); // idx -> { mesh, isBomb, timeoutId }
@@ -35,7 +95,7 @@ function mount(container, difficulty, api) {
       <span id="wm-time">${Math.ceil(remainingMs / 1000)}s</span>
     </div>
     <div class="pc-canvas3d" id="wm-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Tap the moles - avoid red bombs!</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">${cfg.bombChance ? 'Tap the moles - avoid red bombs!' : 'Tap the moles as they pop up!'}</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -44,6 +104,7 @@ function mount(container, difficulty, api) {
   const timeEl = wrap.querySelector('#wm-time');
 
   const stage = createStage(canvasHost, { distance: size * 2.5 });
+  fitBoard(stage, canvasHost, size * CELL, size * CELL, { pad: 16, bottom: 50 });
 
   const holes = [];
   for (let r = 0; r < size; r++) {
@@ -69,11 +130,11 @@ function mount(container, difficulty, api) {
       mesh.userData = { idx };
       stage.world.add(mesh);
       tween(mesh.position, { z: 0.15 }, 160, Easing.outBack);
-      const timeoutId = setTimeout(() => duckMole(idx, false), cfg.upMs);
+      const timeoutId = life.later(() => duckMole(idx, false), cfg.upMs);
       active.set(idx, { mesh, isBomb, timeoutId });
     }
     const [lo, hi] = cfg.spawnMs;
-    setTimeout(spawnMole, lo + Math.random() * (hi - lo));
+    life.later(spawnMole, lo + Math.random() * (hi - lo));
   }
 
   function duckMole(idx, hit) {
@@ -90,10 +151,13 @@ function mount(container, difficulty, api) {
 
   function onPointerDown(e) {
     if (finished) return;
-    const meshes = [...active.values()].map((e) => e.mesh);
-    const hit = stage.pick(e.clientX, e.clientY, meshes);
-    if (!hit) return;
-    const idx = hit.object.userData.idx;
+    // Generous: any touch within the hole's square counts.
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (!pt) return;
+    const half = (size - 1) / 2;
+    const c = Math.round(pt.x / CELL + half), r = Math.round(half - pt.y / CELL);
+    if (r < 0 || r >= size || c < 0 || c >= size) return;
+    const idx = r * size + c;
     const entry = active.get(idx);
     if (!entry) return;
     if (entry.isBomb) {
@@ -103,7 +167,7 @@ function mount(container, difficulty, api) {
     } else {
       score += 1;
       api.sound.click();
-      api.ui.burstFromElement(entry.mesh === hit.object ? canvasHost : canvasHost, { count: 10 });
+      api.ui.burstFromElement(canvasHost, { count: 10 });
     }
     scoreEl.textContent = score;
     duckMole(idx, true);
@@ -112,7 +176,7 @@ function mount(container, difficulty, api) {
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
   const timerId = setInterval(() => {
-    if (finished) return;
+    if (finished || life.dead) return;
     remainingMs -= 200;
     if (remainingMs <= 0) {
       remainingMs = 0;
@@ -129,18 +193,21 @@ function mount(container, difficulty, api) {
     clearInterval(timerId);
     active.forEach((entry, idx) => duckMole(idx, false));
     if (won) {
-      const ratio = score / cfg.target;
-      const stars = ratio >= 1.4 ? 3 : ratio >= 1.1 ? 2 : 1;
-      setTimeout(() => api.win(stars, { score }), 300);
+      const stars = starsForTimeLeft(remainingMs, cfg.timeMs);
+      api.ui.burstFromElement(canvasHost);
+      life.later(() => api.win(stars, { score }), 300);
     } else {
-      setTimeout(() => api.lose(`you scored ${score}, but needed ${cfg.target}. Try again!`), 200);
+      life.later(() => {
+        api.lose(`you scored ${score}, but needed ${cfg.target}. Try again!`);
+        showRetry(canvasHost, restart);
+      }, 200);
     }
   }
 
-  setTimeout(spawnMole, 500);
+  life.later(spawnMole, 600);
 
   function hint() {
-    if (finished) return;
+    if (finished) { api.ui.toast(`${api.playerName}, this round is over!`); return; }
     const goodMole = [...active.entries()].find(([, e]) => !e.isBomb);
     if (!goodMole) { api.ui.toast(`${api.playerName}, wait for a mole to pop up!`); return; }
     const [, entry] = goodMole;
@@ -148,16 +215,20 @@ function mount(container, difficulty, api) {
     api.ui.toast(`${api.playerName}, whack that one!`);
   }
 
-  return {
-    unmount: () => {
-      finished = true;
-      clearInterval(timerId);
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    finished = true;
+    clearInterval(timerId);
+    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('whackmole', { mount });

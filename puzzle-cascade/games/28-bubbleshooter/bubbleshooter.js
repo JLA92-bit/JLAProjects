@@ -30,8 +30,36 @@ function neighbors(r, c) {
   return [[0, -1], [0, 1], ...diagUp, ...diagDown].map(([dr, dc]) => [r + dr, c + dc]);
 }
 
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.08, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
   const numColors = cfg.colors;
   const grid = new Map(); // "r,c" -> colorIdx
   let shotsTaken = 0, popped = 0, finished = false, busy = false;
@@ -49,7 +77,7 @@ function mount(container, difficulty, api) {
   wrap.innerHTML = `
     <div class="bb-meta">Cleared: <span id="bb-popped">0</span> / ${cfg.target}</div>
     <div class="pc-canvas3d" id="bb-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Drag to aim, release to shoot</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">Drag to aim, let go to shoot. Tap the small bubble to swap.</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -58,9 +86,7 @@ function mount(container, difficulty, api) {
 
   const fieldHalfW = COLS * CELL / 2 + CELL * 0.5;
   const fieldHalfH = (ROWS_VISIBLE * ROW_H + CELL * 2.2) / 2 + 0.4;
-  const aspectMin = 0.46;
-  const distance = Math.max((fieldHalfW + 0.4) / (0.42 * aspectMin), fieldHalfH / 0.42) * 1.05;
-  const stage = createStage(canvasHost, { distance });
+  const stage = createStage(canvasHost, fitView(canvasHost, fieldHalfW + 0.25, fieldHalfH, { reserveBottom: 50 }));
 
   const topY = fieldHalfH - CELL * 0.6;
   const shooterY = topY - (ROWS_VISIBLE + 0.6) * ROW_H;
@@ -106,16 +132,40 @@ function mount(container, difficulty, api) {
   let aiming = false;
   let projectile = null; // { pos: {x,y}, vx, vy }
 
+  // Preview the shot path, including one wall bounce, so it is obvious
+  // where the bubble will travel.
   function updateAimLine(dirX, dirY) {
-    const p0 = new THREE.Vector3(0, shooterY, 0.05);
-    const p1 = new THREE.Vector3(dirX * 3, shooterY + dirY * 3, 0.05);
-    aimLine.geometry.setFromPoints([p0, p1]);
+    const pts = [new THREE.Vector3(0, shooterY, 0.05)];
+    let x = 0, y = shooterY, vx = dirX, vy = dirY, left = 9;
+    const wall = fieldHalfW - CELL * 0.46;
+    for (let seg = 0; seg < 2 && left > 0; seg++) {
+      let t = left;
+      if (vx > 0.0001) t = Math.min(t, (wall - x) / vx);
+      if (vx < -0.0001) t = Math.min(t, (-wall - x) / vx);
+      t = Math.min(t, Math.max(0, (topY - y) / vy));
+      x += vx * t; y += vy * t; left -= t;
+      pts.push(new THREE.Vector3(x, y, 0.05));
+      if (y >= topY - 0.001) break;
+      vx = -vx;
+    }
+    aimLine.geometry.setFromPoints(pts);
     aimLine.visible = true;
   }
 
+  const el = stage.renderer.domElement;
+  function swapBubbles() {
+    const t = currentColor; currentColor = nextColor; nextColor = t;
+    shooterMesh.material.color.set(colorPool[currentColor]);
+    nextMesh.material.color.set(colorPool[nextColor]);
+    tween(nextMesh.scale, { x: 0.8, y: 0.8, z: 0.8 }, 120, Easing.outBack, () => tween(nextMesh.scale, { x: 0.6, y: 0.6, z: 0.6 }, 160, Easing.outCubic));
+    api.sound.click();
+  }
   function onPointerDown(e) {
     if (finished || busy) return;
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (pt && Math.hypot(pt.x - nextMesh.position.x, pt.y - nextMesh.position.y) < CELL * 0.9) { swapBubbles(); return; }
     aiming = { dx: 0, dy: 1 };
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     updateFromPointer(e);
   }
   function updateFromPointer(e) {
@@ -132,16 +182,18 @@ function mount(container, difficulty, api) {
     if (!aiming) return;
     updateFromPointer(e);
   }
+  function onPointerCancel() { aiming = false; aimLine.visible = false; }
   function onPointerUp() {
-    if (!aiming || finished || busy) { aiming = false; return; }
+    if (!aiming || finished || busy) { aiming = false; aimLine.visible = false; return; }
     const { dx, dy } = aiming;
     aiming = false;
     aimLine.visible = false;
     fireShot(dx, dy);
   }
-  stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp);
+  el.addEventListener('pointerdown', onPointerDown);
+  el.addEventListener('pointermove', onPointerMove);
+  el.addEventListener('pointerup', onPointerUp);
+  el.addEventListener('pointercancel', onPointerCancel);
 
   function fireShot(dx, dy) {
     busy = true;
@@ -154,6 +206,7 @@ function mount(container, difficulty, api) {
     let best = null, bestDist = Infinity;
     for (let r = 0; r <= DANGER_ROW + 1; r++) {
       for (let c = 0; c < rowLen(r); c++) {
+        if (grid.has(key(r, c))) continue;
         const cx = cellX(r, c), cy = cellY(r, topY);
         const d = Math.hypot(cx - x, cy - y);
         if (d < bestDist) { bestDist = d; best = [r, c]; }
@@ -179,7 +232,6 @@ function mount(container, difficulty, api) {
     }
     if (!target) target = nearestCell(projectile.x, projectile.y);
     if (!target) target = [0, 0];
-    if (grid.has(key(target[0], target[1]))) target = nearestCell(projectile.x, projectile.y);
     landBubble(target[0], target[1], projectile.color);
     projectile = null;
   }
@@ -211,7 +263,7 @@ function mount(container, difficulty, api) {
   function removeCells(cells) {
     cells.forEach((k) => {
       const mesh = bubbleMeshes.get(k);
-      if (mesh) { tween(mesh.scale, { x: 0.01, y: 0.01, z: 0.01 }, 180, Easing.inOutQuad, () => stage.world.remove(mesh)); }
+      if (mesh) { tween(mesh.scale, { x: 0.01, y: 0.01, z: 0.01 }, 180, Easing.inOutQuad, () => { if (alive) stage.world.remove(mesh); }); }
       bubbleMeshes.delete(k);
       grid.delete(k);
     });
@@ -285,16 +337,37 @@ function mount(container, difficulty, api) {
     api.ui.burstFromElement(canvasHost);
     const idealShots = Math.ceil(cfg.target / 2.4);
     const stars = shotsTaken <= idealShots ? 3 : shotsTaken <= idealShots * 1.7 ? 2 : 1;
-    setTimeout(() => api.win(stars, { shotsTaken, popped }), 300);
+    later(() => api.win(stars, { shotsTaken, popped }), 300);
   }
   function lose() {
     finished = true;
-    setTimeout(() => api.lose('the bubbles reached the danger line. Try again.'), 200);
+    aimLine.visible = false;
+    later(() => {
+      api.lose('the bubbles reached the danger line. Try again.');
+      showRetry('The bubbles reached the red line!');
+    }, 200);
+  }
+  function showRetry(msg) {
+    const over = document.createElement('div');
+    over.className = 'bb-over';
+    over.innerHTML = `<div class="bb-over-msg"></div><button class="pc-btn pc-btn--blue">Try again</button>`;
+    over.querySelector('.bb-over-msg').textContent = msg;
+    over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+    canvasHost.appendChild(over);
   }
 
-  stage.onTick(() => {
-    if (!projectile) return;
-    const dt = 1 / 60;
+  // Real frame time, clamped so a long pause (app in background) never
+  // teleports the bubble; small sub-steps keep collisions reliable.
+  let lastT = performance.now();
+  const unsubTick = stage.onTick(() => {
+    const now = performance.now();
+    const frameDt = Math.min(0.05, Math.max(0, (now - lastT) / 1000));
+    lastT = now;
+    if (!projectile || finished) return;
+    const steps = 3;
+    for (let i = 0; i < steps && projectile; i++) stepProjectile(frameDt / steps);
+  });
+  function stepProjectile(dt) {
     projectile.x += projectile.vx * dt;
     projectile.y += projectile.vy * dt;
     if (projectile.x < -fieldHalfW + CELL * 0.46) { projectile.x = -fieldHalfW + CELL * 0.46; projectile.vx *= -1; }
@@ -308,7 +381,7 @@ function mount(container, difficulty, api) {
       settleProjectile();
       shooterMesh.position.set(0, shooterY, 0.1);
     }
-  });
+  }
 
   function hint() {
     if (finished || busy) return;
@@ -320,18 +393,27 @@ function mount(container, difficulty, api) {
       if (sameNeighbors > bestScore) { bestScore = sameNeighbors; best = [r, c]; }
     });
     if (!best) { api.ui.toast(`${api.playerName}, aim anywhere near the top to start a new cluster!`); return; }
-    const mesh = bubbleMeshes.get(key(best[0], best[1]));
-    if (mesh) {
-      tween(mesh.scale, { x: 1.4, y: 1.4, z: 1.4 }, 180, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 220, Easing.outCubic));
-    }
-    api.ui.toast(`${api.playerName}, aim at the glowing cluster - it matches your color!`);
+    // pulse the whole matching cluster so it is easy to spot
+    floodSameColor(best[0], best[1]).forEach((k) => {
+      const mesh = bubbleMeshes.get(k);
+      if (!mesh) return;
+      mesh.material.emissive.set(0xffffff);
+      mesh.material.emissiveIntensity = 0.45;
+      tween(mesh.scale, { x: 1.3, y: 1.3, z: 1.3 }, 180, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 260, Easing.outCubic, () => { mesh.material.emissiveIntensity = 0; }));
+    });
+    api.ui.toast(`${api.playerName}, aim at the glowing bubbles - they match your color!`);
   }
 
   return {
     unmount: () => {
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
+      alive = false;
+      finished = true;
+      timers.forEach(clearTimeout); timers.clear();
+      unsubTick();
+      el.removeEventListener('pointerdown', onPointerDown);
+      el.removeEventListener('pointermove', onPointerMove);
+      el.removeEventListener('pointerup', onPointerUp);
+      el.removeEventListener('pointercancel', onPointerCancel);
       stage.dispose();
       wrap.remove();
     },

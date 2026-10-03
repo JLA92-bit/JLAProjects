@@ -1,19 +1,56 @@
 /**
  * Game 8 - Jigsaw Puzzle (3D). A procedurally-painted "photo" (no
  * scraped art - generated on a canvas) is diced into a grid of beveled
- * 3D pieces, scattered in a tray, and dragged back into their slots.
+ * 3D pieces. The board sits on top and the loose pieces wait in a tray
+ * below it (portrait phones); drag each one up into its slot.
  */
 import * as THREE from 'three';
 import { createStage, roundedRectShape, makeTile, tween, popIn, Easing } from '../../shared/js/three-stage.js';
 
 const CONFIG = {
-  easy: { cols: 3, rows: 3, moveStars: [3, 3] },
-  medium: { cols: 4, rows: 4, moveStars: [4, 4] },
-  hard: { cols: 5, rows: 5, moveStars: [5, 5] },
+  easy: { cols: 3, rows: 3 },
+  medium: { cols: 4, rows: 4 },
+  hard: { cols: 5, rows: 5 },
 };
 const PIECE = 0.9;
 const GAP = 0.06;
-const SNAP_DIST = 0.32;
+const PITCH = PIECE + GAP;
+const SNAP_DIST = PITCH * 0.5; // forgiving: anywhere over the right slot snaps
+const TRAY_GAP = 0.45;
+
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
 
 function paintScene(size = 512) {
   const canvas = document.createElement('canvas');
@@ -57,29 +94,42 @@ function starsForMisplacedTries(wrongDrops, total) {
 }
 
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
   const { cols, rows } = cfg;
   const total = cols * rows;
+  const life = lifecycle();
   let placedCount = 0, wrongDrops = 0, finished = false;
 
   const wrap = document.createElement('div');
   wrap.className = 'pc-stage-inner';
   wrap.innerHTML = `
     <div class="jg-meta"><span>Placed: <span id="jg-placed">0</span>/${total}</span></div>
-    <div class="pc-canvas3d" id="jg-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Drag each piece into its outlined slot</span></div>
-    </div>
+    <div class="pc-canvas3d" id="jg-canvas"></div>
   `;
   container.appendChild(wrap);
   const canvasHost = wrap.querySelector('#jg-canvas');
   const placedEl = wrap.querySelector('#jg-placed');
 
-  const boardSpan = Math.max(cols, rows) * (PIECE + GAP);
-  const stage = createStage(canvasHost, { distance: boardSpan * 1.55 });
+  // Layout (world units): board centered at y = boardY, tray grid below it.
+  const boardW = cols * PITCH, boardH = rows * PITCH;
+  const boardY = (boardH + TRAY_GAP) / 2;
+  const trayY = boardY - boardH / 2 - TRAY_GAP - boardH / 2;
+  const totalH = boardH * 2 + TRAY_GAP;
+  const stage = createStage(canvasHost, { distance: totalH * 1.2 });
+  fitBoard(stage, canvasHost, boardW + 0.2, totalH + 0.2, { pad: 10, top: 10, bottom: 10 });
   const halfC = (cols - 1) / 2, halfR = (rows - 1) / 2;
-  function slotXY(r, c) { return { x: (c - halfC) * (PIECE + GAP), y: (halfR - r) * (PIECE + GAP) }; }
+  function slotXY(r, c) { return { x: (c - halfC) * PITCH, y: boardY + (halfR - r) * PITCH }; }
+  function trayXY(i) { const r = Math.floor(i / cols), c = i % cols; return { x: (c - halfC) * PITCH, y: trayY + (halfR - r) * PITCH }; }
 
-  // slot outlines
+  // board backing + slot outlines
+  const backing = makeTile({ w: boardW + 0.12, h: boardH + 0.12, depth: 0.06, radius: 0.12, color: 0x1a0c30, roughness: 0.9 });
+  backing.position.set(0, boardY, -0.12);
+  backing.castShadow = false;
+  stage.world.add(backing);
+  const tray = makeTile({ w: boardW + 0.12, h: boardH + 0.12, depth: 0.04, radius: 0.12, color: 0xffffff, opacity: 0.08 });
+  tray.position.set(0, trayY, -0.14);
+  tray.castShadow = false;
+  stage.world.add(tray);
   const slotMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const { x, y } = slotXY(r, c);
@@ -87,7 +137,7 @@ function mount(container, difficulty, api) {
     const points = shape.getPoints(20).map((p) => new THREE.Vector3(p.x, p.y, 0.005));
     const geo = new THREE.BufferGeometry().setFromPoints(points);
     const line = new THREE.LineLoop(geo, slotMat);
-    line.position.set(x, y, 0);
+    line.position.set(x, y, -0.05);
     stage.world.add(line);
   }
 
@@ -98,8 +148,8 @@ function mount(container, difficulty, api) {
   const pieces = [];
   const order = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) order.push({ r, c });
-  // scatter positions in a ring around the board
-  const scattered = order.slice().sort(() => Math.random() - 0.5);
+  let trayOrder;
+  do { trayOrder = order.map((_, i) => i).sort(() => Math.random() - 0.5); } while (total > 1 && trayOrder.every((v, i) => v === i));
 
   order.forEach(({ r, c }, i) => {
     const tex = baseTexture.clone();
@@ -118,77 +168,27 @@ function mount(container, difficulty, api) {
     mesh.add(face);
     mesh.castShadow = true; mesh.receiveShadow = true;
 
-    const scatterIdx = scattered.indexOf(order[i]);
-    const angle = (scatterIdx / total) * Math.PI * 2;
-    const radius = boardSpan * 0.58 + (scatterIdx % 3) * 0.16;
-    mesh.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius * 0.55 - boardSpan * 0.1, 0.05);
-    mesh.rotation.z = (Math.random() - 0.5) * 0.5;
+    const home = trayXY(trayOrder.indexOf(i));
+    mesh.position.set(home.x, home.y, 0.05);
+    mesh.rotation.z = (Math.random() - 0.5) * 0.3;
     stage.world.add(mesh);
     popIn(mesh, { delay: i * 25, duration: 260 });
 
-    pieces.push({ r, c, mesh, placed: false, target: slotXY(r, c) });
+    const piece = { r, c, mesh, face, placed: false, target: slotXY(r, c), home };
+    mesh.userData.piece = piece;
+    face.userData.piece = piece;
+    pieces.push(piece);
   });
 
   function meshList() { return pieces.filter((p) => !p.placed).map((p) => p.mesh); }
 
-  let dragging = null;
-  function onDown(e) {
-    if (finished) return;
-    const hit = stage.pick(e.clientX, e.clientY, meshList());
-    if (!hit) return;
-    dragging = pieces.find((p) => p.mesh === hit.object);
-    dragging.mesh.position.z = 0.4;
-    dragging.mesh.scale.set(1.08, 1.08, 1.08);
-    api.sound.select();
-  }
-  function onMove(e) {
-    if (!dragging) return;
-    const pt = stage.pickPlane(e.clientX, e.clientY, 0.4);
-    if (!pt) return;
-    dragging.mesh.position.x = pt.x;
-    dragging.mesh.position.y = pt.y;
-  }
-  function onUp() {
-    if (!dragging) return;
-    const p = dragging;
-    dragging = null;
-    const dx = p.mesh.position.x - p.target.x, dy = p.mesh.position.y - p.target.y;
-    const dist = Math.hypot(dx, dy);
-    tween(p.mesh.scale, { x: 1, y: 1, z: 1 }, 120, Easing.outCubic);
-    if (dist < SNAP_DIST) {
-      p.placed = true;
-      p.mesh.rotation.z = 0;
-      tween(p.mesh.position, { x: p.target.x, y: p.target.y, z: 0 }, 160, Easing.outBack, () => {
-        placedCount++;
-        placedEl.textContent = placedCount;
-        api.sound.match();
-        api.ui.burstFromElement(canvasHost, { count: 10 });
-        if (placedCount === total) {
-          finished = true;
-          const stars = starsForMisplacedTries(wrongDrops, total);
-          setTimeout(() => api.win(stars, { wrongDrops }), 300);
-        }
-      });
-    } else {
-      wrongDrops++;
-      tween(p.mesh.position, { z: 0.05 }, 160, Easing.outCubic);
-    }
-  }
-
-  stage.renderer.domElement.addEventListener('pointerdown', onDown);
-  window.addEventListener('pointermove', onMove);
-  window.addEventListener('pointerup', onUp);
-
-  function hint() {
-    if (finished) return;
-    const unplaced = pieces.filter((p) => !p.placed && p !== dragging);
-    if (!unplaced.length) return;
-    const p = unplaced[Math.floor(Math.random() * unplaced.length)];
+  function placePiece(p, duration) {
     p.placed = true;
-    p.mesh.rotation.z = 0;
-    tween(p.mesh.scale, { x: 1.15, y: 1.15, z: 1.15 }, 120, Easing.outCubic);
-    tween(p.mesh.position, { x: p.target.x, y: p.target.y, z: 0 }, 280, Easing.outBack, () => {
-      tween(p.mesh.scale, { x: 1, y: 1, z: 1 }, 140, Easing.outCubic);
+    p.face.renderOrder = 5;
+    tween(p.mesh.rotation, { z: 0 }, duration, Easing.outCubic);
+    tween(p.mesh.position, { x: p.target.x, y: p.target.y, z: 0 }, duration, Easing.outBack, () => {
+      if (life.dead) return;
+      tween(p.mesh.scale, { x: 1, y: 1, z: 1 }, 120, Easing.outCubic);
       placedCount++;
       placedEl.textContent = placedCount;
       api.sound.match();
@@ -196,21 +196,96 @@ function mount(container, difficulty, api) {
       if (placedCount === total) {
         finished = true;
         const stars = starsForMisplacedTries(wrongDrops, total);
-        setTimeout(() => api.win(stars, { wrongDrops }), 300);
+        life.later(() => api.win(stars, { wrongDrops }), 300);
       }
     });
+  }
+
+  function sendHome(p) {
+    p.face.renderOrder = 10;
+    tween(p.mesh.scale, { x: 1, y: 1, z: 1 }, 120, Easing.outCubic);
+    tween(p.mesh.position, { x: p.home.x, y: p.home.y, z: 0.05 }, 220, Easing.outCubic);
+  }
+
+  const canvas = stage.renderer.domElement;
+  let dragging = null;
+  function onDown(e) {
+    if (finished || dragging) return;
+    const hit = stage.pick(e.clientX, e.clientY, meshList());
+    const p = hit && hit.object.userData.piece;
+    if (!p || p.placed) return;
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0.4);
+    if (!pt) return;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    dragging = { p, id: e.pointerId, ox: p.mesh.position.x - pt.x, oy: p.mesh.position.y - pt.y };
+    p.mesh.position.z = 0.4;
+    p.mesh.scale.set(1.08, 1.08, 1.08);
+    p.face.renderOrder = 20;
+    api.sound.select();
+  }
+  function onMove(e) {
+    if (!dragging || e.pointerId !== dragging.id) return;
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0.4);
+    if (!pt) return;
+    dragging.p.mesh.position.x = pt.x + dragging.ox;
+    dragging.p.mesh.position.y = pt.y + dragging.oy;
+  }
+  function onUp(e) {
+    if (!dragging || e.pointerId !== dragging.id) return;
+    const p = dragging.p;
+    dragging = null;
+    const { x, y } = p.mesh.position;
+    if (Math.hypot(x - p.target.x, y - p.target.y) < SNAP_DIST) {
+      placePiece(p, 160);
+      return;
+    }
+    // Dropped over the board but in the wrong slot counts as a miss.
+    const overBoard = Math.abs(x) < boardW / 2 && Math.abs(y - boardY) < boardH / 2;
+    if (overBoard) {
+      wrongDrops++;
+      api.sound.error();
+      api.ui.shake(canvasHost);
+    }
+    sendHome(p);
+  }
+  function onCancel() {
+    if (!dragging) return;
+    const p = dragging.p;
+    dragging = null;
+    sendHome(p);
+  }
+
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp);
+  canvas.addEventListener('pointercancel', onCancel);
+
+  function hint() {
+    if (finished) { api.ui.toast(`${api.playerName}, the picture is complete!`); return; }
+    const unplaced = pieces.filter((p) => !p.placed && (!dragging || p !== dragging.p));
+    if (!unplaced.length) return;
+    const p = unplaced[Math.floor(Math.random() * unplaced.length)];
+    p.mesh.scale.set(1.15, 1.15, 1.15);
+    placePiece(p, 280);
     api.ui.toast(`${api.playerName}, here's one piece placed for you!`);
   }
 
-  return {
-    unmount: () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    canvas.removeEventListener('pointerdown', onDown);
+    canvas.removeEventListener('pointermove', onMove);
+    canvas.removeEventListener('pointerup', onUp);
+    canvas.removeEventListener('pointercancel', onCancel);
+    baseTexture.dispose();
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('jigsaw', { mount });

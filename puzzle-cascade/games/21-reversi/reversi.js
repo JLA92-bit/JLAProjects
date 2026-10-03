@@ -13,8 +13,9 @@ const BOARD_COLOR = 0x1c6e4a;
 const CELL_COLOR_A = 0x1f7a52;
 const CELL_COLOR_B = 0x1c6e4a;
 const HUMAN = 1, AI = 2;
-const HUMAN_COLOR = 0x241436;
-const AI_COLOR = 0xfffaf2;
+// You play white (matching the intro card's example), the computer black.
+const HUMAN_COLOR = 0xfffaf2;
+const AI_COLOR = 0x241436;
 const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
 
 const CONFIG = {
@@ -126,10 +127,95 @@ function cellXY(r, c) {
   return { x: (c - half) * CELL, y: (half - r) * CELL };
 }
 
+/* ---------- lifecycle + framing helpers (kept local so this file stays self-contained) ---------- */
+
+// World half-height per unit of stage distance (matches three-stage.js).
+const VIEW_SCALE = 0.42;
+
+// Pick a camera distance that fits a board of the given world half-extents
+// into the canvas's real aspect ratio, with a safety margin so a later
+// resize (address bar, rotated phone, wrapped status text) never crops it.
+function fitDistance(host, halfW, halfH, margin = 1.08) {
+  const w = host.clientWidth || 340, h = host.clientHeight || 520;
+  const aspect = Math.max(0.35, Math.min(2.2, w / h));
+  return (Math.max(halfH, halfW / aspect) * margin) / VIEW_SCALE;
+}
+
+// Wraps a raw mount so nothing can call api.win/api.lose after unmount,
+// hint() never throws, and (optionally) a lost round offers an in-place
+// "Try again" button instead of leaving a dead board on screen.
+function guardMount(rawMount, { retry = false } = {}) {
+  return function mount(container, difficulty, api) {
+    let cur = null;
+    function start() {
+      const inst = { alive: true };
+      const safeApi = Object.assign({}, api, {
+        win: (...args) => { if (inst.alive) { inst.alive = false; api.win(...args); } },
+        lose: (msg) => {
+          if (!inst.alive) return;
+          inst.alive = false;
+          api.lose(msg);
+          if (retry) showRetry(inst);
+        },
+      });
+      const res = rawMount(container, difficulty, safeApi);
+      cur = {
+        inst,
+        el: container.lastElementChild,
+        unmount: typeof res === 'function' ? res : (res && res.unmount) || (() => {}),
+        hint: res && typeof res === 'object' ? res.hint : null,
+      };
+    }
+    function stop() {
+      if (!cur) return;
+      const c = cur;
+      cur = null;
+      c.inst.alive = false;
+      try { c.unmount(); } catch (e) { console.warn(e); }
+    }
+    function showRetry(inst) {
+      if (!cur || cur.inst !== inst || !cur.el) return;
+      const host = cur.el.querySelector('.pc-canvas3d') || cur.el;
+      const box = document.createElement('div');
+      box.style.cssText = 'position:absolute;left:0;right:0;bottom:56px;display:flex;justify-content:center;z-index:6;pointer-events:none;';
+      box.innerHTML = '<button type="button" class="pc-btn pc-btn--green" style="pointer-events:auto;min-height:48px;">\u{1F501} Try again</button>';
+      box.querySelector('button').addEventListener('click', () => {
+        if (!cur || cur.inst !== inst) return;
+        api.sound.click();
+        stop();
+        start();
+      });
+      host.appendChild(box);
+    }
+    start();
+    return {
+      unmount: () => stop(),
+      hint: () => {
+        if (!cur || !cur.hint) return;
+        try { cur.hint(); } catch (e) { console.warn(e); }
+      },
+    };
+  };
+}
+
+// setTimeout that is cancelled in bulk on unmount.
+function makeTimers() {
+  const ids = new Set();
+  return {
+    later(fn, ms) {
+      const id = setTimeout(() => { ids.delete(id); fn(); }, ms);
+      ids.add(id);
+      return id;
+    },
+    clear() { ids.forEach(clearTimeout); ids.clear(); },
+  };
+}
+
 function mount(container, difficulty, api) {
   const cfg = CONFIG[difficulty];
   let board = emptyBoard();
-  let finished = false, aiThinking = false, moves = 0, passes = 0;
+  let finished = false, aiThinking = false, busy = false, moves = 0, passes = 0;
+  const timers = makeTimers();
 
   const wrap = document.createElement('div');
   wrap.className = 'pc-stage-inner';
@@ -137,10 +223,10 @@ function mount(container, difficulty, api) {
     <div class="rv-meta">
       <span class="rv-score"><span class="rv-dot rv-dot--you"></span> You: <span id="rv-you">2</span></span>
       <span id="rv-status">Your turn</span>
-      <span class="rv-score"><span class="rv-dot rv-dot--ai"></span> AI: <span id="rv-ai">2</span></span>
+      <span class="rv-score"><span class="rv-dot rv-dot--ai"></span> Computer: <span id="rv-ai">2</span></span>
     </div>
     <div class="pc-canvas3d" id="rv-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Tap a square to flank the AI's discs</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip">You are white - tap a glowing square</span></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -149,7 +235,8 @@ function mount(container, difficulty, api) {
   const youEl = wrap.querySelector('#rv-you');
   const aiEl = wrap.querySelector('#rv-ai');
 
-  const stage = createStage(canvasHost, { distance: 26 });
+  const boardHalf = (SIZE * CELL) / 2 + 0.3;
+  const stage = createStage(canvasHost, { distance: fitDistance(canvasHost, boardHalf, boardHalf + 0.6) });
 
   const boardMat = new THREE.MeshStandardMaterial({ color: BOARD_COLOR, roughness: 0.65, metalness: 0.05 });
   const boardMesh = new THREE.Mesh(new THREE.BoxGeometry(SIZE * CELL + 0.4, SIZE * CELL + 0.4, 0.3), boardMat);
@@ -202,6 +289,16 @@ function mount(container, difficulty, api) {
     });
   }
 
+  // small ring marking the computer's most recent move
+  const lastMarker = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.05, 8, 32), new THREE.MeshBasicMaterial({ color: 0xff4d8d, toneMapped: false }));
+  lastMarker.visible = false;
+  stage.world.add(lastMarker);
+  function markLast(r, c) {
+    const { x, y } = cellXY(r, c);
+    lastMarker.position.set(x, y, 0.24);
+    lastMarker.visible = true;
+  }
+
   function syncCounts() {
     let you = 0, ai = 0;
     for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) { if (board[r][c] === HUMAN) you++; else if (board[r][c] === AI) ai++; }
@@ -228,16 +325,17 @@ function mount(container, difficulty, api) {
   function endGame() {
     finished = true;
     const { you, ai } = syncCounts();
-    if (you === ai) { statusEl.textContent = "It's a tie!"; setTimeout(() => api.win(2, { you, ai }), 300); return; }
+    cellMeshes.flat().forEach((m) => { m.material.emissiveIntensity = 0; });
+    if (you === ai) { statusEl.textContent = "It's a tie!"; timers.later(() => api.win(2, { you, ai }), 300); return; }
     if (you > ai) {
       statusEl.textContent = 'You win!';
       api.ui.burstFromElement(canvasHost);
       const margin = you - ai;
       const stars = margin >= 20 ? 3 : margin >= 8 ? 2 : 1;
-      setTimeout(() => api.win(stars, { you, ai, moves }), 300);
+      timers.later(() => api.win(stars, { you, ai, moves }), 300);
     } else {
-      statusEl.textContent = 'The AI wins.';
-      setTimeout(() => api.lose(`the AI finished with ${ai} discs to your ${you}.`), 300);
+      statusEl.textContent = 'The computer wins.';
+      timers.later(() => api.lose(`the computer finished with ${ai} discs to your ${you}. Try again!`), 300);
     }
   }
 
@@ -247,9 +345,9 @@ function mount(container, difficulty, api) {
     const selfMoves = legalMoves(board, activePlayer);
     if (!otherMoves.length && !selfMoves.length) { endGame(); return; }
     if (!otherMoves.length) {
-      // other side passes
+      // other side has to pass
       passes++;
-      statusEl.textContent = (activePlayer === HUMAN ? 'AI has no move - your turn again' : 'You have no move - AI goes again');
+      api.ui.toast(activePlayer === HUMAN ? 'The computer has no move - go again!' : 'You have no move this time - the computer goes again.');
       if (activePlayer === HUMAN) turnHuman(); else turnAI();
       return;
     }
@@ -258,47 +356,62 @@ function mount(container, difficulty, api) {
 
   function turnHuman() {
     aiThinking = false;
+    busy = false;
     statusEl.textContent = 'Your turn';
     highlightLegal(HUMAN);
   }
 
   function turnAI() {
     aiThinking = true;
-    statusEl.textContent = "AI's turn...";
+    statusEl.textContent = 'Computer is thinking...';
     highlightLegal(AI);
-    setTimeout(() => {
+    timers.later(() => {
+      if (finished) return;
       const move = chooseMove(board, cfg.level, AI, HUMAN, cfg.depth);
       if (!move) { afterMove(AI); return; }
       applyMove(board, move, AI);
       placeDisc(move.r, move.c, AI, true);
+      markLast(move.r, move.c);
       move.flips.forEach(([r, c]) => flipDisc(r, c, AI));
       moves++;
       syncCounts();
-      setTimeout(() => afterMove(AI), 320);
+      api.sound.move();
+      timers.later(() => { if (!finished) afterMove(AI); }, 320);
     }, 500);
   }
 
   function onPointerDown(e) {
-    if (finished || aiThinking) return;
-    const hit = stage.pick(e.clientX, e.clientY, cellMeshes.flat());
-    if (!hit) return;
-    const { r, c } = hit.object.userData;
+    if (finished || aiThinking || busy) return;
+    const p = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (!p) return;
+    const half = (SIZE - 1) / 2;
+    const r = Math.round(half - p.y / CELL), c = Math.round(p.x / CELL + half);
+    if (!inBounds(r, c)) return;
     const flips = flipsFor(board, r, c, HUMAN);
-    if (!flips.length) { api.sound.error(); api.ui.shake(canvasHost); return; }
+    if (!flips.length) {
+      api.sound.error();
+      api.ui.shake(canvasHost);
+      api.ui.toast(board[r][c] ? 'That square is taken - tap a glowing one.' : 'No discs to flip there - tap a glowing square.');
+      return;
+    }
+    busy = true;
+    cellMeshes.flat().forEach((m) => { m.material.emissiveIntensity = 0; });
+    lastMarker.visible = false;
     applyMove(board, { r, c, flips }, HUMAN);
     api.sound.click();
     placeDisc(r, c, HUMAN, true);
     flips.forEach(([fr, fc]) => flipDisc(fr, fc, HUMAN));
     moves++;
     syncCounts();
-    setTimeout(() => afterMove(HUMAN), 320);
+    timers.later(() => { if (!finished) afterMove(HUMAN); }, 320);
   }
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
   turnHuman();
 
   function hint() {
-    if (finished || aiThinking) return;
+    if (finished) return;
+    if (aiThinking || busy) { api.ui.toast(`${api.playerName}, wait for the computer to finish its move.`); return; }
     const move = chooseMove(board, 'minimax', HUMAN, AI, 4);
     if (!move) { api.ui.toast(`${api.playerName}, you have no legal move - pass.`); return; }
     const cell = cellMeshes[move.r][move.c];
@@ -308,6 +421,8 @@ function mount(container, difficulty, api) {
 
   return {
     unmount: () => {
+      finished = true;
+      timers.clear();
       stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       stage.dispose();
       wrap.remove();
@@ -316,4 +431,4 @@ function mount(container, difficulty, api) {
   };
 }
 
-PC.Games.register('reversi', { mount });
+PC.Games.register('reversi', { mount: guardMount(mount, { retry: true }) });

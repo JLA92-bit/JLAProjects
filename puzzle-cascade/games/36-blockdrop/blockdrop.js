@@ -32,8 +32,36 @@ function randomShape() { return SHAPE_KEYS[Math.floor(Math.random() * SHAPE_KEYS
 
 const CELL = 0.72;
 
+// Fit a (halfW x halfH) world rectangle inside the canvas host, measured at
+// mount time, leaving room for DOM overlays (reserve, in px) and a small
+// safety margin so nothing crops on narrow phones.
+function fitView(host, halfW, halfH, { margin = 1.04, reserveTop = 0, reserveBottom = 0 } = {}) {
+  const w = host.clientWidth || 320, h = host.clientHeight || 480;
+  const aspect = Math.max(0.3, w / h);
+  const f = Math.max(0.5, (h - reserveTop - reserveBottom) / h);
+  const halfVis = Math.max(halfH / f, halfW / aspect) * margin;
+  return { distance: halfVis / 0.42, lookAtY: -halfVis * (reserveBottom - reserveTop) / h };
+}
+
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let game = null;
+  const start = () => { game = play(container, difficulty, api, restart); };
+  function restart() { if (game) game.unmount(); start(); }
+  start();
+  return {
+    unmount: () => { if (game) game.unmount(); game = null; },
+    hint: () => { if (game) game.hint(); },
+  };
+}
+
+function play(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  let alive = true;
+  const timers = new Set();
+  function later(fn, ms) {
+    const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms);
+    timers.add(id);
+  }
   const { cols, rows } = cfg;
   const grid = Array.from({ length: rows }, () => Array(cols).fill(null));
   let linesCleared = 0, piecesUsed = 0, finished = false;
@@ -44,11 +72,11 @@ function mount(container, difficulty, api) {
     <div class="bd-meta">Lines: <span id="bd-lines">0</span>/${cfg.targetLines}</div>
     <div class="pc-canvas3d" id="bd-canvas"></div>
     <div class="bd-controls">
-      <div class="bd-btn" data-act="left">⬅️</div>
-      <div class="bd-btn" data-act="rotate">🔄</div>
-      <div class="bd-btn" data-act="down">⬇️</div>
-      <div class="bd-btn" data-act="drop">⏬</div>
-      <div class="bd-btn" data-act="right">➡️</div>
+      <div class="bd-btn" role="button" aria-label="Move left" data-act="left">⬅️</div>
+      <div class="bd-btn" role="button" aria-label="Turn" data-act="rotate">🔄</div>
+      <div class="bd-btn" role="button" aria-label="Move down" data-act="down">⬇️</div>
+      <div class="bd-btn" role="button" aria-label="Drop" data-act="drop">⏬</div>
+      <div class="bd-btn" role="button" aria-label="Move right" data-act="right">➡️</div>
     </div>
   `;
   container.appendChild(wrap);
@@ -56,9 +84,8 @@ function mount(container, difficulty, api) {
   const linesEl = wrap.querySelector('#bd-lines');
 
   const totalW = cols * CELL, totalH = rows * CELL;
-  const halfW = totalW / 2 + 0.5, halfH = totalH / 2 + 0.5;
-  const distance = Math.max(halfH / 0.42, halfW / (0.42 * 0.5));
-  const stage = createStage(canvasHost, { distance });
+  const halfW = totalW / 2 + 0.2, halfH = totalH / 2 + 0.2;
+  const stage = createStage(canvasHost, fitView(canvasHost, halfW, halfH));
 
   function cellPos(col, row) { return { x: (col - (cols - 1) / 2) * CELL, y: ((rows - 1) / 2 - row) * CELL }; }
 
@@ -120,6 +147,7 @@ function mount(container, difficulty, api) {
   }
 
   function lockPiece() {
+    if (finished || !piece) return;
     piece.cells.forEach(([x, y]) => {
       const col = piece.px + x, row = piece.py + y;
       if (row >= 0 && row < rows) grid[row][col] = piece.color;
@@ -127,6 +155,7 @@ function mount(container, difficulty, api) {
     piecesUsed++;
     clearLines();
     rebuildLocked();
+    if (finished) { piece = null; renderFalling(); return; }
     piece = spawnPiece();
     renderFalling();
   }
@@ -146,7 +175,7 @@ function mount(container, difficulty, api) {
       linesEl.textContent = linesCleared;
       api.sound.match();
       api.ui.burstFromElement(canvasHost);
-      if (linesCleared >= cfg.targetLines) { setTimeout(winGame, 200); }
+      if (linesCleared >= cfg.targetLines) winGame();
     }
   }
 
@@ -163,14 +192,23 @@ function mount(container, difficulty, api) {
   }
 
   function winGame() {
+    if (finished) return;
     finished = true;
     const stars = piecesUsed <= cfg.targetLines * 2 ? 3 : piecesUsed <= cfg.targetLines * 3 ? 2 : 1;
     api.sound.win();
-    setTimeout(() => api.win(stars, { piecesUsed }), 250);
+    later(() => api.win(stars, { piecesUsed }), 450);
   }
   function gameOver() {
+    if (finished) return;
     finished = true;
-    setTimeout(() => api.lose('the stack topped out! Try again.'), 250);
+    later(() => {
+      api.lose('the stack topped out! Try again.');
+      const over = document.createElement('div');
+      over.className = 'bd-over';
+      over.innerHTML = `<div>The blocks reached the top!<br>Lines: ${linesCleared} / ${cfg.targetLines}</div><button class="pc-btn pc-btn--blue">Try again</button>`;
+      over.querySelector('button').addEventListener('click', () => { api.sound.click(); restart(); });
+      canvasHost.appendChild(over);
+    }, 250);
   }
 
   function tryMove(dx, dy) {
@@ -197,10 +235,16 @@ function mount(container, difficulty, api) {
   piece = spawnPiece();
   renderFalling();
 
+  // Real frame time, clamped: after a long pause (app in the background)
+  // the piece falls at most one row instead of jumping down the board.
   let acc = 0;
+  let lastT = performance.now();
   const unsubTick = stage.onTick(() => {
+    const now = performance.now();
+    const dtMs = Math.min(50, Math.max(0, now - lastT));
+    lastT = now;
     if (finished || !piece) return;
-    acc += 1000 / 60;
+    acc += dtMs;
     if (acc >= cfg.fallMs) {
       acc = 0;
       if (!tryMove(0, 1)) lockPiece();
@@ -209,8 +253,8 @@ function mount(container, difficulty, api) {
 
   function onBtn(act) {
     if (finished) return;
-    if (act === 'left') tryMove(-1, 0);
-    else if (act === 'right') tryMove(1, 0);
+    if (act === 'left') { if (tryMove(-1, 0)) api.sound.move(); }
+    else if (act === 'right') { if (tryMove(1, 0)) api.sound.move(); }
     else if (act === 'down') { if (!tryMove(0, 1)) lockPiece(); }
     else if (act === 'rotate') tryRotate();
     else if (act === 'drop') hardDrop();
@@ -219,20 +263,35 @@ function mount(container, difficulty, api) {
     btn.addEventListener('pointerdown', (e) => { e.preventDefault(); onBtn(btn.dataset.act); });
   });
 
-  // basic swipe on canvas
-  let touchStartX = null, touchStartY = null;
+  // Canvas gestures: tap = turn, swipe left/right = move one column per
+  // ~40px dragged, quick swipe down = drop.
+  let touchStartX = null, touchStartY = null, touchId = null, stepsDone = 0, touchT = 0;
   const el = stage.renderer.domElement;
-  function onTouchStart(e) { touchStartX = e.clientX; touchStartY = e.clientY; }
+  function onTouchStart(e) {
+    if (touchId !== null) return;
+    touchId = e.pointerId; touchStartX = e.clientX; touchStartY = e.clientY; stepsDone = 0; touchT = performance.now();
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  }
+  function onTouchMove(e) {
+    if (e.pointerId !== touchId || finished) return;
+    const dx = e.clientX - touchStartX;
+    const want = Math.trunc(dx / 40);
+    while (stepsDone < want) { if (!tryMove(1, 0)) break; stepsDone++; api.sound.move(); }
+    while (stepsDone > want) { if (!tryMove(-1, 0)) break; stepsDone--; api.sound.move(); }
+  }
   function onTouchEnd(e) {
-    if (touchStartX === null) return;
+    if (e.pointerId !== touchId) return;
+    touchId = null;
+    if (e.type === 'pointercancel') return;
     const dx = e.clientX - touchStartX, dy = e.clientY - touchStartY;
-    if (Math.hypot(dx, dy) < 18) { onBtn('rotate'); }
-    else if (Math.abs(dx) > Math.abs(dy)) { onBtn(dx > 0 ? 'right' : 'left'); }
-    else if (dy > 0) { onBtn('drop'); }
-    touchStartX = null;
+    if (stepsDone !== 0) return;
+    if (Math.hypot(dx, dy) < 18) onBtn('rotate');
+    else if (dy > 60 && dy > Math.abs(dx) * 1.5 && performance.now() - touchT < 450) onBtn('drop');
   }
   el.addEventListener('pointerdown', onTouchStart);
+  el.addEventListener('pointermove', onTouchMove);
   el.addEventListener('pointerup', onTouchEnd);
+  el.addEventListener('pointercancel', onTouchEnd);
 
   function onKey(e) {
     if (e.key === 'ArrowLeft') onBtn('left');
@@ -243,19 +302,67 @@ function mount(container, difficulty, api) {
   }
   window.addEventListener('keydown', onKey);
 
+  // Hint: try every turn + column for the current piece and score the
+  // resulting stack (lines cleared good; holes and height bad).
+  const hintGroup = new THREE.Group();
+  stage.world.add(hintGroup);
+  function bestPlacement() {
+    let best = null;
+    let cells = piece.cells;
+    for (let rot = 0; rot < 4; rot++) {
+      for (let px = -3; px < cols; px++) {
+        const p = { px, py: piece.py, cells };
+        if (collides(p, 0, 0, cells)) continue;
+        let dy = 0;
+        while (!collides(p, 0, dy + 1, cells)) dy++;
+        const g = grid.map((row) => row.slice());
+        let above = false;
+        cells.forEach(([x, y]) => { const r = p.py + y + dy; if (r < 0) above = true; else g[r][px + x] = 1; });
+        if (above) continue;
+        const lines = g.filter((row) => row.every((v) => v !== null)).length;
+        let holes = 0, height = 0;
+        for (let c = 0; c < cols; c++) {
+          let seen = false;
+          for (let r = 0; r < rows; r++) {
+            if (g[r][c] !== null) { if (!seen) height += rows - r; seen = true; } else if (seen) holes++;
+          }
+        }
+        const score = lines * 8 - holes * 5 - height * 0.35 - rot * 0.05;
+        if (!best || score > best.score) best = { score, rot, px, dy, cells };
+      }
+      cells = rotateCells(cells);
+    }
+    return best;
+  }
   function hint() {
     if (finished || !piece) return;
-    api.ui.toast(`${api.playerName}, the faded ghost shows where it'll land!`);
-    ghostGroup.children.forEach((m) => tween(m.material, { opacity: 0.55 }, 200, Easing.outCubic, () => tween(m.material, { opacity: 0.18 }, 500)));
+    const best = bestPlacement();
+    if (!best) { api.ui.toast(`${api.playerName}, the faded ghost shows where it'll land!`); return; }
+    while (hintGroup.children.length) { const m = hintGroup.children.pop(); m.geometry.dispose(); m.material.dispose(); }
+    best.cells.forEach(([x, y]) => {
+      const r = piece.py + y + best.dy;
+      if (r < 0) return;
+      const { x: wx, y: wy } = cellPos(best.px + x, r);
+      const m = makeCellMesh(0xffd93d, 0.55);
+      m.position.set(wx, wy, -0.02);
+      hintGroup.add(m);
+    });
+    later(() => { while (hintGroup.children.length) { const m = hintGroup.children.pop(); m.geometry.dispose(); m.material.dispose(); } }, 1800);
+    const turns = best.rot === 0 ? '' : `turn it ${best.rot} time${best.rot > 1 ? 's' : ''}, then `;
+    api.ui.toast(`${api.playerName}, ${turns}fit it into the yellow spot!`);
   }
 
   return {
     unmount: () => {
+      alive = false;
       finished = true;
+      timers.forEach(clearTimeout); timers.clear();
       unsubTick();
       window.removeEventListener('keydown', onKey);
       el.removeEventListener('pointerdown', onTouchStart);
+      el.removeEventListener('pointermove', onTouchMove);
       el.removeEventListener('pointerup', onTouchEnd);
+      el.removeEventListener('pointercancel', onTouchEnd);
       stage.dispose();
       wrap.remove();
     },

@@ -78,13 +78,75 @@ function heuristicMove(board, ai, human) {
   return rest[Math.floor(Math.random() * rest.length)];
 }
 
+/* ---- per-game helpers (kept local so the module stands alone) ---- */
+
+// Zoom/pan the ortho camera so a w x h world box centered on (cx, cy) fits
+// the canvas with pixel padding (more at the bottom for the overlay chip).
+// Re-checked every frame so it follows resizes and rotation.
+function fitBoard(stage, host, w, h, { cx = 0, cy = 0, pad = 12, top = 12, bottom = 12 } = {}) {
+  const cam = stage.camera;
+  let lastW = 0, lastH = 0;
+  function apply() {
+    const cw = host.clientWidth, ch = host.clientHeight;
+    if (!cw || !ch || (cw === lastW && ch === lastH)) return;
+    lastW = cw; lastH = ch;
+    const unitPx = ch / (cam.top - cam.bottom);
+    const fit = Math.max(1, Math.min((cw - 2 * pad) / w, (ch - top - bottom) / h));
+    cam.zoom = fit / unitPx;
+    cam.position.x = cx;
+    cam.position.y = cy - (bottom - top) / 2 / fit;
+    cam.updateProjectionMatrix();
+  }
+  apply();
+  return stage.onTick(apply);
+}
+
+// Timers that can never fire after unmount.
+function lifecycle() {
+  const timers = new Set();
+  const life = {
+    dead: false,
+    later(fn, ms) { const id = setTimeout(() => { timers.delete(id); if (!life.dead) fn(); }, ms); timers.add(id); return id; },
+    kill() { life.dead = true; timers.forEach(clearTimeout); timers.clear(); },
+  };
+  return life;
+}
+
+// In-canvas "Try again" button shown after a loss.
+function showRetry(host, onRetry) {
+  host.querySelectorAll('.pc-overlay-bottom').forEach((el) => { el.hidden = true; });
+  const bar = document.createElement('div');
+  bar.className = 'pc-overlay-bottom';
+  bar.innerHTML = '<button class="pc-btn pc-btn--blue" type="button">🔁 Try again</button>';
+  bar.querySelector('button').addEventListener('click', onRetry, { once: true });
+  host.appendChild(bar);
+}
+
+function glow(mesh, color = 0xffffff) {
+  if (!mesh || !mesh.material || !mesh.material.emissive) return;
+  mesh.material.emissive.set(color);
+  mesh.material.emissiveIntensity = 0.7;
+  tween(mesh.material, { emissiveIntensity: 0 }, 900, Easing.inOutQuad);
+  tween(mesh.scale, { x: 1.18, y: 1.18, z: 1.18 }, 160, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 220, Easing.outCubic));
+}
+
+
 function cellXY(idx) {
   const r = Math.floor(idx / 3), c = idx % 3;
   return { x: (c - 1) * CELL, y: (1 - r) * CELL };
 }
 
 function mount(container, difficulty, api) {
-  const cfg = CONFIG[difficulty];
+  let round = null;
+  const start = () => { round = mountRound(container, difficulty, api, restart); };
+  const restart = () => { api.sound.click(); if (round) round.unmount(); start(); };
+  start();
+  return { unmount: () => round && round.unmount(), hint: () => round && round.hint() };
+}
+
+function mountRound(container, difficulty, api, restart) {
+  const cfg = CONFIG[difficulty] || CONFIG.easy;
+  const life = lifecycle();
   let board = Array(9).fill(null);
   let finished = false;
   let aiThinking = false;
@@ -104,6 +166,7 @@ function mount(container, difficulty, api) {
   const statusEl = wrap.querySelector('#tt-status');
 
   const stage = createStage(canvasHost, { distance: 5.6 });
+  fitBoard(stage, canvasHost, 2 * CELL + 1.1, 2 * CELL + 1.1, { pad: 16, bottom: 50 });
 
   const cellMeshes = [];
   for (let i = 0; i < 9; i++) {
@@ -128,7 +191,8 @@ function mount(container, difficulty, api) {
   function highlightLine(line) {
     line.forEach((idx, i) => {
       const mesh = cellMeshes[idx];
-      setTimeout(() => tween(mesh.material, { emissiveIntensity: 0.8 }, 200, Easing.outCubic), i * 80);
+      mesh.material.emissive.set(0xffffff);
+      life.later(() => tween(mesh.material, { emissiveIntensity: 0.35 }, 200, Easing.outCubic), i * 80);
     });
   }
 
@@ -138,7 +202,7 @@ function mount(container, difficulty, api) {
     finished = true;
     if (w === 'draw') {
       statusEl.textContent = "It's a draw!";
-      setTimeout(() => api.win(2, { result: 'draw' }), 300);
+      life.later(() => api.win(2, { result: 'draw' }), 300);
     } else {
       for (const line of LINES) {
         if (line.every((i) => board[i] === w)) { highlightLine(line); break; }
@@ -146,10 +210,13 @@ function mount(container, difficulty, api) {
       if (w === HUMAN) {
         statusEl.textContent = 'You win!';
         api.ui.burstFromElement(canvasHost);
-        setTimeout(() => api.win(3, { moves }), 350);
+        life.later(() => api.win(3, { moves }), 350);
       } else {
-        statusEl.textContent = 'The computer wins.';
-        setTimeout(() => api.lose('the computer got three in a row! Try again.'), 350);
+        statusEl.textContent = 'The computer wins this time.';
+        life.later(() => {
+          api.lose('the computer got three in a row! Try again.');
+          showRetry(canvasHost, restart);
+        }, 450);
       }
     }
     return true;
@@ -159,7 +226,7 @@ function mount(container, difficulty, api) {
     if (finished) return;
     aiThinking = true;
     statusEl.textContent = "Computer's turn...";
-    setTimeout(() => {
+    life.later(() => {
       let idx;
       if (cfg.ai === 'random') {
         const rest = emptyCells(board);
@@ -179,9 +246,11 @@ function mount(container, difficulty, api) {
 
   function onPointerDown(e) {
     if (finished || aiThinking) return;
-    const hit = stage.pick(e.clientX, e.clientY, cellMeshes);
-    if (!hit) return;
-    const idx = hit.object.userData.idx;
+    const pt = stage.pickPlane(e.clientX, e.clientY, 0);
+    if (!pt) return;
+    const c = Math.round(pt.x / CELL) + 1, r = 1 - Math.round(pt.y / CELL);
+    if (r < 0 || r > 2 || c < 0 || c > 2) return;
+    const idx = r * 3 + c;
     if (board[idx]) { api.sound.error(); api.ui.shake(canvasHost); return; }
     board[idx] = HUMAN;
     moves++;
@@ -192,22 +261,27 @@ function mount(container, difficulty, api) {
   stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
   function hint() {
-    if (finished || aiThinking) return;
-    const idx = bestMove(board, HUMAN, AI);
+    if (finished) { api.ui.toast(`${api.playerName}, this game is over!`); return; }
+    if (aiThinking) return;
+    // opening move: centre is always a strong choice (and skips a full search)
+    const idx = emptyCells(board).length === 9 ? 4 : bestMove(board, HUMAN, AI);
     if (idx === undefined || idx === null) return;
-    const mesh = cellMeshes[idx];
-    tween(mesh.scale, { x: 1.35, y: 1.35, z: 1.35 }, 180, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 200, Easing.outCubic));
+    glow(cellMeshes[idx]);
     api.ui.toast(`${api.playerName}, try that glowing square!`);
   }
 
-  return {
-    unmount: () => {
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      stage.dispose();
-      wrap.remove();
-    },
-    hint,
-  };
+  const attached = wrap.isConnected;
+  stage.onTick(() => { if (attached && !wrap.isConnected) queueMicrotask(unmount); });
+
+  function unmount() {
+    if (life.dead) return;
+    life.kill();
+    stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+    stage.dispose();
+    wrap.remove();
+  }
+
+  return { unmount, hint };
 }
 
 PC.Games.register('tictactoe', { mount });

@@ -2,3 +2,8 @@
   display: flex; justify-content: center; color: #fff; font-weight: 700;
   font-family: var(--pc-font-display); margin-bottom: 4px; text-align: center;
 }
+
+.ps-actions {
+  display: flex; gap: 10px; justify-content: center; flex: 0 0 auto;
+}
+.ps-btn { min-height: 46px; padding: 8px 18px; font-size: 0.95rem; }

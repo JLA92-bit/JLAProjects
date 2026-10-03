@@ -22,7 +22,7 @@ const DIRS4 = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 // then greedily extend every path outward to soak up leftover free cells
 // so the finished board is (usually) fully covered by some valid solution.
 function generatePuzzle(size, colorsCount) {
-  for (let attempt = 0; attempt < 40; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) {
     const owner = Array.from({ length: size }, () => Array(size).fill(-1));
     const paths = [];
     let ok = true;
@@ -83,6 +83,90 @@ function cellXY(r, c, size) {
   return { x: (c - half) * CELL, y: (half - r) * CELL };
 }
 
+/* ---------- lifecycle + framing helpers (kept local so this file stays self-contained) ---------- */
+
+// World half-height per unit of stage distance (matches three-stage.js).
+const VIEW_SCALE = 0.42;
+
+// Pick a camera distance that fits a board of the given world half-extents
+// into the canvas's real aspect ratio, with a safety margin so a later
+// resize (address bar, rotated phone, wrapped status text) never crops it.
+function fitDistance(host, halfW, halfH, margin = 1.08) {
+  const w = host.clientWidth || 340, h = host.clientHeight || 520;
+  const aspect = Math.max(0.35, Math.min(2.2, w / h));
+  return (Math.max(halfH, halfW / aspect) * margin) / VIEW_SCALE;
+}
+
+// Wraps a raw mount so nothing can call api.win/api.lose after unmount,
+// hint() never throws, and (optionally) a lost round offers an in-place
+// "Try again" button instead of leaving a dead board on screen.
+function guardMount(rawMount, { retry = false } = {}) {
+  return function mount(container, difficulty, api) {
+    let cur = null;
+    function start() {
+      const inst = { alive: true };
+      const safeApi = Object.assign({}, api, {
+        win: (...args) => { if (inst.alive) { inst.alive = false; api.win(...args); } },
+        lose: (msg) => {
+          if (!inst.alive) return;
+          inst.alive = false;
+          api.lose(msg);
+          if (retry) showRetry(inst);
+        },
+      });
+      const res = rawMount(container, difficulty, safeApi);
+      cur = {
+        inst,
+        el: container.lastElementChild,
+        unmount: typeof res === 'function' ? res : (res && res.unmount) || (() => {}),
+        hint: res && typeof res === 'object' ? res.hint : null,
+      };
+    }
+    function stop() {
+      if (!cur) return;
+      const c = cur;
+      cur = null;
+      c.inst.alive = false;
+      try { c.unmount(); } catch (e) { console.warn(e); }
+    }
+    function showRetry(inst) {
+      if (!cur || cur.inst !== inst || !cur.el) return;
+      const host = cur.el.querySelector('.pc-canvas3d') || cur.el;
+      const box = document.createElement('div');
+      box.style.cssText = 'position:absolute;left:0;right:0;bottom:56px;display:flex;justify-content:center;z-index:6;pointer-events:none;';
+      box.innerHTML = '<button type="button" class="pc-btn pc-btn--green" style="pointer-events:auto;min-height:48px;">\u{1F501} Try again</button>';
+      box.querySelector('button').addEventListener('click', () => {
+        if (!cur || cur.inst !== inst) return;
+        api.sound.click();
+        stop();
+        start();
+      });
+      host.appendChild(box);
+    }
+    start();
+    return {
+      unmount: () => stop(),
+      hint: () => {
+        if (!cur || !cur.hint) return;
+        try { cur.hint(); } catch (e) { console.warn(e); }
+      },
+    };
+  };
+}
+
+// setTimeout that is cancelled in bulk on unmount.
+function makeTimers() {
+  const ids = new Set();
+  return {
+    later(fn, ms) {
+      const id = setTimeout(() => { ids.delete(id); fn(); }, ms);
+      ids.add(id);
+      return id;
+    },
+    clear() { ids.forEach(clearTimeout); ids.clear(); },
+  };
+}
+
 function mount(container, difficulty, api) {
   const cfg = CONFIG[difficulty];
   const size = cfg.size;
@@ -94,26 +178,27 @@ function mount(container, difficulty, api) {
   const cellOwner = Array.from({ length: size }, () => Array(size).fill(-1));
   const isEndpoint = Array.from({ length: size }, () => Array(size).fill(-1));
   endpoints.forEach((pair, idx) => { pair.forEach(([r, c]) => { isEndpoint[r][c] = idx; cellOwner[r][c] = idx; }); });
-  const playerPaths = Array.from({ length: numColors }, () => null); // ordered [[r,c],...] or null
-  let dragging = null; // { color, path: [[r,c]] }
+  // playerPaths[color] = ordered [[r,c],...] starting at one of its dots, or null
+  const playerPaths = Array.from({ length: numColors }, () => null);
+  let dragging = null; // { color, pointerId }
   let finished = false, resets = 0;
+  const timers = makeTimers();
 
   const wrap = document.createElement('div');
   wrap.className = 'pc-stage-inner';
   wrap.innerHTML = `
-    <div class="fc-meta"><span id="fc-status">Drag from a dot to its matching color</span></div>
+    <div class="fc-meta"><span id="fc-status">Drag from a dot to the dot of the same color</span></div>
     <div class="pc-canvas3d" id="fc-canvas">
-      <div class="pc-overlay-bottom"><span class="pc-chip">Pipes can't cross - fill the board for full stars</span></div>
+      <div class="pc-overlay-bottom"><span class="pc-chip" id="fc-chip">Connected: 0 / ${numColors}</span></div>
     </div>
   `;
   container.appendChild(wrap);
   const canvasHost = wrap.querySelector('#fc-canvas');
   const statusEl = wrap.querySelector('#fc-status');
+  const chipEl = wrap.querySelector('#fc-chip');
 
-  const halfExt = size * CELL / 2 + CELL * 0.5;
-  const aspectMin = 0.46;
-  const distance = Math.max((halfExt + 0.5) / (0.42 * aspectMin), (halfExt + 0.5) / 0.42) * 1.05;
-  const stage = createStage(canvasHost, { distance });
+  const boardHalf = (size * CELL) / 2 + 0.1;
+  const stage = createStage(canvasHost, { distance: fitDistance(canvasHost, boardHalf, boardHalf + 0.9) });
 
   const cellMeshes = [];
   for (let r = 0; r < size; r++) {
@@ -130,16 +215,14 @@ function mount(container, difficulty, api) {
     cellMeshes.push(row);
   }
 
-  const dotMeshes = Array.from({ length: size }, () => Array(size).fill(null));
   endpoints.forEach((pair, idx) => {
     pair.forEach(([r, c]) => {
       const { x, y } = cellXY(r, c, size);
-      const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.22, 24), new THREE.MeshPhysicalMaterial({ color: colorOf(idx), roughness: 0.3, metalness: 0.15, clearcoat: 0.6 }));
+      const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.22, 24), new THREE.MeshPhysicalMaterial({ color: colorOf(idx), emissive: colorOf(idx), emissiveIntensity: 0.25, roughness: 0.3, metalness: 0.15, clearcoat: 0.6 }));
       dot.rotation.x = Math.PI / 2;
-      dot.position.set(x, y, 0.14);
+      dot.position.set(x, y, 0.16);
       dot.castShadow = true;
       stage.world.add(dot);
-      dotMeshes[r][c] = dot;
     });
   });
 
@@ -147,17 +230,25 @@ function mount(container, difficulty, api) {
     const owner = cellOwner[r][c];
     const mesh = cellMeshes[r][c];
     if (owner === -1) { mesh.material.color.set(EMPTY_COLOR); return; }
-    mesh.material.color.set(colorOf(owner));
+    // pipe cells are a lighter tint than the solid dots so the dots stay visible
+    mesh.material.color.set(colorOf(owner)).lerp(new THREE.Color(0x2a1f4d), isEndpoint[r][c] === owner ? 0.55 : 0.25);
   }
 
-  function clearColorCells(colorIdx) {
-    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) {
-      if (cellOwner[r][c] === colorIdx && isEndpoint[r][c] !== colorIdx) { cellOwner[r][c] = -1; refreshCellVisual(r, c); }
-    }
+  function isConnected(idx) {
+    const p = playerPaths[idx];
+    if (!p || p.length < 2) return false;
+    const last = p[p.length - 1];
+    return isEndpoint[last[0]][last[1]] === idx && (last[0] !== p[0][0] || last[1] !== p[0][1]);
   }
 
-  function paintPath(colorIdx, path) {
-    path.forEach(([r, c]) => { cellOwner[r][c] = colorIdx; refreshCellVisual(r, c); });
+  // Remove cells from index `from` onward of a color's path.
+  function truncate(idx, from) {
+    const p = playerPaths[idx];
+    if (!p) return;
+    p.splice(from).forEach(([r, c]) => {
+      if (isEndpoint[r][c] !== idx) { cellOwner[r][c] = -1; refreshCellVisual(r, c); }
+    });
+    if (p.length === 0) playerPaths[idx] = null;
   }
 
   function coverage() {
@@ -166,132 +257,166 @@ function mount(container, difficulty, api) {
     return filled / (size * size);
   }
 
-  function allConnected() {
-    return playerPaths.every((p, idx) => {
-      if (!p || p.length < 2) return false;
-      const [er0, ec0] = endpoints[idx][0], [er1, ec1] = endpoints[idx][1];
-      const first = p[0], last = p[p.length - 1];
-      const hitsStart = (first[0] === er0 && first[1] === ec0) || (first[0] === er1 && first[1] === ec1);
-      const hitsEnd = (last[0] === er0 && last[1] === ec0) || (last[0] === er1 && last[1] === ec1);
-      return hitsStart && hitsEnd && (first[0] !== last[0] || first[1] !== last[1]);
-    });
+  function updateChip() {
+    const done = playerPaths.filter((_, i) => isConnected(i)).length;
+    chipEl.textContent = `Connected: ${done} / ${numColors}`;
   }
 
   function checkWin() {
-    if (!allConnected()) return;
+    updateChip();
+    if (!playerPaths.every((_, i) => isConnected(i))) return;
     finished = true;
+    dragging = null;
     statusEl.textContent = 'All connected!';
     api.ui.burstFromElement(canvasHost);
     const cov = coverage();
     const stars = cov >= 0.97 ? 3 : cov >= 0.75 ? 2 : 1;
-    setTimeout(() => api.win(stars, { coverage: Math.round(cov * 100), resets }), 300);
+    timers.later(() => api.win(stars, { coverage: Math.round(cov * 100), resets }), 300);
   }
 
   function cellAt(clientX, clientY) {
-    const hit = stage.pick(clientX, clientY, cellMeshes.flat());
-    return hit ? hit.object.userData : null;
+    const p = stage.pickPlane(clientX, clientY, 0);
+    if (!p) return null;
+    const half = (size - 1) / 2;
+    const c = Math.round(p.x / CELL + half), r = Math.round(half - p.y / CELL);
+    if (r < 0 || r >= size || c < 0 || c >= size) return null;
+    return { r, c };
   }
 
-  function startDrag(r, c) {
-    const colorIdx = isEndpoint[r][c];
-    if (colorIdx === -1) return;
-    clearColorCells(colorIdx);
-    playerPaths[colorIdx] = null;
-    dragging = { color: colorIdx, path: [[r, c]] };
-    resets++;
-    api.sound.click();
-  }
-
-  function extendDrag(r, c) {
-    if (!dragging) return;
-    const { color, path } = dragging;
-    const last = path[path.length - 1];
-    if (last[0] === r && last[1] === c) return;
-    // backtrack support: stepping onto the previous cell shortens the path
-    if (path.length >= 2) {
-      const prev = path[path.length - 2];
-      if (prev[0] === r && prev[1] === c) {
-        const removed = path.pop();
-        if (isEndpoint[removed[0]][removed[1]] !== color) { cellOwner[removed[0]][removed[1]] = -1; refreshCellVisual(removed[0], removed[1]); }
-        return;
+  function startDrag(r, c, pointerId) {
+    const dotColor = isEndpoint[r][c];
+    if (dotColor !== -1) {
+      // pressing a dot starts that color fresh from this dot
+      truncate(dotColor, 0);
+      playerPaths[dotColor] = [[r, c]];
+      dragging = { color: dotColor, pointerId };
+      resets++;
+      api.sound.click();
+      updateChip();
+      return true;
+    }
+    const owner = cellOwner[r][c];
+    if (owner !== -1 && playerPaths[owner]) {
+      // pressing a pipe resumes drawing from that point
+      const i = playerPaths[owner].findIndex(([pr, pc]) => pr === r && pc === c);
+      if (i >= 0) {
+        truncate(owner, i + 1);
+        dragging = { color: owner, pointerId };
+        api.sound.click();
+        updateChip();
+        return true;
       }
     }
-    const adjacent = Math.abs(last[0] - r) + Math.abs(last[1] - c) === 1;
-    if (!adjacent) return;
+    api.sound.error();
+    api.ui.toast('Start from a colored dot (or the end of a pipe).');
+    return false;
+  }
+
+  function stepTo(r, c) {
+    const color = dragging.color;
+    const path = playerPaths[color];
+    const last = path[path.length - 1];
+    if (last[0] === r && last[1] === c) return;
+    // finished pipes don't grow past their second dot
+    if (isConnected(color)) {
+      const back = path.findIndex(([pr, pc]) => pr === r && pc === c);
+      if (back >= 0) truncate(color, back + 1);
+      return;
+    }
+    // stepping back onto your own pipe rewinds it to that point
+    const back = path.findIndex(([pr, pc]) => pr === r && pc === c);
+    if (back >= 0) { truncate(color, back + 1); return; }
+    const dot = isEndpoint[r][c];
+    if (dot !== -1 && dot !== color) return; // can't run through another color's dot
     const owner = cellOwner[r][c];
-    if (owner !== -1 && owner !== color) return; // blocked by another color
-    if (owner === color && isEndpoint[r][c] === -1) return; // already part of this path elsewhere (avoid loops)
+    if (owner !== -1 && owner !== color) {
+      // crossing another pipe cuts it back to just before this cell
+      const other = playerPaths[owner];
+      const i = other ? other.findIndex(([pr, pc]) => pr === r && pc === c) : -1;
+      if (i >= 0) truncate(owner, i);
+    }
     path.push([r, c]);
     cellOwner[r][c] = color;
     refreshCellVisual(r, c);
-    if (isEndpoint[r][c] === color && !(r === path[0][0] && c === path[0][1])) {
-      // reached the matching endpoint - finish
-      finishDrag();
+    if (dot === color) { api.sound.move(); checkWin(); }
+  }
+
+  // Walk one cell at a time toward the finger so a fast swipe never skips
+  // cells (which would otherwise break the pipe).
+  function extendDrag(r, c) {
+    if (!dragging || finished) return;
+    let guard = 0;
+    while (dragging && guard++ < size * 2) {
+      const path = playerPaths[dragging.color];
+      if (!path) return;
+      const [lr, lc] = path[path.length - 1];
+      if (lr === r && lc === c) return;
+      const dr = r - lr, dc = c - lc;
+      const next = Math.abs(dr) >= Math.abs(dc) ? [lr + Math.sign(dr), lc] : [lr, lc + Math.sign(dc)];
+      const before = path.length;
+      const beforeLast = path[path.length - 1];
+      stepTo(next[0], next[1]);
+      const after = playerPaths[dragging.color];
+      if (!after || after.length === before && after[after.length - 1] === beforeLast) return; // blocked
+      if (finished) return;
     }
   }
 
-  function finishDrag() {
-    if (!dragging) return;
-    const { color, path } = dragging;
-    playerPaths[color] = path.slice();
-    dragging = null;
-    checkWin();
-  }
-
+  const canvas = stage.renderer.domElement;
   function onPointerDown(e) {
-    if (finished) return;
+    if (finished || dragging) return;
     const cell = cellAt(e.clientX, e.clientY);
     if (!cell) return;
-    startDrag(cell.r, cell.c);
+    if (startDrag(cell.r, cell.c, e.pointerId)) {
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    }
   }
   function onPointerMove(e) {
-    if (!dragging) return;
+    if (!dragging || e.pointerId !== dragging.pointerId) return;
     const cell = cellAt(e.clientX, e.clientY);
-    if (!cell) return;
-    extendDrag(cell.r, cell.c);
+    if (cell) extendDrag(cell.r, cell.c);
   }
-  function onPointerUp() {
-    if (!dragging) return;
-    // incomplete path: keep cells painted but not marked connected
-    playerPaths[dragging.color] = dragging.path.slice();
+  function onPointerUp(e) {
+    if (!dragging || e.pointerId !== dragging.pointerId) return;
+    const color = dragging.color;
     dragging = null;
+    const p = playerPaths[color];
+    if (p && p.length === 1) { truncate(color, 1); }
+    updateChip();
+    checkWin();
   }
-  stage.renderer.domElement.addEventListener('pointerdown', onPointerDown);
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
 
   function hint() {
     if (finished) return;
     for (let idx = 0; idx < numColors; idx++) {
-      const solved = playerPaths[idx];
-      const isDone = solved && allConnectedSingle(idx, solved);
-      if (isDone) continue;
+      if (isConnected(idx)) continue;
       const sol = solutionPaths[idx];
-      // find first solution cell not yet owned by this color
-      const target = sol.find(([r, c]) => cellOwner[r][c] !== idx);
-      if (target) {
-        const mesh = cellMeshes[target[0]][target[1]];
-        tween(mesh.scale, { x: 1.3, y: 1.3, z: 1.3 }, 180, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 220, Easing.outCubic));
-        api.ui.toast(`${api.playerName}, route that color through the glowing cell!`);
-        return;
-      }
+      // first cell of the known solution route not yet painted this color
+      const target = sol.find(([r, c]) => cellOwner[r][c] !== idx) || sol[sol.length - 1];
+      const mesh = cellMeshes[target[0]][target[1]];
+      mesh.material.emissive.set(colorOf(idx));
+      mesh.material.emissiveIntensity = 0.6;
+      tween(mesh.scale, { x: 1.3, y: 1.3, z: 1.3 }, 180, Easing.outBack, () => tween(mesh.scale, { x: 1, y: 1, z: 1 }, 220, Easing.outCubic));
+      timers.later(() => { mesh.material.emissiveIntensity = 0; }, 1400);
+      api.ui.toast(`${api.playerName}, route that color through the glowing square!`);
+      return;
     }
-    api.ui.toast(`${api.playerName}, every pipe already matches the solution!`);
-  }
-  function allConnectedSingle(idx, p) {
-    if (!p || p.length < 2) return false;
-    const [er0, ec0] = endpoints[idx][0], [er1, ec1] = endpoints[idx][1];
-    const first = p[0], last = p[p.length - 1];
-    const hitsStart = (first[0] === er0 && first[1] === ec0) || (first[0] === er1 && first[1] === ec1);
-    const hitsEnd = (last[0] === er0 && last[1] === ec0) || (last[0] === er1 && last[1] === ec1);
-    return hitsStart && hitsEnd;
+    api.ui.toast(`${api.playerName}, every pipe is connected!`);
   }
 
   return {
     unmount: () => {
-      stage.renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
+      finished = true;
+      dragging = null;
+      timers.clear();
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
       stage.dispose();
       wrap.remove();
     },
@@ -299,4 +424,4 @@ function mount(container, difficulty, api) {
   };
 }
 
-PC.Games.register('flowconnect', { mount });
+PC.Games.register('flowconnect', { mount: guardMount(mount) });
